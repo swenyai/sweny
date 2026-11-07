@@ -140,6 +140,21 @@ describe("tool bridge protocol", () => {
     expect(toolOutputToMcpResult({ number: 1 }).isError).toBeUndefined();
     expect(toolOutputToMcpResult({ refused: false, reason: "x" }).isError).toBeUndefined();
   });
+
+  it("the bridge uses the write stage's and the journal's refusal predicate: refused alone is a refusal (#558)", async () => {
+    // The write stage and the journal record these as refused, so the agent must see a tool error too.
+    for (const output of [{ refused: true }, { refused: true, reason: 42, number: 8 }, { refused: true, reason: "" }]) {
+      const r = toolOutputToMcpResult(output);
+      expect(r.isError, JSON.stringify(output)).toBe(true);
+      expect(r.content[0].text).toMatch(/^Refused: the tool refused the write\n/);
+    }
+  });
+
+  it("the reason the agent sees is capped like a receipt's (#558)", () => {
+    const r = toolOutputToMcpResult({ refused: true, reason: "x".repeat(5000) });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text.split("\n")[0]).toBe(`Refused: ${"x".repeat(200)}`);
+  });
 });
 
 describe("tool bridge server", () => {

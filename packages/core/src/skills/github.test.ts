@@ -368,8 +368,20 @@ describe("github_create_pr after the sweny-side push", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   let calls: Array<{ url: string; method: string }>;
 
-  /** Routes the handler's API calls; `refs` answers GET /git/ref/heads/x-1-fix. */
-  function route(o: { branch?: () => Response; ref?: () => Response; pr?: unknown }) {
+  /**
+   * Routes the handler's API calls. `branch` answers the lease's branch read,
+   * `leasePrs` its open-PR lookup (the one with `&base=`), `ref` GET
+   * /git/ref/heads/x-1-fix, `post` POST /pulls, and `existing` the 422
+   * recovery's lookup (no `&base=`).
+   */
+  function route(o: {
+    branch?: () => Response;
+    leasePrs?: () => Response;
+    ref?: () => Response;
+    pr?: unknown;
+    post?: () => Response;
+    existing?: unknown[];
+  }) {
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       const method = init?.method ?? "GET";
       calls.push({ url, method });
@@ -380,12 +392,14 @@ describe("github_create_pr after the sweny-side push", () => {
         return o.branch ? o.branch() : jsonResponse(404, { message: "Branch not found" });
       }
       if (url.startsWith("https://api.github.com/repos/o/r/pulls?") && method === "GET") {
-        return jsonResponse(200, [{ number: 3 }]);
+        if (url.includes("&base=")) return o.leasePrs ? o.leasePrs() : jsonResponse(200, [{ number: 3 }]);
+        return jsonResponse(200, o.existing ?? []);
       }
       if (url === "https://api.github.com/repos/o/r/git/ref/heads/x-1-fix") {
         return o.ref ? o.ref() : jsonResponse(404, { message: "Not Found" });
       }
       if (url === "https://api.github.com/repos/o/r/pulls" && method === "POST") {
+        if (o.post) return o.post();
         return jsonResponse(201, o.pr ?? { number: 7, html_url: "https://github.com/o/r/pull/7" });
       }
       return jsonResponse(200, []);
@@ -495,33 +509,6 @@ describe("github_create_pr after the sweny-side push", () => {
     expect(result).toMatchObject({ refused: true, local_sha: null });
   });
 
-  it("a lease skip is unchanged: no push, no ref read, the PR is requested, and the result names the remote head", async () => {
-    route({ branch: () => jsonResponse(200, { protected: true, commit: { sha: OTHER } }) });
-    const pushBranch = failedPush();
-    const result: any = await createPr.handler(
-      { repo: "o/r", title: "t", head: "x-1-fix" },
-      ctx({ logger: makeLogger(), pushBranch }),
-    );
-    expect(pushBranch).not.toHaveBeenCalled();
-    expect(refRead()).toBe(false);
-    expect(posted()).toBe(true);
-    expect(result).toMatchObject({ number: 7, head_sha: OTHER });
-  });
-
-  it("a pusher guard skip (attempted: false) is unchanged: no ref read, the PR is requested", async () => {
-    route({});
-    const pushBranch = vi.fn(async () => ({ pushed: false, attempted: false, reason: "no local branch x-1-fix" }));
-    const result: any = await createPr.handler(
-      { repo: "o/r", title: "t", head: "x-1-fix" },
-      ctx({ logger: makeLogger(), pushBranch }),
-    );
-    expect(pushBranch).toHaveBeenCalledTimes(1);
-    expect(refRead()).toBe(false);
-    expect(posted()).toBe(true);
-    expect(result).toMatchObject({ number: 7 });
-    expect(result.refused).toBeUndefined();
-  });
-
   it("a failed push whose PR comes back with another head returns a refusal naming the PR, and adds no labels", async () => {
     route({ ref: refAt(LOCAL), pr: { number: 7, html_url: "https://github.com/o/r/pull/7", head: { sha: OTHER } } });
     const logger = makeLogger();
@@ -559,19 +546,6 @@ describe("github_create_pr after the sweny-side push", () => {
     });
   });
 
-  it("the post-create check runs only after a failed push: a lease skip's PR is returned as is", async () => {
-    route({
-      branch: () => jsonResponse(200, { protected: true, commit: { sha: OTHER } }),
-      pr: { number: 7, head: { sha: LOCAL } },
-    });
-    const result: any = await createPr.handler(
-      { repo: "o/r", title: "t", head: "x-1-fix" },
-      ctx({ logger: makeLogger(), pushBranch: failedPush() }),
-    );
-    expect(result.refused).toBeUndefined();
-    expect(result).toMatchObject({ number: 7, head_sha: LOCAL });
-  });
-
   it("the result's head_sha is the head GitHub reports for the PR", async () => {
     route({ pr: { number: 7, head: { ref: "x-1-fix", sha: LOCAL } } });
     const pushBranch = vi.fn(async () => ({ pushed: true, attempted: true, sha: LOCAL }));
@@ -581,6 +555,232 @@ describe("github_create_pr after the sweny-side push", () => {
     );
     expect(refRead()).toBe(false);
     expect(result).toMatchObject({ number: 7, head_sha: LOCAL });
+  });
+
+  // ─── #558: every path is bound to the commit this run produced ──
+
+  const SKIP_MISMATCH = "the head branch was not pushed and the remote head is not the commit this run produced";
+  const SKIP_UNREADABLE = "the head branch was not pushed and the remote head could not be read";
+  const NO_COMMIT = "the run has no local commit for the head branch";
+  const PUSHED_NO_LOCAL = "the head was pushed but the pusher did not report the local commit";
+  const PR_MISMATCH = "the PR was opened but its head is not the commit this run produced";
+
+  /** A pusher whose guard skipped the push (`attempted: false`), reporting the local commit when it read one. */
+  const skipPush = (reason: string, sha: string | null = LOCAL) =>
+    vi.fn(async (_o: Record<string, unknown>) => ({
+      pushed: false,
+      attempted: false,
+      reason,
+      ...(sha ? { sha } : {}),
+    }));
+  const okPush = (sha: string | null = LOCAL) =>
+    vi.fn(async () => ({ pushed: true, attempted: true, ...(sha ? { sha } : {}) }));
+  const labeled = () => calls.some((c) => c.url.includes("/labels"));
+
+  const leaseSkips: Array<[string, Parameters<typeof route>[0], string]> = [
+    [
+      "the head exists with no open PR",
+      {
+        branch: () => jsonResponse(200, { protected: false, commit: { sha: OTHER } }),
+        leasePrs: () => jsonResponse(200, []),
+      },
+      "no open PR into main",
+    ],
+    [
+      "the head is protected",
+      { branch: () => jsonResponse(200, { protected: true, commit: { sha: OTHER } }) },
+      "is protected",
+    ],
+    [
+      "the open-PR lookup failed",
+      {
+        branch: () => jsonResponse(200, { protected: false, commit: { sha: OTHER } }),
+        leasePrs: () => jsonResponse(500, { message: "boom" }),
+      },
+      "cannot check open PRs",
+    ],
+    ["the branch lookup failed", { branch: () => jsonResponse(500, { message: "boom" }) }, "cannot check head"],
+  ];
+
+  it.each(leaseSkips)(
+    "a lease skip (%s) with a remote head that is not the local commit refuses with both shas",
+    async (_l, r, why) => {
+      route({ ...r, ref: refAt(OTHER) });
+      const pushBranch = skipPush("the remote state of x-1-fix is unknown");
+      const result: any = await createPr.handler(
+        { repo: "o/r", title: "t", head: "x-1-fix" },
+        ctx({ logger: makeLogger(), pushBranch }),
+      );
+      expect(posted()).toBe(false);
+      expect(isToolRefusal(result)).toBe(true);
+      expect(result).toMatchObject({
+        refused: true,
+        reason: SKIP_MISMATCH,
+        head: "x-1-fix",
+        local_sha: LOCAL,
+        remote_sha: OTHER,
+      });
+      expect(result.transient).toBeUndefined();
+      // The lease's own reason is the detail, not the pusher's "remote state unknown".
+      expect(result.detail).toContain(why);
+      expect(result.detail).toContain(LOCAL);
+      expect(result.detail).toContain(OTHER);
+    },
+  );
+
+  it("a lease skip asks the pusher for the local commit only: no lease and no token, so it cannot push", async () => {
+    route({
+      branch: () => jsonResponse(200, { protected: false, commit: { sha: LOCAL } }),
+      leasePrs: () => jsonResponse(200, []),
+      ref: refAt(LOCAL),
+      pr: { number: 7, html_url: "https://github.com/o/r/pull/7", head: { sha: LOCAL } },
+    });
+    const pushBranch = skipPush("the remote state of x-1-fix is unknown");
+    const result: any = await createPr.handler(
+      { repo: "o/r", title: "t", head: "x-1-fix" },
+      ctx({ logger: makeLogger(), pushBranch }),
+    );
+    expect(pushBranch).toHaveBeenCalledTimes(1);
+    const arg = pushBranch.mock.calls[0][0];
+    expect(arg).not.toHaveProperty("remoteSha");
+    expect(arg).not.toHaveProperty("token");
+    // The remote head is the local commit (the agent pushed it itself): the PR opens, bound.
+    expect(refRead()).toBe(true);
+    expect(posted()).toBe(true);
+    expect(result.refused).toBeUndefined();
+    expect(result).toMatchObject({ number: 7, head_sha: LOCAL });
+  });
+
+  it("a lease skip fails closed, as transient, when the remote head cannot be read", async () => {
+    route({ ...leaseSkips[0][1], ref: () => jsonResponse(502, { message: "bad gateway" }) });
+    const result: any = await createPr.handler(
+      { repo: "o/r", title: "t", head: "x-1-fix" },
+      ctx({ logger: makeLogger(), pushBranch: skipPush("the remote state of x-1-fix is unknown") }),
+    );
+    expect(posted()).toBe(false);
+    expect(result).toMatchObject({ refused: true, reason: SKIP_UNREADABLE, transient: true, local_sha: LOCAL });
+    expect(result.remote_sha).toBeNull();
+  });
+
+  it.each(["x-1-fix is not a fast-forward of the remote x-1-fix", "the private push repo changed before the push"])(
+    "a pusher guard skip (%s) opens the PR only when the remote head is the local commit",
+    async (reason) => {
+      for (const remote of [OTHER, LOCAL]) {
+        calls = [];
+        route({
+          ref: refAt(remote),
+          pr: { number: 7, html_url: "https://github.com/o/r/pull/7", head: { sha: remote } },
+        });
+        const result: any = await createPr.handler(
+          { repo: "o/r", title: "t", head: "x-1-fix" },
+          ctx({ logger: makeLogger(), pushBranch: skipPush(reason) }),
+        );
+        expect(refRead()).toBe(true);
+        expect(posted()).toBe(remote === LOCAL);
+        if (remote === LOCAL) {
+          expect(result.refused).toBeUndefined();
+          expect(result).toMatchObject({ number: 7, head_sha: LOCAL });
+        } else {
+          expect(result).toMatchObject({ refused: true, reason: SKIP_MISMATCH, local_sha: LOCAL, remote_sha: OTHER });
+          expect(result.detail).toContain(reason);
+        }
+      }
+    },
+  );
+
+  it("a pusher guard skip with no local commit (no local branch) refuses without reading the remote", async () => {
+    route({ ref: refAt(LOCAL) });
+    const result: any = await createPr.handler(
+      { repo: "o/r", title: "t", head: "x-1-fix" },
+      ctx({ logger: makeLogger(), pushBranch: skipPush("no local branch x-1-fix", null) }),
+    );
+    expect(posted()).toBe(false);
+    expect(refRead()).toBe(false);
+    expect(isToolRefusal(result)).toBe(true);
+    expect(result).toMatchObject({ refused: true, reason: NO_COMMIT, local_sha: null, remote_sha: null });
+    expect(result.detail).toContain("no local branch x-1-fix");
+  });
+
+  it("the 422 recovery after a guard skip refuses a reused PR whose head diverged, and adds no labels", async () => {
+    route({
+      ref: refAt(LOCAL),
+      post: () => jsonResponse(422, ALREADY_EXISTS_422),
+      existing: [{ number: 3, html_url: "https://github.com/o/r/pull/3", head: { sha: OTHER } }],
+    });
+    const result: any = await createPr.handler(
+      { repo: "o/r", title: "t", head: "x-1-fix" },
+      ctx({ logger: makeLogger(), pushBranch: skipPush("x-1-fix is not a fast-forward of the remote x-1-fix") }),
+    );
+    expect(isToolRefusal(result)).toBe(true);
+    expect(result).toMatchObject({
+      refused: true,
+      reason: PR_MISMATCH,
+      number: 3,
+      reused: true,
+      local_sha: LOCAL,
+      remote_sha: OTHER,
+    });
+    expect(labeled()).toBe(false);
+  });
+
+  it("the 422 recovery returns the reused PR when its head is the local commit", async () => {
+    route({
+      ref: refAt(LOCAL),
+      post: () => jsonResponse(422, ALREADY_EXISTS_422),
+      existing: [{ number: 3, html_url: "https://github.com/o/r/pull/3", head: { sha: LOCAL } }],
+    });
+    const result: any = await createPr.handler(
+      { repo: "o/r", title: "t", head: "x-1-fix" },
+      ctx({ logger: makeLogger(), pushBranch: okPush() }),
+    );
+    expect(result.refused).toBeUndefined();
+    expect(result).toMatchObject({ number: 3, reused: true, head_sha: LOCAL });
+  });
+
+  it("a successful push followed by a remote move before POST /pulls refuses, naming the PR", async () => {
+    route({ pr: { number: 7, html_url: "https://github.com/o/r/pull/7", head: { sha: OTHER } } });
+    const logger = makeLogger();
+    const result: any = await createPr.handler(
+      { repo: "o/r", title: "t", head: "x-1-fix" },
+      ctx({ logger, pushBranch: okPush() }),
+    );
+    expect(posted()).toBe(true);
+    expect(isToolRefusal(result)).toBe(true);
+    expect(result).toMatchObject({
+      refused: true,
+      reason: PR_MISMATCH,
+      number: 7,
+      html_url: "https://github.com/o/r/pull/7",
+      local_sha: LOCAL,
+      remote_sha: OTHER,
+    });
+    expect(labeled()).toBe(false);
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it("a successful push whose PR comes back with no head sha is refused as unverified", async () => {
+    route({ pr: { number: 7, html_url: "https://github.com/o/r/pull/7" } });
+    const result: any = await createPr.handler(
+      { repo: "o/r", title: "t", head: "x-1-fix" },
+      ctx({ logger: makeLogger(), pushBranch: okPush() }),
+    );
+    expect(result).toMatchObject({
+      refused: true,
+      reason: "the PR was opened but its head commit could not be verified",
+      number: 7,
+      local_sha: LOCAL,
+      remote_sha: null,
+    });
+  });
+
+  it("a push that reports success but no local commit refuses before requesting the PR", async () => {
+    route({ pr: { number: 7, head: { sha: LOCAL } } });
+    const result: any = await createPr.handler(
+      { repo: "o/r", title: "t", head: "x-1-fix" },
+      ctx({ logger: makeLogger(), pushBranch: okPush(null) }),
+    );
+    expect(posted()).toBe(false);
+    expect(result).toMatchObject({ refused: true, reason: PUSHED_NO_LOCAL, local_sha: null });
   });
 });
 

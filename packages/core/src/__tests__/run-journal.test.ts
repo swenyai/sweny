@@ -1050,4 +1050,87 @@ describe("a write handler's refusal in the journal (#544)", () => {
     expect(types.filter((t) => t === "output:refused")).toHaveLength(1);
     expect(types.filter((t) => t === "output:applied")).toHaveLength(1);
   });
+
+  // ─── #558 ──
+
+  /** A provider whose create handler files the issue, then refuses once with `shape(filed)`. */
+  function refusingAfterFiling(shape: (filed: { number: number; html_url: string }) => Record<string, unknown>) {
+    const gh = fakeProvider({ listing: true });
+    const create = gh.skill.tools.find((t) => t.name === "github_create_issue")!;
+    const real = create.handler;
+    let calls = 0;
+    create.handler = async (input: unknown, ctx: ToolContext) => {
+      calls++;
+      const filed = (await real(input, ctx)) as { number: number; html_url: string };
+      return calls > 1 ? filed : shape(filed);
+    };
+    return { gh, calls: () => calls };
+  }
+
+  it.each([
+    ["in an array", (f: { number: number; html_url: string }) => ({ created: [{ number: f.number }] })],
+    ["nested past the slimmed depth", (f: { number: number }) => ({ a: { b: { c: { d: { number: f.number } } } } })],
+  ])(
+    "a transient refusal that names what it made %s is not retried on resume (decided from the handler's output)",
+    async (_l, extra) => {
+      const cwd = tmp();
+      const { gh, calls } = refusingAfterFiling((filed) => ({
+        refused: true,
+        reason: "the tool could not vouch for this write",
+        transient: true,
+        ...extra(filed),
+      }));
+      const agent = fakeAgent({ emit: { report: [ISSUE] } });
+      await firstRun(cwd, reporting(), agent, [gh.skill]);
+      expect(gh.issues).toHaveLength(1);
+      const refused = readJournal(journalFile(cwd)).records.find((r) => r.type === "output:refused")!;
+      expect(refused.retry).toBeUndefined();
+      const { results } = await resumeRun(cwd, reporting(), agent, [gh.skill]);
+      // Not looked up into an applied receipt, not re-sent: the refusal stands.
+      expect(gh.searches()).toBe(0);
+      expect(gh.lists()).toBe(0);
+      expect(calls()).toBe(1);
+      expect(gh.issues).toHaveLength(1);
+      expect(results!.get("report")!.outputs).toEqual([expect.objectContaining({ status: "refused" })]);
+    },
+  );
+
+  it("the retry decision is recorded with the refusal: retry only on a transient one that names nothing", async () => {
+    for (const transient of [true, false]) {
+      const cwd = tmp();
+      const { gh } = refusingProvider({ times: 1, transient });
+      await firstRun(cwd, reporting(), fakeAgent({ emit: { report: [ISSUE] } }), [gh.skill]);
+      const refused = readJournal(journalFile(cwd)).records.find((r) => r.type === "output:refused")!;
+      if (transient) expect(refused.retry).toBe(true);
+      else expect(refused.retry).toBeUndefined();
+    }
+  });
+
+  it("the journal caps a refusal's reason like a receipt, and a refusal with no usable reason gets the fixed wording", async () => {
+    for (const [reason, want] of [
+      ["r".repeat(5000), "r".repeat(200)],
+      [42, "the tool refused the write"],
+    ] as const) {
+      const cwd = tmp();
+      const gh = fakeProvider();
+      const create = gh.skill.tools.find((t) => t.name === "github_create_issue")!;
+      create.handler = async () => ({ refused: true, reason });
+      await firstRun(cwd, reporting(), fakeAgent({ emit: { report: [ISSUE] } }), [gh.skill]);
+      const refused = readJournal(journalFile(cwd)).records.find((r) => r.type === "output:refused")!;
+      expect(refused.output).toEqual({ refused: true, reason: want });
+    }
+  });
+
+  it("the resume summary prints refused and transient counts", async () => {
+    for (const transient of [false, true]) {
+      const cwd = tmp();
+      const { gh } = refusingProvider({ times: 1, transient });
+      const agent = fakeAgent({ emit: { report: [ISSUE] } });
+      await firstRun(cwd, reporting(), agent, [gh.skill]);
+      const prepared = prepareResume(RUN_ID, { plan: true }, { cwd, loadWorkflow: () => reporting() });
+      const text = prepared.lines.join("\n");
+      if (transient) expect(text).toMatch(/report\s+write stage only: .*1 transient refusal\(s\) to try again/);
+      else expect(text).toMatch(/report\s+write stage only: .*1 refused write\(s\), not re-sent/);
+    }
+  });
 });

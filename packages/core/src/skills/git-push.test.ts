@@ -183,7 +183,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     const g = realGit({ [PUSH]: remoteUrl });
     // The operator env holds the token too (a CI job's GITHUB_TOKEN).
     const r = await pushHeadBranch({ ...opts(f), env: { ...f.env, GITHUB_TOKEN: TOKEN }, git: g.git });
-    expect(r).toEqual({ pushed: true, attempted: true });
+    expect(r).toEqual({ pushed: true, attempted: true, sha: f.sha });
 
     // Pushed to the validated destination, not the decoy.
     expect(f.refs(f.remote)).toBe(`refs/heads/off-1-fix ${f.sha}`);
@@ -245,7 +245,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
   it("an scp-form origin of the same repo pushes over https with the token", async () => {
     const f = make({ origin: "git@github.com:owner/repo.git" });
     const g = realGit({ [PUSH]: `file://${f.remote}` });
-    expect(await pushHeadBranch({ ...opts(f), git: g.git })).toEqual({ pushed: true, attempted: true });
+    expect(await pushHeadBranch({ ...opts(f), git: g.git })).toEqual({ pushed: true, attempted: true, sha: f.sha });
     expect(g.pushes()[0].args).toContain(PUSH);
     expect(f.refs(f.remote)).toBe(`refs/heads/off-1-fix ${f.sha}`);
   });
@@ -279,7 +279,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
 
     const g = realGit({ [PUSH]: `file://${f.remote}` });
     const r = await pushHeadBranch({ ...opts(f), head: "off-2-fix", cwd: shallow, git: g.git });
-    expect(r).toEqual({ pushed: true, attempted: true });
+    expect(r).toEqual({ pushed: true, attempted: true, sha });
     expect(run(["rev-parse", "refs/heads/off-2-fix"], f.remote, f.env).stdout.trim()).toBe(sha);
     expect(run(["fsck", "--connectivity-only", "--no-dangling"], f.remote, f.env).code).toBe(0);
   });
@@ -290,7 +290,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     expect(f.git(["worktree", "add", "-q", "-b", "off-3-fix", wt, "off-1-fix"]).code).toBe(0);
     const g = realGit({ [PUSH]: `file://${f.remote}` });
     const r = await pushHeadBranch({ ...opts(f), head: "off-3-fix", cwd: wt, git: g.git });
-    expect(r).toEqual({ pushed: true, attempted: true });
+    expect(r).toEqual({ pushed: true, attempted: true, sha: f.sha });
     expect(f.refs(f.remote)).toBe(`refs/heads/off-3-fix ${f.sha}`);
   });
 
@@ -355,7 +355,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     expect(f.git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/off-1-fix"]).code).toBe(0);
     const g = realGit({ [PUSH]: `file://${f.remote}` });
     const r = await pushHeadBranch({ ...opts(f), defaultBranch: "develop", git: g.git });
-    expect(r).toEqual({ pushed: true, attempted: true });
+    expect(r).toEqual({ pushed: true, attempted: true, sha: f.sha });
     expect(g.calls.some((c) => c.args.includes("symbolic-ref"))).toBe(false);
   });
 
@@ -376,7 +376,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     const f = make();
     const g = realGit({ [PUSH]: `file://${f.remote}` });
     const r = await pushHeadBranch({ ...opts(f), head: "refs/heads/off-1-fix", git: g.git });
-    expect(r).toEqual({ pushed: true, attempted: true });
+    expect(r).toEqual({ pushed: true, attempted: true, sha: f.sha });
     expect(g.pushes()[0].args.at(-1)).toBe("refs/heads/off-1-fix:refs/heads/off-1-fix");
     expect(f.refs(f.remote)).toBe(`refs/heads/off-1-fix ${f.sha}`);
   });
@@ -442,7 +442,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     const w = introduce({ TMPDIR: evilTmp });
     try {
       const g = realGit({ [PUSH]: `file://${f.remote}` });
-      expect(await pushHeadBranch({ ...opts(f), git: g.git })).toEqual({ pushed: true, attempted: true });
+      expect(await pushHeadBranch({ ...opts(f), git: g.git })).toEqual({ pushed: true, attempted: true, sha: f.sha });
       const [push] = g.pushes();
       expect(push.cwd.startsWith(evilTmp)).toBe(false);
       expect(path.dirname(push.cwd)).toBe(startupTmpdir());
@@ -466,7 +466,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
         const g = realGit({ [PUSH]: `file://${f.remote}` });
         const r = await pushHeadBranch({ ...opts(f), env, git: g.git });
         // GITHUB_SERVER_URL=evil.invalid was ignored: origin github.com still matches.
-        if (w.fresh.includes("GITHUB_SERVER_URL")) expect(r).toEqual({ pushed: true, attempted: true });
+        if (w.fresh.includes("GITHUB_SERVER_URL")) expect(r).toEqual({ pushed: true, attempted: true, sha: f.sha });
         expect(g.calls.length).toBeGreaterThan(0);
         for (const c of g.calls) {
           for (const k of w.fresh) expect(c.env[k], k).toBe(startupEnv()[k]);
@@ -493,7 +493,12 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
       return r;
     };
     const r = await pushHeadBranch({ ...opts(f), git: tamper });
-    expect(r).toEqual({ pushed: false, attempted: false, reason: "the private push repo changed before the push" });
+    expect(r).toEqual({
+      pushed: false,
+      attempted: false,
+      reason: "the private push repo changed before the push",
+      sha: f.sha,
+    });
     expect(g.pushes()).toEqual([]);
     expect(f.refs(f.remote)).toBe("");
     expect(f.refs(f.decoy)).toBe("");
@@ -502,7 +507,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
   it("the push carries transport config for its exact URL: no proxy, TLS verified", async () => {
     const f = make();
     const g = realGit({ [PUSH]: `file://${f.remote}` });
-    expect(await pushHeadBranch({ ...opts(f), git: g.git })).toEqual({ pushed: true, attempted: true });
+    expect(await pushHeadBranch({ ...opts(f), git: g.git })).toEqual({ pushed: true, attempted: true, sha: f.sha });
     const cfg = gitConfig(g.pushes()[0].env);
     expect(cfg[`http.${PUSH}.proxy`]).toEqual([""]);
     expect(cfg[`http.${PUSH}.sslVerify`]).toEqual(["true"]);
@@ -513,8 +518,25 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     const f = make();
     const g = realGit({ [PUSH]: `file://${f.remote}` });
     const r = await pushHeadBranch({ ...opts(f), remoteSha: undefined, git: g.git });
-    expect(r).toMatchObject({ pushed: false, attempted: false, reason: "the remote state of off-1-fix is unknown" });
-    expect(g.calls).toEqual([]);
+    // #558: the local commit is still read and reported, so github_create_pr can bind the PR to it.
+    expect(r).toEqual({
+      pushed: false,
+      attempted: false,
+      reason: "the remote state of off-1-fix is unknown",
+      sha: f.sha,
+    });
+    expect(g.pushes()).toEqual([]);
+    expect(f.refs(f.remote)).toBe("");
+  });
+
+  it("without a lease and a token (a lease skip's read, #558) nothing is pushed and the local commit is reported", async () => {
+    const f = make();
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
+    const r = await pushHeadBranch({ ...opts(f), remoteSha: undefined, token: undefined, git: g.git });
+    expect(r).toMatchObject({ pushed: false, attempted: false, sha: f.sha });
+    expect(g.pushes()).toEqual([]);
+    expect(f.refs(f.remote)).toBe("");
+    for (const c of g.calls) expect(JSON.stringify(c)).not.toContain(BASIC);
   });
 
   it("the lease: a head created on the remote after the check is not overwritten", async () => {
@@ -533,7 +555,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     expect(f.git(["push", "-q", `file://${f.remote}`, "main:refs/heads/off-1-fix"]).code).toBe(0);
     const g = realGit({ [PUSH]: `file://${f.remote}` });
     const r = await pushHeadBranch({ ...opts(f), remoteSha: main, git: g.git });
-    expect(r).toEqual({ pushed: true, attempted: true });
+    expect(r).toEqual({ pushed: true, attempted: true, sha: f.sha });
     expect(g.pushes()[0].args).toContain(`--force-with-lease=refs/heads/off-1-fix:${main}`);
     expect(f.refs(f.remote)).toBe(`refs/heads/off-1-fix ${f.sha}`);
   });
@@ -549,6 +571,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     const r = await pushHeadBranch({ ...opts(f), remoteSha: other, git: g.git });
     expect(r).toMatchObject({ pushed: false, attempted: false });
     expect(r.reason).toContain("not a fast-forward");
+    expect(r.sha).toBe(f.sha);
     expect(g.pushes()).toEqual([]);
     expect(f.refs(f.remote)).toBe(`refs/heads/off-1-fix ${other}`);
   });
@@ -570,6 +593,12 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
           return json({ protected: o.branch.protected, commit: { sha: o.branch.sha } });
         }
         if (u.includes("/repos/Owner/Repo/pulls?")) return json(o.openPrs ?? []);
+        // #558: the remote head, read to bind the PR to the local commit.
+        const ref = /\/repos\/Owner\/Repo\/git\/ref\/heads\/(.+)$/.exec(u);
+        if (ref && o.branch && typeof o.branch === "object") {
+          return json({ ref: `refs/heads/${decodeURIComponent(ref[1])}`, object: { sha: o.branch.sha } });
+        }
+        if (ref) return new Response("Not Found", { status: 404 });
         return json({});
       });
       return urls;
@@ -578,10 +607,11 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
       vi.restoreAllMocks();
     });
 
+    let lastResult: unknown;
     async function createPrWith(f: ReturnType<typeof fixture>, head: string, g: ReturnType<typeof realGit>) {
       const createPr = github.tools.find((t) => t.name === "github_create_pr")!;
       const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
-      await createPr.handler(
+      lastResult = await createPr.handler(
         { repo: "Owner/Repo", title: "t", head, base: "main" },
         {
           config: { GITHUB_TOKEN: TOKEN },
@@ -603,6 +633,8 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
       expect(g.pushes()).toEqual([]);
       expect(f.refs(f.remote)).toBe(`refs/heads/release ${main}`);
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("no open PR into main"));
+      // #558: the PR would publish main's commit, not the local release branch: refused, both shas.
+      expect(lastResult).toMatchObject({ refused: true, local_sha: f.sha, remote_sha: main });
     });
 
     it("a head that does not exist remotely is pushed", async () => {
@@ -635,6 +667,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
       expect(g.pushes()).toEqual([]);
       expect(f.refs(f.remote)).toBe(`refs/heads/off-1-fix ${main}`);
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("is protected"));
+      expect(lastResult).toMatchObject({ refused: true, local_sha: f.sha, remote_sha: main });
     });
 
     it("an API error on the branch check means no push", async () => {
@@ -668,7 +701,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
           }
         : g.git(args, o);
     const r = await pushHeadBranch({ ...opts(f), git: failing });
-    expect(r).toMatchObject({ pushed: false, attempted: true });
+    expect(r).toMatchObject({ pushed: false, attempted: true, sha: f.sha });
     expect(r.reason).toContain("403");
     expect(r.reason).not.toContain(TOKEN);
   });
@@ -833,7 +866,7 @@ describe("github_create_pr pushes the head before it requests the PR", () => {
     const order: string[] = [];
     const pusher = vi.fn(async (_opts: { repo: string; head: string; base: string; token?: string }) => {
       order.push("push");
-      return { pushed: true, attempted: true };
+      return { pushed: true, attempted: true, sha: "c".repeat(40) };
     });
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       if (String(url) === "https://api.github.com/repos/o/r" && !init?.method) {
@@ -874,7 +907,11 @@ describe("github_create_pr pushes the head before it requests the PR", () => {
         ? new Response(JSON.stringify({ default_branch: "trunk" }), { status: 200 })
         : new Response(JSON.stringify({ number: 7 }), { status: 201 });
     });
-    const pusher = vi.fn(async (_o: { defaultBranch?: string }) => ({ pushed: true, attempted: true }));
+    const pusher = vi.fn(async (_o: { defaultBranch?: string }) => ({
+      pushed: true,
+      attempted: true,
+      sha: "c".repeat(40),
+    }));
     const createPr = github.tools.find((t) => t.name === "github_create_pr")!;
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
     await createPr.handler(
