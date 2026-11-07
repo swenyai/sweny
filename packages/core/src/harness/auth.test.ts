@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { claudeCodeAuth, codexAuth, CLAUDE_CODE_AUTH_HINT, CODEX_AUTH_HINT } from "./auth.js";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
+import { claudeCodeAuth, codexAuth, detectClaudeCodeLogin, CLAUDE_CODE_AUTH_HINT, CODEX_AUTH_HINT } from "./auth.js";
 
 // #339: every probe here is faked. No real CLI, keychain or home directory.
 const noLogin = () => false;
@@ -66,5 +69,26 @@ describe("codexAuth", () => {
     expect(reason).toMatch(/^Missing: OPENAI_API_KEY/);
     expect(reason).toMatch(/codex login/);
     expect(reason).toMatch(/for --agent codex$/);
+  });
+});
+
+describe("stored logins follow the env's HOME (a harness env overlay)", () => {
+  it("detectClaudeCodeLogin and codexAuth find a login only under the env's HOME", () => {
+    const home = mkdtempSync(path.join(tmpdir(), "sweny-login-home-"));
+    try {
+      const noKeychain = { platform: "linux" as NodeJS.Platform, keychainHasLogin: () => false };
+      expect(detectClaudeCodeLogin({ env: { HOME: home }, ...noKeychain })).toBe(false);
+      mkdirSync(path.join(home, ".claude"));
+      writeFileSync(path.join(home, ".claude", ".credentials.json"), "{}");
+      expect(detectClaudeCodeLogin({ env: { HOME: home }, ...noKeychain })).toBe(true);
+      expect(detectClaudeCodeLogin({ env: { HOME: path.join(home, "elsewhere") }, ...noKeychain })).toBe(false);
+
+      expect(codexAuth({ HOME: home }).ok).toBe(false);
+      mkdirSync(path.join(home, ".codex"));
+      writeFileSync(path.join(home, ".codex", "auth.json"), "{}");
+      expect(codexAuth({ HOME: home })).toEqual({ ok: true, via: "codex login" });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

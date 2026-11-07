@@ -46,13 +46,16 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import * as fs from "node:fs";
 import * as path from "node:path";
 import type { JSONSchema, Logger, McpServerConfig, NodeResult, NodeUsage, ToolCall, ToolContext } from "../types.js";
 import { consoleLogger } from "../types.js";
 import {
+  agentEnvOverlay,
+  applyEnvOverlay,
   finishAgentEnv,
   heldCredentials,
+  overlaidProcessEnv,
+  resolveExecutable,
   parseList,
   reportWithheldEnv,
   resolveEnvScope,
@@ -61,6 +64,8 @@ import {
   withPushBlocked,
   mcpWithheld,
   type AgentAccess,
+  type AgentEnvOverlay,
+  type HarnessEnvOptions,
   type SandboxMode,
 } from "../agent-env.js";
 import type {
@@ -103,7 +108,7 @@ const PROCESS_EXITED = "agent process exited";
 /** Name of the MCP server that carries sweny's skill tools (the tool bridge). */
 const BRIDGE_SERVER = "sweny-core";
 
-export interface AcpHarnessOptions {
+export interface AcpHarnessOptions extends HarnessEnvOptions {
   /**
    * The agent to run: a command line (`"opencode acp"`, the part after `acp:`)
    * or an explicit `{command, args}`. Never run through a shell.
@@ -252,23 +257,6 @@ export function toAcpMcpServers(
   return { list, unsupported };
 }
 
-function resolveOnPath(command: string, env: Record<string, string | undefined>): string | undefined {
-  const ok = (p: string) => {
-    try {
-      fs.accessSync(p, fs.constants.X_OK);
-      return fs.statSync(p).isFile();
-    } catch {
-      return false;
-    }
-  };
-  if (command.includes(path.sep) || command.includes("/")) return ok(command) ? command : undefined;
-  for (const dir of (env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
-    const p = path.join(dir, command);
-    if (ok(p)) return p;
-  }
-  return undefined;
-}
-
 // ─── Process registry (crash cleanup) ────────────────────────────
 
 const liveChildren = new Set<ChildProcess>();
@@ -358,6 +346,7 @@ export class AcpHarness implements AgentHarness {
   private envPassthrough: string[] | undefined;
   private authVars: string[];
   private envScope: boolean | undefined;
+  private envOverlay: AgentEnvOverlay | undefined;
   private sandboxMode: SandboxMode | undefined;
   private sandboxWrapper: SandboxWrapper | null | undefined;
   private policyMode: HarnessPolicyMode;
@@ -391,6 +380,7 @@ export class AcpHarness implements AgentHarness {
     this.envPassthrough = opts.envPassthrough;
     this.authVars = opts.authVars ?? [];
     this.envScope = opts.envScope;
+    this.envOverlay = agentEnvOverlay(opts);
     this.sandboxMode = opts.sandbox;
     this.sandboxWrapper = opts.sandboxWrapper;
     this.policyMode = opts.policy ?? resolveHarnessPolicy(process.env, undefined, this.logger);
@@ -411,7 +401,7 @@ export class AcpHarness implements AgentHarness {
    * first run (`agentInfo.version`).
    */
   async preflight(): Promise<{ ok: true; version: string } | { ok: false; reason: string }> {
-    const found = resolveOnPath(this.agent.command, process.env);
+    const found = resolveExecutable(this.agent.command, overlaidProcessEnv(this.envOverlay, this.authVars), this.cwd);
     if (!found) {
       const example = [this.agent.command, ...this.agent.args].join(" ");
       return {
@@ -427,6 +417,8 @@ export class AcpHarness implements AgentHarness {
    * vars the operator named. Skill credentials are dropped either way
    * ({@link finishAgentEnv}) unless the node granted them with `agent_env`; an
    * operator-named auth var stays, and the gate counts it if it is a write token.
+   * The caller's `envRemove` / `env` are applied after scoping
+   * ({@link applyEnvOverlay}), before that credential rule.
    */
   private buildEnv(access?: Pick<AgentAccess, "envVars" | "withhold">): Record<string, string> {
     const full: Record<string, string> = Object.fromEntries(
@@ -445,6 +437,7 @@ export class AcpHarness implements AgentHarness {
       reportWithheldEnv(scoped.withheld, this.logger);
       env = scoped.env;
     }
+    env = applyEnvOverlay(env, this.envOverlay, this.authVars);
     return finishAgentEnv(env, { access, keep: this.authVars, passthrough, logger: this.logger }).env;
   }
 

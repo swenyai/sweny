@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCodexProcessFake } from "./__contract__/fakes.js";
+import { createRecordingWrapper } from "./__contract__/sandbox.js";
 import {
   CodexHarness,
   CODEX_ISOLATION_FEATURES_OFF,
@@ -724,5 +725,190 @@ describe.skipIf(process.platform === "win32")("CodexHarness descendant cleanup",
       await running;
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("CodexHarness env overlay", () => {
+  it("lays env over the scoped env, drops envRemove, and keeps the credential rule", async () => {
+    vi.stubEnv("SWENY_OVERLAY_RAW", "raw");
+    vi.stubEnv("CODEX_API_KEY", "parent-key");
+    const { h } = harness({
+      envPassthrough: ["SWENY_OVERLAY_RAW"],
+      envRemove: ["SWENY_OVERLAY_RAW"],
+      env: { CODEX_HOME: "/run/codex", MY_RUN_VAR: "run", GITHUB_TOKEN: "overlay-gh" },
+    });
+    fakes.script(DONE);
+    expect((await h.run({ instruction: "x", context: {}, tools: [] })).status).toBe("success");
+    const env = fakes.raw().at(-1)!.env;
+    expect(env.CODEX_HOME).toBe("/run/codex");
+    expect(env.MY_RUN_VAR).toBe("run");
+    expect(env.SWENY_OVERLAY_RAW).toBeUndefined();
+    expect(env.GITHUB_TOKEN).toBeUndefined();
+    // CODEX_HOME is a location, not a credential: the inherited key stays.
+    expect(env.CODEX_API_KEY).toBe("parent-key");
+  });
+
+  it("an overlaid key replaces the inherited one, in run() and complete()", async () => {
+    vi.stubEnv("CODEX_API_KEY", "parent-key");
+    vi.stubEnv("CODEX_ACCESS_TOKEN", "parent-token");
+    const { h } = harness({ env: { OPENAI_API_KEY: "run-key" } });
+    fakes.script(DONE);
+    await h.run({ instruction: "x", context: {}, tools: [] });
+    let env = fakes.raw().at(-1)!.env;
+    expect(env.CODEX_API_KEY).toBe("run-key");
+    expect(env.CODEX_ACCESS_TOKEN).toBeUndefined();
+    fakes.script([{ kind: "final", text: "a" }]);
+    expect(await h.complete({ prompt: "p" })).toBe("a");
+    env = fakes.raw().at(-1)!.env;
+    expect(env.CODEX_API_KEY).toBe("run-key");
+    // The overlaid OPENAI_API_KEY does not ship beside it, as scoping would have withheld it.
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+  });
+
+  for (const envScope of [true, false]) {
+    const mode = envScope ? "on" : "off";
+    it(`an overlaid CODEX_API_KEY drops an inherited OPENAI_API_KEY (env scope ${mode})`, async () => {
+      vi.stubEnv("OPENAI_API_KEY", "parent-openai");
+      const { h } = harness({ envScope, env: { CODEX_API_KEY: "run-key" } });
+      fakes.script(DONE);
+      await h.run({ instruction: "x", context: {}, tools: [] });
+      const env = fakes.raw().at(-1)!.env;
+      expect(env.CODEX_API_KEY).toBe("run-key");
+      expect(env.OPENAI_API_KEY).toBeUndefined();
+    });
+
+    for (const name of ["CODEX_API_KEY", "OPENAI_API_KEY"]) {
+      it(`envRemove ${name} is not recreated from the OPENAI_API_KEY alias (env scope ${mode})`, async () => {
+        vi.stubEnv("CODEX_API_KEY", undefined);
+        vi.stubEnv("OPENAI_API_KEY", "synthetic-parent-key");
+        const { h } = harness({ envScope, envRemove: [name] });
+        fakes.script(DONE);
+        await h.run({ instruction: "x", context: {}, tools: [] });
+        const env = fakes.raw().at(-1)!.env;
+        expect(env.CODEX_API_KEY).toBeUndefined();
+        if (name === "OPENAI_API_KEY") expect(env.OPENAI_API_KEY).toBeUndefined();
+      });
+    }
+  }
+
+  it("an overlaid OPENAI_BASE_URL reaches -c openai_base_url and the wrapper's egress", async () => {
+    vi.stubEnv("OPENAI_BASE_URL", "https://parent.example.test/v1");
+    const wrapper = createRecordingWrapper();
+    const { h } = harness({
+      sandbox: "strict",
+      sandboxWrapper: wrapper,
+      env: { OPENAI_BASE_URL: "https://gw.example.test:8443/v1" },
+    });
+    fakes.script(DONE);
+    await h.run({ instruction: "x", context: {}, tools: [] });
+    expect(overrides().openai_base_url).toBe("https://gw.example.test:8443/v1");
+    expect(wrapper.requests.at(-1)!.egress).toContain("gw.example.test:8443");
+    expect(wrapper.requests.at(-1)!.egress).not.toContain("parent.example.test");
+  });
+
+  it("preflight finds a stored codex login only under the overlaid HOME (real login helper)", async () => {
+    for (const k of ["CODEX_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_TOKEN", "CODEX_HOME"]) vi.stubEnv(k, undefined);
+    const home = fs.mkdtempSync(path.join(tmpdir(), "sweny-codex-home-"));
+    try {
+      // The fake sets an ambient CODEX_HOME; remove it so the run's HOME decides.
+      const overlay = { env: { HOME: home }, envRemove: ["CODEX_HOME"] };
+      expect(await harness(overlay).h.preflight()).toMatchObject({ ok: false });
+      fs.mkdirSync(path.join(home, ".codex"));
+      fs.writeFileSync(path.join(home, ".codex", "auth.json"), "{}");
+      expect(await harness(overlay).h.preflight()).toMatchObject({ ok: true });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("version-checks and spawns the codex an overlaid PATH selects", async () => {
+    vi.stubEnv("CODEX_API_KEY", "k");
+    const bin = fs.mkdtempSync(path.join(tmpdir(), "sweny-codex-bin-"));
+    try {
+      const exe = path.join(bin, "sweny-overlay-codex");
+      const q = (a: string) => `'${a.replace(/'/g, "'\\''")}'`;
+      fs.writeFileSync(
+        exe,
+        `#!/bin/sh\nexec ${[fakes.command.command, ...fakes.command.args].map(q).join(" ")} "$@"\n`,
+      );
+      fs.chmodSync(exe, 0o755);
+      const cmd = { command: "sweny-overlay-codex", args: [] };
+      expect(await harness({ codexCommand: cmd }).h.preflight()).toMatchObject({ ok: false });
+      const wrapper = createRecordingWrapper();
+      const { h } = harness({
+        codexCommand: cmd,
+        sandbox: "strict",
+        sandboxWrapper: wrapper,
+        env: { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}` },
+      });
+      expect(await h.preflight()).toMatchObject({ ok: true });
+      fakes.script(DONE);
+      expect((await h.run({ instruction: "x", context: {}, tools: [] })).status).toBe("success");
+      // The spawn runs the exact file the version check resolved and ran.
+      expect(wrapper.requests.at(-1)!.command).toBe(exe);
+    } finally {
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  it("preflight does not count an inherited OPENAI_API_KEY once envRemove names CODEX_API_KEY", async () => {
+    const home = fs.mkdtempSync(path.join(tmpdir(), "sweny-codex-nologin-"));
+    try {
+      const mk = () =>
+        harness({ env: { HOME: home }, envRemove: ["CODEX_API_KEY", "CODEX_HOME", "CODEX_ACCESS_TOKEN"] });
+      vi.stubEnv("OPENAI_API_KEY", "synthetic-parent-key");
+      vi.stubEnv("CODEX_API_KEY", undefined);
+      // The agent env gets no CODEX_API_KEY, so the probe must not pass on the parent's OPENAI_API_KEY.
+      expect(await mk().h.preflight()).toMatchObject({ ok: false });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "the version check runs with the overlaid env and the harness cwd",
+    async () => {
+      vi.stubEnv("CODEX_API_KEY", "k");
+      const dir = fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), "sweny-codex-vcheck-")));
+      try {
+        const exe = path.join(dir, "codex-vcheck");
+        fs.writeFileSync(
+          exe,
+          `#!/bin/sh\n[ "$VCHECK_MARK" = "set" ] && [ "$(pwd -P)" = "${dir}" ] && echo "codex-cli ${TESTED_CODEX_VERSION}" && exit 0\nexit 1\n`,
+        );
+        fs.chmodSync(exe, 0o755);
+        const codexCommand = { command: exe, args: [] };
+        expect(await harness({ codexCommand, cwd: dir }).h.preflight()).toMatchObject({ ok: false });
+        expect(await harness({ codexCommand, env: { VCHECK_MARK: "set" } }).h.preflight()).toMatchObject({ ok: false });
+        const ok = await harness({ codexCommand, cwd: dir, env: { VCHECK_MARK: "set" } }).h.preflight();
+        expect(ok).toEqual({ ok: true, version: TESTED_CODEX_VERSION });
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("createHarness passes env through for codex", async () => {
+    fakes.reset();
+    const h = createHarness("codex" as string, {
+      logger: logger(),
+      envScope: true,
+      sandbox: "off",
+      codexCommand: fakes.command,
+      sandboxWrapper: null,
+      env: { MY_RUN_VAR: "via-factory" },
+    });
+    fakes.script(DONE);
+    await h.run({ instruction: "x", context: {}, tools: [] });
+    expect(fakes.raw().at(-1)!.env.MY_RUN_VAR).toBe("via-factory");
+  });
+
+  it("preflight's default login probe sees the overlay", async () => {
+    for (const k of ["CODEX_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_TOKEN"]) vi.stubEnv(k, "");
+    vi.stubEnv("CODEX_HOME", path.join(tmpdir(), "sweny-no-codex-login"));
+    const without = harness();
+    expect(await without.h.preflight()).toMatchObject({ ok: false });
+    const withKey = harness({ env: { CODEX_API_KEY: "run-key" } });
+    expect(await withKey.h.preflight()).toMatchObject({ ok: true });
   });
 });

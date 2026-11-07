@@ -284,7 +284,7 @@ export const PI_PROVIDER_VARS: Readonly<Record<string, readonly string[]>> = {
 };
 
 /** pi settings that are not secrets: their presence alone never selects a provider. */
-const PI_NON_SECRET_VARS: ReadonlySet<string> = new Set([
+export const PI_NON_SECRET_VARS: ReadonlySet<string> = new Set([
   "AZURE_OPENAI_BASE_URL",
   "AZURE_OPENAI_RESOURCE_NAME",
   "CLOUDFLARE_ACCOUNT_ID",
@@ -381,7 +381,8 @@ export function hasCodexLogin(
   env: Record<string, string | undefined> = process.env,
   exists: (p: string) => boolean = existsSync,
 ): boolean {
-  const home = env.CODEX_HOME || path.join(homedir(), ".codex");
+  // The env's HOME, not the process's: a harness `env` overlay may give the run its own.
+  const home = env.CODEX_HOME || path.join(env.HOME || homedir(), ".codex");
   return exists(path.join(home, "auth.json"));
 }
 
@@ -397,6 +398,12 @@ export interface BuildAgentEnvOpts {
   prefixes?: readonly string[];
   /** Operator passthrough list (`env-passthrough`). `"*"` inherits everything. */
   passthrough?: readonly string[];
+  /**
+   * Where `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX` are read when
+   * deciding the cloud vars. Default: `source`. A harness `env` overlay passes
+   * the overlaid env, so an overlay that turns Bedrock on keeps the `AWS_*` vars.
+   */
+  routing?: Record<string, string | undefined>;
   logger?: Pick<Logger, "warn">;
 }
 
@@ -621,8 +628,9 @@ export function buildAgentEnv(
   const prefixes = [...(opts.prefixes ?? AGENT_ENV_PREFIXES)];
   // Bedrock / Vertex routing is a Claude Code setting; only its default prefixes carry it.
   if (!opts.prefixes) {
-    if (truthy(source.CLAUDE_CODE_USE_BEDROCK)) prefixes.push(...BEDROCK_PREFIXES);
-    if (truthy(source.CLAUDE_CODE_USE_VERTEX)) for (const v of VERTEX_VARS) exact.add(v);
+    const routing = opts.routing ?? source;
+    if (truthy(routing.CLAUDE_CODE_USE_BEDROCK)) prefixes.push(...BEDROCK_PREFIXES);
+    if (truthy(routing.CLAUDE_CODE_USE_VERTEX)) for (const v of VERTEX_VARS) exact.add(v);
   }
 
   const out: Record<string, string> = {};
@@ -728,7 +736,8 @@ export function noPushGitConfig(dir: string): Array<[string, string]> {
  * scoping is on. Withholds {@link PUSH_TOKEN_VARS} (the ssh agent socket and
  * askpass programs among them) and every {@link isAgentCredential} name, even
  * one a node granted with `agent_env`, appends
- * {@link noPushGitConfig} after any `GIT_CONFIG_*` entries already present,
+ * {@link noPushGitConfig} after any `GIT_CONFIG_*` entries already present
+ * (and drops `GIT_CONFIG_PARAMETERS`, which git would apply after them),
  * sets `GIT_ASKPASS` to a refusing program, turns off git's terminal prompt,
  * routes git's ssh through a wrapper that refuses `git-receive-pack` (so an
  * ssh push fails even to a remote with an explicit `pushurl` under
@@ -752,6 +761,9 @@ export function withPushBlocked(env: Record<string, string>, enabled: boolean | 
   for (const [k, v] of Object.entries(env)) {
     // Every skill credential too, even one a node granted with `agent_env`.
     if (PUSH_TOKEN_VARS.includes(k) || isAgentCredential(k)) continue;
+    // git reads GIT_CONFIG_PARAMETERS after the GIT_CONFIG_COUNT entries, so a value there would
+    // override the block (push.default, core.hooksPath, credential.helper).
+    if (k === "GIT_CONFIG_PARAMETERS") continue;
     out[k] = v;
   }
   const base = Number.parseInt(out.GIT_CONFIG_COUNT ?? "0", 10);
@@ -936,6 +948,175 @@ export function grantedAgentEnv(
   if (opts.readOnly) return { grant: [], dropped: `agent_env withheld on a read-only node: ${names.join(", ")}` };
   if (opts.staged) return { grant: [], dropped: `agent_env withheld in a staged or dry run: ${names.join(", ")}` };
   return { grant: names };
+}
+
+// ─── Caller env overlay (harness `env` / `envRemove`) ────────────
+
+/**
+ * The `env` and `envRemove` options every harness takes. They hold per
+ * harness instance: every node and every judge and route call (`complete()`)
+ * on that instance gets them, so per-run isolation means one harness per
+ * `execute()`.
+ */
+export interface HarnessEnvOptions {
+  /**
+   * Values laid over the agent env after scoping and passthrough, then put
+   * through the same credential rule as the inherited env: a skill credential
+   * (`GITHUB_TOKEN`, `SLACK_*`, a custom skill's config name) is withheld
+   * unless the node grants it with `agent_env`, and the harness's own auth
+   * vars always pass. When it names one of the harness's own credentials, the
+   * inherited ones are dropped first, so the overlay's login replaces the
+   * parent's instead of sitting beside it. In a staged or dry run the push
+   * block lands on top: it sets `GIT_ASKPASS`, `GH_CONFIG_DIR`, the ssh
+   * command and its git config entries over any overlaid value, drops
+   * `GIT_CONFIG_PARAMETERS` and every push token. `SWENY_*` names here only
+   * reach the agent; sweny itself reads its settings from `process.env`.
+   * Use it to hand a run its own `HOME` or `CLAUDE_CONFIG_DIR` without
+   * touching `process.env`, which is never modified. `HOME`,
+   * `CLAUDE_CONFIG_DIR` and `CODEX_HOME` must be absolute paths: the sandbox
+   * denies the login files under them.
+   */
+  env?: Readonly<Record<string, string>>;
+  /**
+   * Names removed from the agent env after scoping and passthrough, before
+   * `env` is applied (e.g. a parent `ANTHROPIC_API_KEY` when the run should
+   * use a login under `CLAUDE_CONFIG_DIR`).
+   */
+  envRemove?: readonly string[];
+}
+
+/** A validated, copied {@link HarnessEnvOptions}. */
+export interface AgentEnvOverlay {
+  readonly env: Readonly<Record<string, string>>;
+  readonly remove: readonly string[];
+}
+
+/** POSIX leaves env names loosely defined; the rules here: not empty, no `=`, no NUL, no whitespace. */
+function checkEnvName(option: string, name: unknown): string {
+  if (typeof name !== "string" || name === "" || /[=\0\s]/.test(name)) {
+    throw new Error(
+      `${option}: invalid env var name ${JSON.stringify(name)} (must be a non-empty string without "=", NUL or whitespace)`,
+    );
+  }
+  return name;
+}
+
+/**
+ * The executable a spawn of `command` with this env and cwd would run: a path
+ * with a separator resolves against `cwd`, a bare name is looked up on
+ * `env.PATH`. Undefined when nothing executable is found. Used so a version
+ * check probes the same file the spawn later runs (a harness `env` overlay may
+ * set its own `PATH`).
+ */
+export function resolveExecutable(
+  command: string,
+  env: Record<string, string | undefined>,
+  cwd: string = process.cwd(),
+): string | undefined {
+  const ok = (p: string) => {
+    try {
+      accessSync(p, fsConstants.X_OK);
+      return statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  };
+  if (command.includes(path.sep) || command.includes("/")) {
+    const p = path.resolve(cwd, command);
+    return ok(p) ? p : undefined;
+  }
+  for (const dir of (env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
+    const p = path.resolve(cwd, dir, command);
+    if (ok(p)) return p;
+  }
+  return undefined;
+}
+
+/** Overlay names whose value is a directory the sandbox derives credential-file denies from. */
+const OVERLAY_PATH_VARS: readonly string[] = ["HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"];
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  if (v === null || typeof v !== "object") return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Validate and copy a harness's `env` / `envRemove` options. Throws on a
+ * non-string value or an invalid name, so a bad overlay fails at construction
+ * instead of at spawn. Returns undefined when neither option is set. The copy
+ * means a later change to the caller's objects has no effect.
+ */
+export function agentEnvOverlay(opts: HarnessEnvOptions): AgentEnvOverlay | undefined {
+  if (opts.env === undefined && opts.envRemove === undefined) return undefined;
+  const env: Record<string, string> = {};
+  if (opts.env !== undefined) {
+    if (!isPlainObject(opts.env)) {
+      throw new Error("env: must be a plain object of env var names to string values (not a Map or class instance)");
+    }
+    for (const [k, v] of Object.entries(opts.env)) {
+      checkEnvName("env", k);
+      if (typeof v !== "string") {
+        throw new Error(
+          `env: value for ${k} must be a string, got ${typeof v}` +
+            (v === undefined ? " (leave the key out, or name it in envRemove to unset it)" : ""),
+        );
+      }
+      if (v.includes("\0")) throw new Error(`env: value for ${k} contains NUL`);
+      if (OVERLAY_PATH_VARS.includes(k) && !path.isAbsolute(v)) {
+        throw new Error(`env: ${k} must be an absolute path, got ${JSON.stringify(v)}`);
+      }
+      env[k] = v;
+    }
+  }
+  if (opts.envRemove !== undefined && !Array.isArray(opts.envRemove)) {
+    throw new Error("envRemove: must be an array of env var names");
+  }
+  const remove = (opts.envRemove ?? []).map((n) => checkEnvName("envRemove", n));
+  return Object.freeze({ env: Object.freeze(env), remove: Object.freeze(remove) });
+}
+
+/**
+ * Apply a caller overlay to a scoped agent env, before {@link finishAgentEnv}
+ * (which then withholds any overlaid skill credential the node did not grant).
+ * Drops the `remove` names, then, when the overlay names any of `credentials`
+ * (the harness's own login vars), drops the inherited ones, then lays the
+ * overlay values on top. Pure: returns a copy.
+ */
+export function applyEnvOverlay(
+  env: Record<string, string>,
+  overlay: AgentEnvOverlay | undefined,
+  credentials: readonly string[],
+): Record<string, string> {
+  if (!overlay) return env;
+  const out = { ...env };
+  for (const name of overlay.remove) delete out[name];
+  if (credentials.some((c) => Object.hasOwn(overlay.env, c))) for (const c of credentials) delete out[c];
+  return Object.assign(out, overlay.env);
+}
+
+/**
+ * `process.env` as the agent will see it for auth and command lookups (a
+ * harness's `preflight()` probe): the overlay applied by {@link applyEnvOverlay},
+ * except `SWENY_*` names, which stay as sweny reads them from `process.env`.
+ */
+export function overlaidProcessEnv(
+  overlay: AgentEnvOverlay | undefined,
+  credentials: readonly string[],
+): Record<string, string> {
+  const full: Record<string, string> = Object.fromEntries(
+    Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
+  );
+  if (!overlay) return full;
+  const own = (n: string) => !n.startsWith("SWENY_");
+  return applyEnvOverlay(
+    full,
+    {
+      env: Object.fromEntries(Object.entries(overlay.env).filter(([k]) => own(k))),
+      remove: overlay.remove.filter(own),
+    },
+    credentials,
+  );
 }
 
 // ─── Per-node access (env vars + network) ────────────────────────
@@ -1228,12 +1409,21 @@ function defaultProbe(): string | undefined {
  * - `network.allowedDomains` + `strictAllowlist`: non-listed hosts are denied
  *   deterministically rather than prompted (no prompt exists headless).
  * - `credentials`: the agent's own Anthropic credentials are unset for
- *   sandboxed commands, and the Claude Code credentials file is unreadable.
+ *   sandboxed commands, and the Claude Code credentials file is unreadable:
+ *   the host's, and the one the agent env selects ({@link claudeCredentialFiles},
+ *   `agentEnv` carrying a harness `env` overlay's `HOME` / `CLAUDE_CONFIG_DIR`).
  */
 export function buildSandboxSettings(
   domains: readonly string[],
-  opts: { failIfUnavailable?: boolean; home?: string } = {},
+  opts: {
+    failIfUnavailable?: boolean;
+    home?: string;
+    agentEnv?: Record<string, string | undefined>;
+    /** The agent's working directory, for a relative `HOME` / `CLAUDE_CONFIG_DIR`. */
+    cwd?: string;
+  } = {},
 ): SandboxSettings {
+  const loginFiles = claudeCredentialFiles(opts.agentEnv ?? {}, opts.home ?? homedir(), opts.cwd);
   return {
     enabled: true,
     failIfUnavailable: opts.failIfUnavailable ?? true,
@@ -1246,7 +1436,7 @@ export function buildSandboxSettings(
     credentials: {
       envVars: AGENT_AUTH_VARS.map((name) => ({ name, mode: "deny" as const })),
       files: [
-        { path: path.join(opts.home ?? homedir(), ".claude", ".credentials.json"), mode: "deny" as const },
+        ...loginFiles.map((p) => ({ path: p, mode: "deny" as const })),
         // Run journals and their keys: an agent that could read a key could forge records.
         { path: runStateRoot(), mode: "deny" as const },
       ],
@@ -1256,8 +1446,30 @@ export function buildSandboxSettings(
   };
 }
 
+/**
+ * Claude Code login files to deny to sandboxed commands: the host's
+ * (`<hostHome>/.claude/.credentials.json`), plus the one `env` selects when it
+ * points elsewhere: `$CLAUDE_CONFIG_DIR/.credentials.json`, and
+ * `$HOME/.claude/.credentials.json`. A relative value resolves against the
+ * agent's `cwd`, where the agent would resolve it. Deduplicated, host file first.
+ */
+export function claudeCredentialFiles(
+  env: Record<string, string | undefined>,
+  hostHome: string,
+  cwd: string = process.cwd(),
+): string[] {
+  const files = [path.join(hostHome, ".claude", ".credentials.json")];
+  if (env.CLAUDE_CONFIG_DIR) files.push(path.resolve(cwd, env.CLAUDE_CONFIG_DIR, ".credentials.json"));
+  if (env.HOME) files.push(path.resolve(cwd, env.HOME, ".claude", ".credentials.json"));
+  return [...new Set(files)];
+}
+
 export interface ResolveAgentSandboxOpts {
   env: Record<string, string | undefined>;
+  /** The agent's env when it differs from `env` (a harness `env` overlay): its login files are denied too. */
+  agentEnv?: Record<string, string | undefined>;
+  /** The agent's working directory (resolves a relative path in `agentEnv`). */
+  cwd?: string;
   /** Explicit mode (client option); falls back to `env.SWENY_SANDBOX`. */
   mode?: SandboxMode;
   /** Explicit extra hosts (client option); falls back to `env.SWENY_SANDBOX_ALLOWED_DOMAINS`. */
@@ -1318,6 +1530,8 @@ export function resolveAgentSandbox(opts: ResolveAgentSandboxOpts): AgentSandbox
     settings: buildSandboxSettings([...DEFAULT_SANDBOX_DOMAINS, ...(opts.nodeDomains ?? []), ...extra], {
       // Preflight passed: from here the sandbox is enforced or the node fails.
       failIfUnavailable: true,
+      agentEnv: opts.agentEnv,
+      cwd: opts.cwd,
     }),
   };
 }

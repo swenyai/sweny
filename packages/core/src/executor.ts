@@ -100,7 +100,11 @@ export interface ExecuteOptions {
   logger?: Logger;
   /** Working directory for resolving file Sources (default: process.cwd()) */
   cwd?: string;
-  /** Environment variables for Source resolution auth lookup */
+  /**
+   * The env SWEny itself reads for this run: skill config, `context:` Source
+   * auth, the branch pusher's token and the run's identity. It never reaches
+   * the agent; to change the agent's env, pass `env` / `envRemove` to the harness.
+   */
   env?: NodeJS.ProcessEnv;
   /** Host → env-var-name map for URL Source authentication */
   fetchAuth?: Record<string, string>;

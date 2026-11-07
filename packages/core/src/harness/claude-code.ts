@@ -27,7 +27,10 @@ import type {
 import { consoleLogger } from "../types.js";
 import {
   AGENT_AUTH_VARS,
+  agentEnvOverlay,
+  applyEnvOverlay,
   finishAgentEnv,
+  overlaidProcessEnv,
   reportWithheldEnv,
   parseList,
   resolveEnvScope,
@@ -36,6 +39,8 @@ import {
   mcpWithheld,
   resolveAgentSandbox,
   type AgentAccess,
+  type AgentEnvOverlay,
+  type HarnessEnvOptions,
   type SandboxMode,
 } from "../agent-env.js";
 import type {
@@ -257,7 +262,7 @@ export function resolveAuthEnv(env: Record<string, string>, opts: ResolveAuthEnv
   return out;
 }
 
-export interface ClaudeCodeHarnessOptions {
+export interface ClaudeCodeHarnessOptions extends HarnessEnvOptions {
   /** Model override */
   model?: string;
   /** Max turns for tool use loop (default: 20) */
@@ -293,7 +298,7 @@ export interface ClaudeCodeHarnessOptions {
   sandboxAllowedDomains?: string[];
   /** Sandbox preflight probe (test seam). Returns a reason when the sandbox cannot run. */
   sandboxProbe?: () => string | undefined;
-  /** Login probe for `preflight()` (test seam). Default: {@link claudeCodeAuth} over `process.env`. */
+  /** Login probe for `preflight()` (test seam). Default: {@link claudeCodeAuth} over `process.env` with `env` / `envRemove` applied. */
   authProbe?: AuthProbe;
   /**
    * Serve skill tools through the SwenyToolBridge (a stdio MCP shim over a
@@ -384,6 +389,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
   private sandboxProbe: (() => string | undefined) | undefined;
   private sandboxWarned = false;
   private envScope: boolean | undefined;
+  private envOverlay: AgentEnvOverlay | undefined;
   /** Floor facts from the latest runQuery, read by run() for the receipt. */
   private lastPolicyFacts: NodePolicyFacts | undefined;
   private toolBridge: boolean;
@@ -401,38 +407,50 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     this.defaultMcpServers = opts.defaultMcpServers ?? {};
     this.envPassthrough = opts.envPassthrough;
     this.envScope = opts.envScope;
+    this.envOverlay = agentEnvOverlay(opts);
     this.sandboxMode = opts.sandbox;
     this.sandboxAllowedDomains = opts.sandboxAllowedDomains;
     this.sandboxProbe = opts.sandboxProbe;
     this.toolBridge = opts.toolBridge ?? process.env.SWENY_TOOL_BRIDGE === "1";
     this.toolBridgeShim = opts.toolBridgeShim;
-    this.authProbe = opts.authProbe ?? (() => claudeCodeAuth(process.env));
+    this.authProbe = opts.authProbe ?? (() => claudeCodeAuth(overlaidProcessEnv(this.envOverlay, AGENT_AUTH_VARS)));
     this.policyMode = opts.policy ?? "warn";
   }
 
   /**
-   * Build env for the Claude Code subprocess (#360). Applies auth precedence
-   * via {@link resolveAuthEnv} on the full process env (it reads
-   * `SWENY_AUTH`). When env scoping is on (default in CI, see
-   * {@link resolveEnvScope}) the result is narrowed to the allowlist plus
-   * `extraVars` (the node's declared skill env vars) and the operator
-   * passthrough list, and the withheld names (never values) are reported once
-   * per process ({@link reportWithheldEnv}). When off, the full env passes through as before.
-   * Either way, skill credentials are then dropped ({@link finishAgentEnv}):
-   * only the names the node granted with `agent_env` reach the agent.
+   * Build env for the Claude Code subprocess (#360). When env scoping is on
+   * (default in CI, see {@link resolveEnvScope}) the process env is narrowed
+   * to the allowlist plus `extraVars` (the node's declared skill env vars)
+   * and the operator passthrough list, and the withheld names (never values)
+   * are reported once per process ({@link reportWithheldEnv}). When off, the
+   * full env passes through as before. Then the caller's `envRemove` / `env`
+   * ({@link applyEnvOverlay}; overlaid auth replaces the inherited auth), then
+   * auth precedence ({@link resolveAuthEnv}, mode from `process.env.SWENY_AUTH`),
+   * then skill credentials are dropped ({@link finishAgentEnv}), overlaid ones
+   * included: only the names the node granted with `agent_env` reach the agent.
+   * `process.env` is never modified.
    */
   private buildEnv(access?: Pick<AgentAccess, "envVars" | "withhold">): Record<string, string> {
     const full: Record<string, string> = Object.fromEntries(
       Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
     );
-    const authed = resolveAuthEnv(full, { logger: this.logger });
     const passthrough = this.envPassthrough ?? parseList(process.env.SWENY_ENV_PASSTHROUGH);
-    let env = authed;
+    let env = full;
     if (resolveEnvScope(process.env, this.envScope, this.logger)) {
-      const scoped = scopeAgentEnv(authed, { extraVars: access?.envVars ?? [], passthrough, logger: this.logger });
+      const scoped = scopeAgentEnv(full, {
+        extraVars: access?.envVars ?? [],
+        passthrough,
+        // An overlaid CLAUDE_CODE_USE_BEDROCK / _VERTEX decides which cloud vars are kept.
+        routing: this.envOverlay ? overlaidProcessEnv(this.envOverlay, AGENT_AUTH_VARS) : undefined,
+        logger: this.logger,
+      });
       reportWithheldEnv(scoped.withheld, this.logger);
       env = scoped.env;
     }
+    env = applyEnvOverlay(env, this.envOverlay, AGENT_AUTH_VARS);
+    // Scoping keeps every ANTHROPIC_* / CLAUDE_* name, so auth resolves the same after it. The mode
+    // comes from process.env: an overlaid SWENY_AUTH reaches the agent, not sweny ("" reads as auto).
+    env = resolveAuthEnv(env, { mode: (process.env.SWENY_AUTH ?? "") as SwenyAuthMode, logger: this.logger });
     return finishAgentEnv(env, { access, keep: AGENT_AUTH_VARS, passthrough, logger: this.logger }).env;
   }
 
@@ -579,6 +597,9 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     // `strict` fails the node here instead.
     const sandbox = resolveAgentSandbox({
       env: process.env,
+      // A `HOME` / `CLAUDE_CONFIG_DIR` overlay selects another login file; deny it too.
+      agentEnv: overlaidProcessEnv(this.envOverlay, AGENT_AUTH_VARS),
+      cwd: this.cwd,
       mode: opts.sandboxMode ?? this.sandboxMode,
       allowedDomains: this.sandboxAllowedDomains,
       nodeDomains: agentAccess?.domains,

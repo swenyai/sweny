@@ -158,3 +158,28 @@ In the GitHub Action, set the env vars on the step:
     SWENY_ENV_PASSTHROUGH: NPM_TOKEN
     NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 ```
+
+### Library use
+
+When you call `execute()` yourself, each harness also takes `env` and `envRemove`, for giving one run its own login or home without touching `process.env`:
+
+```ts
+import { createHarness, execute } from "@sweny-ai/core";
+
+const harness = createHarness("claude-code", {
+  env: { HOME: runHome, CLAUDE_CONFIG_DIR: `${runHome}/.claude` },
+  // use the login under CLAUDE_CONFIG_DIR, not the parent's credentials
+  envRemove: ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"],
+});
+await execute(workflow, input, { skills, harness });
+```
+
+`execute()`'s own `env` option is different: it is the environment SWEny itself reads (skill config, `context:` Source auth, the run's identity) and never reaches the agent. To change the agent's environment, use the harness options.
+
+`envRemove` names are dropped after scoping and passthrough, then `env` is laid on top. Then:
+
+- The skill credential rule still applies: an overlaid `GITHUB_TOKEN` or `SLACK_*` reaches the agent only on a node that grants it with `agent_env`.
+- When `env` sets one of the agent's own credentials, the inherited ones are dropped, so a parent key cannot sit beside the run's login. Those are `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` for Claude Code; `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN` and `OPENAI_API_KEY` for Codex; the provider keys for pi; your `authVars` for ACP. `HOME`, `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are not credentials and drop nothing: remove inherited keys with `envRemove`, as above.
+- Under the sandbox, the login files an overlaid `HOME`, `CLAUDE_CONFIG_DIR` or `CODEX_HOME` selects are denied like the host's. For Claude Code that covers its shell commands; the agent itself still reads its login. Codex, pi and ACP agents run inside the process sandbox with a scratch `HOME` (an overlaid `HOME` does not reach them), so a login file is unreadable to the agent itself: give a sandboxed Codex run `CODEX_API_KEY` or `OPENAI_API_KEY` in `env`.
+
+Staged and dry runs still apply the push block on top. `SWENY_*` names in `env` reach the agent only; SWEny reads its own settings from `process.env`. Both options hold for every node and every judge and route call on that harness instance, so build one harness per run when runs need different envs. The same options work on `codex`, `pi` and `acp:` harnesses.

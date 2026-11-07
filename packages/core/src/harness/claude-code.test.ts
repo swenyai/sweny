@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { NodePolicy } from "./types.js";
 
 // ClaudeCodeHarness behind the seam (#330): the SDK query options must be the
@@ -269,6 +272,319 @@ describe("ClaudeCodeHarness", () => {
       expect(options.sandbox.network.allowedDomains).toContain("policy.example.test");
       expect(options.sandbox.network.allowedDomains).not.toContain("legacy.example.test");
       expect(options.env.SWENY_REQUEST_TEST_KEY).toBe("synthetic-value");
+    });
+
+    describe("env overlay", () => {
+      type Req = Partial<Parameters<InstanceType<typeof mod.ClaudeCodeHarness>["run"]>[0]>;
+      const runEnv = async (opts: Record<string, unknown>, req: Req = {}) => {
+        mockQuery.mockReturnValueOnce(resultStream("done"));
+        const h = new mod.ClaudeCodeHarness({ logger: noopLogger(), ...opts });
+        await h.run({ instruction: "x", context: {}, tools: [], ...req });
+        return mockQuery.mock.calls.at(-1)![0].options.env as Record<string, string>;
+      };
+
+      it("is applied after scoping and passthrough, and wins over both", async () => {
+        vi.stubEnv("SWENY_OVERLAY_PASS", "from-parent");
+        vi.stubEnv("HOME", "/parent/home");
+        const env = await runEnv({
+          envScope: true,
+          envPassthrough: ["SWENY_OVERLAY_PASS"],
+          env: { SWENY_OVERLAY_PASS: "from-overlay", HOME: "/run/home", CLAUDE_CONFIG_DIR: "/run/claude" },
+        });
+        expect(env.SWENY_OVERLAY_PASS).toBe("from-overlay");
+        expect(env.HOME).toBe("/run/home");
+        expect(env.CLAUDE_CONFIG_DIR).toBe("/run/claude");
+      });
+
+      it("envRemove drops names from the subprocess env, then the overlay is applied", async () => {
+        vi.stubEnv("SWENY_OVERLAY_RAW", "raw");
+        vi.stubEnv("SWENY_OVERLAY_KEEP", "keep");
+        const env = await runEnv({
+          envScope: false,
+          envRemove: ["SWENY_OVERLAY_RAW", "SWENY_OVERLAY_BOTH"],
+          env: { SWENY_OVERLAY_BOTH: "set-again" },
+        });
+        expect(env).not.toHaveProperty("SWENY_OVERLAY_RAW");
+        expect(env.SWENY_OVERLAY_KEEP).toBe("keep");
+        expect(env.SWENY_OVERLAY_BOTH).toBe("set-again");
+      });
+
+      for (const envScope of [true, false]) {
+        it(`an overlaid skill credential is withheld unless the node grants it (env scope ${envScope ? "on" : "off"})`, async () => {
+          const overlay = {
+            env: { GITHUB_TOKEN: "overlay-gh", SLACK_BOT_TOKEN: "overlay-slack", MY_SKILL_KEY: "overlay-custom" },
+            envScope,
+          };
+          const withheld = await runEnv(overlay, {
+            agentAccess: { envVars: [], domains: [], withhold: ["MY_SKILL_KEY"] },
+          });
+          expect(withheld).not.toHaveProperty("GITHUB_TOKEN");
+          expect(withheld).not.toHaveProperty("SLACK_BOT_TOKEN");
+          expect(withheld).not.toHaveProperty("MY_SKILL_KEY");
+          const granted = await runEnv(overlay, {
+            agentAccess: { envVars: ["GITHUB_TOKEN", "MY_SKILL_KEY"], domains: [], withhold: ["MY_SKILL_KEY"] },
+          });
+          expect(granted.GITHUB_TOKEN).toBe("overlay-gh");
+          expect(granted.MY_SKILL_KEY).toBe("overlay-custom");
+          expect(granted).not.toHaveProperty("SLACK_BOT_TOKEN");
+        });
+      }
+
+      it("an overlaid login replaces the inherited one instead of sitting beside it", async () => {
+        vi.stubEnv("ANTHROPIC_API_KEY", "parent-key");
+        vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "parent-bearer");
+        vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "");
+        const env = await runEnv({ envScope: true, env: { CLAUDE_CODE_OAUTH_TOKEN: "run-oauth" } });
+        expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("run-oauth");
+        expect(env).not.toHaveProperty("ANTHROPIC_API_KEY");
+        expect(env).not.toHaveProperty("ANTHROPIC_AUTH_TOKEN");
+
+        // And the other way: an overlaid key replaces an inherited OAuth token.
+        vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "parent-oauth");
+        const keyed = await runEnv({ envScope: false, env: { ANTHROPIC_API_KEY: "run-key" } });
+        expect(keyed.ANTHROPIC_API_KEY).toBe("run-key");
+        expect(keyed).not.toHaveProperty("CLAUDE_CODE_OAUTH_TOKEN");
+      });
+
+      it("auth precedence runs on the overlaid env, with the mode from process.env", async () => {
+        const both = { CLAUDE_CODE_OAUTH_TOKEN: "run-oauth", ANTHROPIC_API_KEY: "run-key" };
+        const auto = await runEnv({ envScope: false, env: both });
+        expect(auto.CLAUDE_CODE_OAUTH_TOKEN).toBe("run-oauth");
+        expect(auto).not.toHaveProperty("ANTHROPIC_API_KEY");
+        // An overlaid SWENY_AUTH reaches the agent but does not change sweny's own mode.
+        const overlaidMode = await runEnv({ envScope: false, env: { ...both, SWENY_AUTH: "api-key" } });
+        expect(overlaidMode.SWENY_AUTH).toBe("api-key");
+        expect(overlaidMode).not.toHaveProperty("ANTHROPIC_API_KEY");
+        vi.stubEnv("SWENY_AUTH", "api-key");
+        const apiKeyMode = await runEnv({ envScope: false, env: both });
+        expect(apiKeyMode.ANTHROPIC_API_KEY).toBe("run-key");
+      });
+
+      it("a staged run's push block lands on top of the overlay", async () => {
+        const env = await runEnv(
+          {
+            envScope: true,
+            env: {
+              GIT_ASKPASS: "/overlay/askpass",
+              GH_CONFIG_DIR: "/overlay/gh",
+              GIT_CONFIG_COUNT: "1",
+              GIT_CONFIG_KEY_0: "user.name",
+              GIT_CONFIG_VALUE_0: "overlay",
+              GIT_CONFIG_PARAMETERS: "'push.default'='current'",
+              GITHUB_TOKEN: "overlay-gh",
+            },
+          },
+          { agentAccess: { envVars: ["GITHUB_TOKEN"], domains: [], noPush: true } },
+        );
+        expect(env.GIT_ASKPASS).not.toBe("/overlay/askpass");
+        expect(env.GIT_ASKPASS).toMatch(/askpass$/);
+        expect(env.GH_CONFIG_DIR).not.toBe("/overlay/gh");
+        expect(env.GIT_CONFIG_KEY_0).toBe("user.name");
+        expect(env.GIT_CONFIG_KEY_1).toBe("credential.helper");
+        expect(Number(env.GIT_CONFIG_COUNT)).toBeGreaterThan(1);
+        expect(env).not.toHaveProperty("GIT_CONFIG_PARAMETERS");
+        expect(env).not.toHaveProperty("GITHUB_TOKEN");
+      });
+
+      it("reaches complete() as well as run()", async () => {
+        vi.stubEnv("SWENY_OVERLAY_RAW", "raw");
+        mockQuery.mockReturnValueOnce(resultStream("a"));
+        const h = new mod.ClaudeCodeHarness({
+          logger: noopLogger(),
+          envScope: false,
+          envRemove: ["SWENY_OVERLAY_RAW"],
+          env: { CLAUDE_CONFIG_DIR: "/run/claude", GITHUB_TOKEN: "overlay-gh" },
+        });
+        expect(await h.complete({ prompt: "p" })).toBe("a");
+        const env = mockQuery.mock.calls[0][0].options.env as Record<string, string>;
+        expect(env.CLAUDE_CONFIG_DIR).toBe("/run/claude");
+        expect(env).not.toHaveProperty("SWENY_OVERLAY_RAW");
+        expect(env).not.toHaveProperty("GITHUB_TOKEN");
+      });
+
+      it("copies the options: changing them after construction has no effect", async () => {
+        const overlay: Record<string, string> = { CLAUDE_CONFIG_DIR: "/run/claude" };
+        const remove = ["SWENY_OVERLAY_RAW"];
+        vi.stubEnv("SWENY_OVERLAY_RAW", "raw");
+        mockQuery.mockReturnValueOnce(resultStream("done"));
+        const h = new mod.ClaudeCodeHarness({ logger: noopLogger(), envScope: false, env: overlay, envRemove: remove });
+        overlay.CLAUDE_CONFIG_DIR = "/changed";
+        overlay.SWENY_OVERLAY_ADDED = "added";
+        remove.length = 0;
+        await h.run({ instruction: "x", context: {}, tools: [] });
+        const env = mockQuery.mock.calls[0][0].options.env as Record<string, string>;
+        expect(env.CLAUDE_CONFIG_DIR).toBe("/run/claude");
+        expect(env).not.toHaveProperty("SWENY_OVERLAY_ADDED");
+        expect(env).not.toHaveProperty("SWENY_OVERLAY_RAW");
+      });
+
+      // Frozen: what origin/main (before env / envRemove) built from this exact process env.
+      const FIXTURE_PROCESS_ENV = {
+        PATH: "/usr/bin:/bin",
+        HOME: "/home/op",
+        LANG: "C.UTF-8",
+        CI: "true",
+        SWENY_SANDBOX: "off",
+        ANTHROPIC_API_KEY: "parent-key",
+        CLAUDE_CODE_OAUTH_TOKEN: "parent-oauth",
+        CLAUDE_CODE_USE_BEDROCK: "1",
+        AWS_REGION: "us-east-1",
+        GITHUB_TOKEN: "parent-gh",
+        SLACK_BOT_TOKEN: "parent-slack",
+        DATABASE_URL: "postgres://x",
+      };
+      const FROZEN_SCOPED = {
+        PATH: "/usr/bin:/bin",
+        HOME: "/home/op",
+        LANG: "C.UTF-8",
+        CI: "true",
+        CLAUDE_CODE_OAUTH_TOKEN: "parent-oauth",
+        CLAUDE_CODE_USE_BEDROCK: "1",
+        AWS_REGION: "us-east-1",
+      };
+      const FROZEN_UNSCOPED = { ...FROZEN_SCOPED, SWENY_SANDBOX: "off", DATABASE_URL: "postgres://x" };
+
+      for (const [envScope, frozen] of [
+        [true, FROZEN_SCOPED],
+        [false, FROZEN_UNSCOPED],
+      ] as const) {
+        it(`no options build the same env as before this change (env scope ${envScope ? "on" : "off"})`, async () => {
+          const saved = process.env;
+          process.env = { ...FIXTURE_PROCESS_ENV };
+          try {
+            expect(await runEnv({ envScope })).toEqual(frozen);
+          } finally {
+            process.env = saved;
+          }
+        });
+      }
+
+      it("absent options and an empty overlay give the same env as the plain build", async () => {
+        vi.stubEnv("SWENY_OVERLAY_KEEP", "keep");
+        vi.stubEnv("ANTHROPIC_API_KEY", "parent-key");
+        vi.stubEnv("GITHUB_TOKEN", "parent-gh");
+        const absent = await runEnv({ envScope: false });
+        // `env: {}` and `envRemove: []` are set, so this build runs the overlay (copy) path.
+        const empty = await runEnv({ envScope: false, env: {}, envRemove: [] });
+        expect(empty).toEqual(absent);
+        expect(absent.SWENY_OVERLAY_KEEP).toBe("keep");
+        expect(absent.ANTHROPIC_API_KEY).toBe("parent-key");
+        expect(absent).not.toHaveProperty("GITHUB_TOKEN");
+      });
+
+      it("never mutates process.env", async () => {
+        vi.stubEnv("SWENY_OVERLAY_RAW", "raw");
+        const before = { ...process.env };
+        await runEnv({ envRemove: ["SWENY_OVERLAY_RAW"], env: { SWENY_OVERLAY_NEW: "x", HOME: "/run/home" } });
+        expect(process.env).toEqual(before);
+        expect(process.env.SWENY_OVERLAY_NEW).toBeUndefined();
+      });
+
+      it("preflight's default login probe sees the overlay and envRemove", async () => {
+        vi.stubEnv("ANTHROPIC_API_KEY", "parent-key");
+        vi.stubEnv("SWENY_AUTH", "auto");
+        const seen: Array<Record<string, string | undefined>> = [];
+        vi.resetModules();
+        vi.doMock("./auth.js", async (orig) => ({
+          ...(await orig<typeof import("./auth.js")>()),
+          claudeCodeAuth: (env: Record<string, string | undefined>) => {
+            seen.push({ ...env });
+            return { ok: true, via: "test" };
+          },
+        }));
+        const fresh = await import("./claude-code.js");
+        await new fresh.ClaudeCodeHarness({
+          logger: noopLogger(),
+          envRemove: ["SWENY_OVERLAY_RAW"],
+          env: { CLAUDE_CODE_OAUTH_TOKEN: "run-oauth", CLAUDE_CONFIG_DIR: "/run/claude", SWENY_AUTH: "api-key" },
+        }).preflight();
+        await new fresh.ClaudeCodeHarness({ logger: noopLogger(), envRemove: ["ANTHROPIC_API_KEY"] }).preflight();
+        vi.doUnmock("./auth.js");
+        expect(seen[0].CLAUDE_CODE_OAUTH_TOKEN).toBe("run-oauth");
+        expect(seen[0].CLAUDE_CONFIG_DIR).toBe("/run/claude");
+        // The overlay's login replaces the parent key for the probe as for the agent.
+        expect(seen[0]).not.toHaveProperty("ANTHROPIC_API_KEY");
+        // sweny's own settings stay as process.env has them.
+        expect(seen[0].SWENY_AUTH).toBe("auto");
+        expect(seen[1]).not.toHaveProperty("ANTHROPIC_API_KEY");
+      });
+
+      for (const [label, overlay, file] of [
+        ["HOME", { HOME: "/run/home" }, "/run/home/.claude/.credentials.json"],
+        ["CLAUDE_CONFIG_DIR", { CLAUDE_CONFIG_DIR: "/run/claude" }, "/run/claude/.credentials.json"],
+      ] as const) {
+        it(`the sandbox denies the login file an overlaid ${label} selects, and the host's`, async () => {
+          const env = { ...overlay } as Record<string, string>;
+          mockQuery.mockReturnValueOnce(resultStream("done"));
+          const h = new mod.ClaudeCodeHarness({
+            logger: noopLogger(),
+            sandbox: "strict",
+            sandboxProbe: () => undefined,
+            env,
+          });
+          await h.run({ instruction: "x", context: {}, tools: [] });
+          const paths = (mockQuery.mock.calls[0][0].options.sandbox.credentials.files as Array<{ path: string }>).map(
+            (f) => f.path,
+          );
+          expect(paths).toContain(file);
+          expect(paths).toContain(path.join(os.homedir(), ".claude", ".credentials.json"));
+        });
+      }
+
+      it("the sandbox denies an inherited CLAUDE_CONFIG_DIR login with no overlay", async () => {
+        vi.stubEnv("CLAUDE_CONFIG_DIR", "/opt/inherited-claude");
+        mockQuery.mockReturnValueOnce(resultStream("done"));
+        const h = new mod.ClaudeCodeHarness({ logger: noopLogger(), sandbox: "strict", sandboxProbe: () => undefined });
+        await h.run({ instruction: "x", context: {}, tools: [] });
+        const paths = (mockQuery.mock.calls[0][0].options.sandbox.credentials.files as Array<{ path: string }>).map(
+          (f) => f.path,
+        );
+        expect(paths).toContain("/opt/inherited-claude/.credentials.json");
+      });
+
+      it("an overlaid CLAUDE_CODE_USE_BEDROCK keeps the inherited AWS_* vars under scoping", async () => {
+        vi.stubEnv("CLAUDE_CODE_USE_BEDROCK", "");
+        vi.stubEnv("AWS_REGION", "us-east-1");
+        vi.stubEnv("AWS_ACCESS_KEY_ID", "aws-key");
+        const plain = await runEnv({ envScope: true });
+        expect(plain).not.toHaveProperty("AWS_REGION");
+        const env = await runEnv({ envScope: true, env: { CLAUDE_CODE_USE_BEDROCK: "1" } });
+        expect(env.CLAUDE_CODE_USE_BEDROCK).toBe("1");
+        expect(env.AWS_REGION).toBe("us-east-1");
+        expect(env.AWS_ACCESS_KEY_ID).toBe("aws-key");
+      });
+
+      it("preflight finds a Claude Code login under the overlaid HOME (real login helpers)", async () => {
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-cc-home-"));
+        try {
+          fs.mkdirSync(path.join(home, ".claude"));
+          fs.writeFileSync(path.join(home, ".claude", ".credentials.json"), "{}");
+          for (const k of [
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "CLAUDE_CONFIG_DIR",
+          ]) {
+            vi.stubEnv(k, "");
+          }
+          const h = new mod.ClaudeCodeHarness({ logger: noopLogger(), env: { HOME: home } });
+          expect(await h.preflight()).toMatchObject({ ok: true });
+        } finally {
+          fs.rmSync(home, { recursive: true, force: true });
+        }
+      });
+
+      it("rejects a bad overlay at construction", () => {
+        const make = (o: Record<string, unknown>) => () => new mod.ClaudeCodeHarness({ logger: noopLogger(), ...o });
+        expect(make({ env: { A: 1 } })).toThrow(/env: value for A must be a string/);
+        expect(make({ env: { "": "x" } })).toThrow(/invalid env var name/);
+        expect(make({ env: { "A=B": "x" } })).toThrow(/invalid env var name/);
+        expect(make({ env: { "A\0B": "x" } })).toThrow(/invalid env var name/);
+        expect(make({ envRemove: ["A=B"] })).toThrow(/envRemove: invalid env var name/);
+        expect(make({ envRemove: "A" })).toThrow(/envRemove: must be an array/);
+      });
     });
 
     it("policy.deny classes reach the SDK as native disallowedTools, merged with the legacy names", async () => {
