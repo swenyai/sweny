@@ -850,6 +850,8 @@ async function executeRun(
             safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
           },
         });
+        // Commit the attempt's spend before anything here can throw (#549); `finish` below reads the breach.
+        attemptBudget?.settle(result.usage);
       } catch (err) {
         if (journalFault) throw journalFault;
         // The attempt ended abnormally (abort, timeout, harness error): whether its agent was
@@ -857,8 +859,9 @@ async function executeRun(
         journal?.uncontained?.(usageNode, iteration);
         throw err;
       } finally {
-        parentSignal?.removeEventListener("abort", onParentAbort);
+        // A throw from the harness still commits the spend it reported live; a no-op once settled.
         attemptBudget?.dispose();
+        parentSignal?.removeEventListener("abort", onParentAbort);
       }
       if (journalFault) throw journalFault;
       // Key secrecy (and so the journal's spend and write records) holds only for a contained agent.
@@ -881,8 +884,8 @@ async function executeRun(
         result = { ...result, degraded: [...new Set([...(result.degraded ?? []), ...budgetCheck.degraded])] };
       }
       if (attemptBudget) {
-        // Commit this attempt's spend; a live stop, or a crossing visible only
-        // in the final usage, fails the node whatever else it did.
+        // The spend was committed when the harness returned; a live stop, or a
+        // crossing visible only in the final usage, fails the node whatever else it did.
         const breach = attemptBudget.finish(result.usage);
         if (breach) {
           const error = describeOverrun(breach, currentId);

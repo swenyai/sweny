@@ -19,6 +19,24 @@ An id that is not a built-in template is installed from [swenyai/marketplace](ht
 
 In a fresh repo, walks you through provider inference, credential collection, and writes `.sweny.yml` + `.env` + `.sweny/workflows/<id>.yml`. In a repo that already has `.sweny.yml`, adds the new workflow non-destructively — existing config is preserved and `.env` is append-only.
 
+## sweny try
+
+A recorded demo. Replays a saved `explain-repo` run through the real executor, so you see the real progress lines, the answer, the receipt ticket and the PR comment, with no login, no credentials, no network and no model calls.
+
+```bash
+sweny try
+sweny try --fast        # skip the pacing
+```
+
+The recording is illustrative sample data (a fictional repo, hand-written timings and token counts), not output from a real run. Nothing runs and no files are written. When you are ready for a real run, use [`sweny new`](#sweny-new).
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--fast` | Replay instantly instead of pacing the progress | `false` |
+| `--pace <ms>` | Milliseconds each node takes to replay | `1200` |
+| `--comment-file <path>` | Also write the PR-comment markdown to `<path>` | none |
+| `--record <file.svg>` | Write the demo as an animated, self-contained SVG terminal recording to `<file.svg>` | none |
+
 ## sweny check
 
 Verify that all configured provider credentials are valid and can connect.
@@ -403,6 +421,8 @@ sweny runs diff --workflow triage
 | `--workflow <id>` | `runs`, `runs diff` | Only runs of this workflow; for `diff`, the pair is its last two runs | all workflows |
 | `--limit <n>` | `runs` | Max runs to show | `20` |
 | `--json` | `runs`, `runs diff` | Machine-readable output, no color | `false` |
+
+After your first successful run in a workspace, `sweny workflow run` prints a short "Next" note once: `sweny runs`, `sweny runs diff`, and a link to [scheduling](/action/scheduling/). It is never printed in CI, with `--json`, `--stream` or `--dry-run`, or after a failed run, and it respects `NO_COLOR`. The marker that records it was shown lives in the sweny state dir (`$SWENY_STATE_DIR`, else `$XDG_STATE_HOME/sweny`, else `~/.local/state/sweny`), not in your repo.
 
 ### sweny runs diff
 

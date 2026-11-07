@@ -82,6 +82,7 @@ import {
 } from "./run-output.js";
 import { writeRunComment } from "./comment-output.js";
 import { writeReceipt } from "./ticket.js";
+import { writeWhatNext } from "./first-success.js";
 import { createNodeProgress, toolCallsText } from "./progress.js";
 import { applyNoColor, createPaint } from "./style.js";
 import { colorEnabled, glyphsFor, richOutput, spinnerFramesFor, supportsUnicode } from "./terminal.js";
@@ -1343,6 +1344,12 @@ export async function workflowRunAction(
     }
     await writeReceipt(receipt, { workflow: workflow.id, runId, stream: process.stdout });
     if (sinceLast) console.log(createPaint(colorEnabled(process.stdout)).muted(`  ${formatSinceLast(sinceLast)}`));
+    // First successful real run in this workspace: one "what next" note (#534).
+    writeWhatNext({
+      stream: process.stdout,
+      ok: true,
+      quiet: Boolean(options.stream) || config.dryRun,
+    });
     process.exit(0);
   } catch (err) {
     // A refused resume ran nothing: leave the run's journal and history as they were.

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { classifySource, sourceZ } from "./sources.js";
+import { classifySource, sourceZ, type DnsLookup } from "./sources.js";
 import { hashContent, resolveSource, resolveSources } from "./source-resolver.js";
 
 const fileTmp = path.join(tmpdir(), "sweny-sources-file-test");
@@ -13,6 +13,8 @@ const baseCtx = () => ({
   env: {} as NodeJS.ProcessEnv,
   authConfig: {} as Record<string, string>,
   offline: false,
+  // Deterministic public address: the SSRF guard must never do real DNS in tests.
+  dnsLookup: vi.fn<DnsLookup>(async () => ["93.184.216.34"]),
   logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
 });
 
@@ -171,7 +173,9 @@ describe("resolveSource (fetch)", () => {
         headers: { "content-type": "text/markdown" },
       });
     });
-    const resolved = await resolveSource("https://example.com/rules.md", "rules[0]", baseCtx());
+    const ctx = baseCtx();
+    const resolved = await resolveSource("https://example.com/rules.md", "rules[0]", ctx);
+    expect(ctx.dnsLookup).toHaveBeenCalledWith("example.com");
     expect(resolved.content).toBe("# Shared rules\n\nBe careful.");
     expect(resolved.kind).toBe("url");
     expect(resolved.resolver).toBe("fetch");
