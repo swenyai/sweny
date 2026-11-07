@@ -35,7 +35,9 @@
  * socat for step 1: install it with `npm i -g @anthropic-ai/sandbox-runtime`, or
  * point `SWENY_SRT_PATH` at the binary. Linux also needs bubblewrap, socat and
  * ripgrep, and unprivileged user namespaces (Ubuntu 23.10+:
- * `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`).
+ * `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`; Ubuntu 26.04
+ * also `sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict`, see
+ * {@link usernsHint}).
  *
  * Modes are the step 1 modes, unchanged (`SWENY_SANDBOX`, default `auto` in CI
  * and `off` locally): `off` never wraps; `auto` wraps when a wrapper is
@@ -48,7 +50,14 @@ import { existsSync, realpathSync } from "node:fs";
 import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
-import { DEFAULT_SANDBOX_DOMAINS, parseList, resolveSandboxMode, type SandboxMode } from "../agent-env.js";
+import {
+  DEFAULT_SANDBOX_DOMAINS,
+  parseList,
+  probeLine,
+  resolveSandboxMode,
+  usernsHint,
+  type SandboxMode,
+} from "../agent-env.js";
 import { runStateRoot } from "../journal.js";
 import { policyGate } from "./policy.js";
 import type { HarnessCapabilities, NodePolicy, PolicyWrappers } from "./types.js";
@@ -350,19 +359,8 @@ async function srtWorks(srtPath: string, env: Record<string, string | undefined>
         { env: { PATH: env.PATH ?? "", HOME: dir }, timeout: 30_000 },
         (err, _stdout, stderr) => {
           if (!err) return resolve(undefined);
-          const first =
-            String(stderr || err.message)
-              .trim()
-              .split("\n")[0] || "unknown error";
-          const userns = /user namespace|uid map|setting up uid|Operation not permitted|Permission denied/i.test(
-            String(stderr),
-          );
-          resolve(
-            `srt cannot sandbox on this host (${first})` +
-              (userns
-                ? "; unprivileged user namespaces look restricted (Ubuntu 23.10+: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0)"
-                : ""),
-          );
+          const first = probeLine(String(stderr || err.message));
+          resolve(`srt cannot sandbox on this host (${first})${usernsHint(String(stderr))}`);
         },
       );
     });

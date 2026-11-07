@@ -12,6 +12,10 @@ import {
   resolveSandboxMode,
   resolveAgentSandbox,
   checkSandboxSupport,
+  bwrapWorks,
+  systemBin,
+  usernsHint,
+  type ProbeResult,
   DEFAULT_SANDBOX_DOMAINS,
   resolveEnvScope,
   formatWithheldWarning,
@@ -170,6 +174,120 @@ describe("checkSandboxSupport", () => {
         () => "bwrap cannot create a sandbox (x)",
       ),
     ).toMatch(/bwrap cannot create a sandbox/);
+  });
+});
+
+describe("bwrapWorks", () => {
+  const BASE = ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"];
+  const ok = (stdout = ""): ProbeResult => ({ status: 0, stdout, stderr: "" });
+  const bad = (stderr: string): ProbeResult => ({ status: 1, stdout: "", stderr });
+  const UTIL_LINUX_HELP =
+    "Usage:\n unshare [options] [<program> [<argument>...]]\n -r, --map-root-user  map the current user to root\n";
+  const bins = (names: Record<string, string>) => (name: string) => names[name];
+  const both = bins({ bwrap: "/usr/bin/bwrap", unshare: "/usr/bin/unshare" });
+
+  it("runs bwrap, checks unshare supports --map-root-user, then nests it by absolute path", () => {
+    const calls: string[][] = [];
+    const run = (file: string, args: string[]) => {
+      calls.push([file, ...args]);
+      return args[0] === "--help" ? ok(UTIL_LINUX_HELP) : ok();
+    };
+    expect(bwrapWorks(run, both)).toBeUndefined();
+    expect(calls).toEqual([
+      ["/usr/bin/bwrap", ...BASE, "true"],
+      ["/usr/bin/unshare", "--help"],
+      ["/usr/bin/bwrap", ...BASE, "/usr/bin/unshare", "--user", "--map-root-user", "true"],
+    ]);
+  });
+
+  it("Ubuntu 26.04: plain bwrap works but the nested user namespace is denied", () => {
+    const run = (_file: string, args: string[]) =>
+      args[0] === "--help"
+        ? ok(UTIL_LINUX_HELP)
+        : args.includes("--map-root-user")
+          ? bad("unshare: write failed /proc/self/uid_map: Operation not permitted\n")
+          : ok();
+    const reason = bwrapWorks(run, both);
+    expect(reason).toMatch(
+      /^bwrap cannot nest a user namespace, which the sandbox's seccomp helper needs \(unshare: write failed \/proc\/self\/uid_map: Operation not permitted\)/,
+    );
+    expect(reason).toContain("sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict");
+    expect(reason).toContain("kernel.apparmor_restrict_unprivileged_userns=0");
+  });
+
+  it("a plain bwrap failure is reported first and skips the rest", () => {
+    const calls: string[][] = [];
+    const reason = bwrapWorks((file, args) => {
+      calls.push(args);
+      return bad("bwrap: setting up uid map: Permission denied\nmore");
+    }, both);
+    expect(calls).toHaveLength(1);
+    expect(reason).toMatch(
+      /^bwrap cannot create a sandbox \(bwrap: setting up uid map: Permission denied\); unprivileged/,
+    );
+  });
+
+  it("skips the nested run when unshare is not in a system directory", () => {
+    const calls: string[][] = [];
+    const run = (_f: string, args: string[]) => (calls.push(args), ok());
+    expect(bwrapWorks(run, bins({ bwrap: "/usr/bin/bwrap" }))).toBeUndefined();
+    expect(calls).toEqual([[...BASE, "true"]]);
+  });
+
+  it("skips the nested run when unshare has no --map-root-user (busybox), instead of disabling the sandbox", () => {
+    const calls: string[][] = [];
+    const run = (_f: string, args: string[]) => {
+      calls.push(args);
+      return args[0] === "--help"
+        ? {
+            status: 0,
+            stdout: "",
+            stderr:
+              "BusyBox v1.36.1 multi-call binary.\n\nUsage: unshare [OPTIONS] [PROG ARGS]\n\t-U\tUnshare user namespace\n",
+          }
+        : ok();
+    };
+    expect(bwrapWorks(run, both)).toBeUndefined();
+    expect(calls.some((a) => a.includes("--map-root-user"))).toBe(false);
+  });
+
+  it("only looks for bwrap in system directories, never PATH", () => {
+    const run = () => ok();
+    expect(bwrapWorks(run, bins({}))).toMatch(
+      /^bwrap is not installed in \/usr\/bin, \/bin, \/usr\/local\/bin or \/usr\/sbin/,
+    );
+  });
+
+  it("echoes one sanitized, capped line of the probe's stderr", () => {
+    const long = "x".repeat(500);
+    const reason = bwrapWorks(() => bad(`bwrap: \u001b[31mred\u0007 ${long}\nsecond line`), both)!;
+    expect(reason).not.toContain("second line");
+    expect(reason).not.toMatch(/[\u0000-\u001f\u007f]/);
+    const echoed = /\((.*?)\)/.exec(reason)![1];
+    expect(echoed.length).toBeLessThanOrEqual(200);
+    expect(echoed.startsWith("bwrap: ?[31mred? x")).toBe(true);
+  });
+});
+
+describe("systemBin", () => {
+  it("resolves only from /usr/bin, /bin, /usr/local/bin and /usr/sbin, in that order", () => {
+    const seen: string[] = [];
+    expect(systemBin("bwrap", (p) => (seen.push(p), p === "/usr/local/bin/bwrap"))).toBe("/usr/local/bin/bwrap");
+    expect(seen).toEqual(["/usr/bin/bwrap", "/bin/bwrap", "/usr/local/bin/bwrap"]);
+    expect(systemBin("bwrap", () => false)).toBeUndefined();
+  });
+});
+
+describe("usernsHint", () => {
+  it("names the sysctl and the Ubuntu 26.04 bwrap profile for the apply-seccomp error", () => {
+    const hint = usernsHint(
+      "apply-seccomp: write /proc/self/setgroups (nested userns is capability-restricted; caller must provide CAP_SYS_ADMIN): Permission denied",
+    );
+    expect(hint).toContain("sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0");
+    expect(hint).toContain("sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict");
+  });
+  it("is empty for an unrelated error", () => {
+    expect(usernsHint("bwrap: No such file or directory")).toBe("");
   });
 });
 

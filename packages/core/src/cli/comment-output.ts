@@ -4,7 +4,8 @@
  * `--comment-file`, and any runner (the GitHub Action, GitLab, a script) posts it.
  *
  * METADATA ONLY. Node names, statuses, counts, and durations. Never prompts,
- * tool inputs, node outputs, errors, or model prose.
+ * tool inputs, node outputs, errors, or model prose. The optional "since last
+ * run" line carries counts of added and resolved answers, never their text.
  */
 
 import { workspaceRoot, writeFileNoFollow } from "../safe-file.js";
@@ -22,6 +23,8 @@ export interface RunCommentOptions {
   durationsMs?: Record<string, number>;
   /** Run id; the ticket shows its short hash. */
   runId?: string;
+  /** Pre-rendered "since last run" markdown line (run-answers.ts formatSinceLastMarkdown): counts only. */
+  sinceLast?: string | null;
 }
 
 /** The receipt ticket as a fenced block, the same card a TTY run ends on. */
@@ -62,6 +65,7 @@ export function formatRunComment(
     "",
     ticketBlock(workflow, summary, opts.runId),
     "",
+    ...(opts.sinceLast ? [opts.sinceLast, ""] : []),
     toMermaidBlock(workflow, { state, trace: opts.trace }),
     "",
     "<details>",

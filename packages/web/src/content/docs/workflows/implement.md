@@ -3,7 +3,7 @@ title: Implement Workflow
 description: The built-in workflow for implementing fixes from issues.
 ---
 
-The implement workflow takes an issue, analyzes it, writes a fix, opens a pull request, and notifies the team. It uses Claude Code's full coding capabilities through the `github` skill to make real code changes.
+The implement workflow takes an issue, analyzes it, writes a fix, opens a pull request, and notifies the team. It uses the coding agent's full capabilities through the `github` skill to make real code changes.
 
 ## Overview
 
@@ -148,7 +148,7 @@ The `analyze` node produces structured output that drives the conditional routin
 
 ## Conditional routing
 
-After `analyze` completes, Claude evaluates two conditions:
+After `analyze` completes, the coding agent evaluates two conditions:
 
 - **To `implement`**: "Fix risk level is low or medium and a clear plan exists"
 - **To `skip`**: "Fix is too complex, risky, or unclear"
