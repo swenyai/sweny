@@ -22,6 +22,7 @@ import { openNoFollow } from "../safe-file.js";
 export const RUN_HISTORY_SCHEMA_VERSION = 1;
 export const RUN_HISTORY_DIR = path.join(".sweny", "runs");
 export const RUN_HISTORY_KEEP = 200;
+const RECORD_READ_MAX_BYTES = 1024 * 1024;
 
 export type RunStatus = "success" | "failed" | "crashed";
 
@@ -294,7 +295,11 @@ export function listRuns(cwd: string = process.cwd()): RunRecord[] {
   const out: RunRecord[] = [];
   for (const f of files) {
     try {
-      const parsed = JSON.parse(fs.readFileSync(path.join(dir, f), "utf-8"));
+      // A link is not history: the target may be anywhere, and an agent can plant it.
+      const file = path.join(dir, f);
+      const st = fs.lstatSync(file);
+      if (!st.isFile() || st.size > RECORD_READ_MAX_BYTES) continue;
+      const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
       if (isRecord(parsed) && RUN_ID_RE.test(parsed.run_id) && f === `${parsed.run_id}.json`) out.push(parsed);
     } catch {
       // corrupt record: skip

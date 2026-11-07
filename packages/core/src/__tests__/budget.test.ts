@@ -4,7 +4,7 @@
  * Fake agents report usage the way a real harness does: live, through
  * `onUsage`, or only on the finished result. No test calls a model.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { execute } from "../executor.js";
 import type { ExecuteOptions } from "../executor.js";
 import { createSkillMap } from "../skills/index.js";
@@ -17,6 +17,7 @@ import { summarizeRun, formatReceipt, WORKFLOW_RUN_OPTIONS } from "../cli/run-ou
 import { parseSpendFlags } from "../cli/workflow-input.js";
 import type { AgentHarness, HarnessCapabilities, HarnessRunRequest, HarnessRunResult } from "../harness/types.js";
 import type { Claude, NodeResult, NodeUsage, Workflow } from "../types.js";
+import type { ExecutionJournal } from "../journal.js";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -375,6 +376,116 @@ describe("BudgetGuard", () => {
       tokens: 10,
       costUsd: 5,
     });
+  });
+});
+
+describe("settle: every attempt's spend is committed exactly once (#549)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A journal that keeps nothing; `usage` runs the given hook. */
+  const journalOf = (usage: ExecutionJournal["usage"]): ExecutionJournal => ({
+    begin() {},
+    replay: () => undefined,
+    nodeStart() {},
+    checkpoint() {},
+    wrapWrites: (_n, _i, skills) => skills,
+    nodeEnd() {},
+    route() {},
+    usage,
+  });
+
+  /** Every spend the run's guard commits, and the guard itself. */
+  const commits = () => {
+    const spy = vi.spyOn(BudgetGuard.prototype, "commit");
+    return {
+      calls: () => spy.mock.calls.map(([s]) => s),
+      totals: () => (spy.mock.contexts[0] as BudgetGuard | undefined)?.totals,
+    };
+  };
+
+  it("a journal append that throws after the harness returned usage still commits that spend", async () => {
+    const seen = commits();
+    // Live 25 tokens, final 70: settling only in `finally` (live spend) would commit 25, not 70.
+    const { calls, run } = scripted({
+      a: [{ live: [{ inputTokens: 20, outputTokens: 5 }], final: { inputTokens: 60, outputTokens: 10, costUsd: 0.3 } }],
+      b: [{}],
+    });
+    const appends: boolean[] = [];
+    const journal = journalOf((_n, _i, _a, _u, final) => {
+      appends.push(final);
+      if (final) throw new Error("usage append failed");
+    });
+
+    await expect(
+      exec(wf({ budget: { tokens: 1000 } }), harnessOf(CLAUDE_CODE_CAPABILITIES, run), { journal }),
+    ).rejects.toThrow("usage append failed");
+
+    expect(appends).toEqual([false, true]);
+    expect(seen.calls()).toEqual([{ tokens: 70, costUsd: 0.3 }]);
+    expect(seen.totals()).toEqual({ tokens: 70, costUsd: 0.3 });
+    expect(calls.map((c) => c.node)).toEqual(["a"]);
+  });
+
+  it("a harness that throws after live usage commits what it reported live", async () => {
+    const seen = commits();
+    const harness = harnessOf(CLAUDE_CODE_CAPABILITIES, async (req) => {
+      req.onUsage?.({ inputTokens: 12, outputTokens: 3 });
+      req.onUsage?.({ inputTokens: 30, outputTokens: 10, costUsd: 0.2 });
+      throw new Error("harness died");
+    });
+
+    await expect(exec(wf({ budget: { tokens: 1000 } }), harness)).rejects.toThrow("harness died");
+
+    expect(seen.calls()).toEqual([{ tokens: 40, costUsd: 0.2 }]);
+    expect(seen.totals()).toEqual({ tokens: 40, costUsd: 0.2 });
+  });
+
+  it("a crossing seen only in the final usage still fails the node, and is counted once", async () => {
+    const seen = commits();
+    const { run } = scripted({ a: [{ final: { inputTokens: 80, outputTokens: 40 } }], b: [{}] });
+    const { results } = await exec(wf({ budget: { tokens: 100 } }), harnessOf(CODEX_CAPABILITIES, run));
+
+    expect(results.get("a")!.budget).toEqual({ scope: "run", unit: "tokens", limit: 100, spent: 120 });
+    expect(seen.calls()).toEqual([{ tokens: 120, costUsd: 0 }]);
+  });
+
+  it("settle commits once: finish and dispose after it change nothing and return the same breach", () => {
+    const guard = new BudgetGuard({ tokens: 100 });
+    const node = guard.node({});
+    const a = node.attempt();
+    a.onUsage({ inputTokens: 10, costUsd: 0.1 });
+    const breach = a.settle({ inputTokens: 90, outputTokens: 30, costUsd: 0.05 });
+    expect(breach).toEqual({ scope: "run", unit: "tokens", limit: 100, spent: 120 });
+    expect(guard.totals).toEqual({ tokens: 120, costUsd: 0.1 });
+
+    expect(a.finish({ inputTokens: 500, outputTokens: 500 })).toBe(breach);
+    a.dispose();
+    expect(a.settle()).toBe(breach);
+    expect(guard.totals).toEqual({ tokens: 120, costUsd: 0.1 });
+    expect(node.committed).toEqual({ tokens: 120, costUsd: 0.1 });
+  });
+
+  it("dispose alone settles the live spend once, and judges no breach on it after the commit", () => {
+    const guard = new BudgetGuard({ tokens: 10 });
+    const a = guard.node({}).attempt();
+    a.onUsage({ inputTokens: 4, outputTokens: 2, costUsd: 0.5 });
+    a.dispose();
+    a.dispose();
+    expect(guard.totals).toEqual({ tokens: 6, costUsd: 0.5 });
+    // Judged before the commit (6 of 10), not after it (12 of 10).
+    expect(a.finish(undefined)).toBeUndefined();
+    expect(guard.totals).toEqual({ tokens: 6, costUsd: 0.5 });
+  });
+
+  it("a settled attempt stops listening to the caller's signal", () => {
+    const guard = new BudgetGuard({});
+    const outer = new AbortController();
+    const a = guard.node({}).attempt(outer.signal);
+    a.settle();
+    outer.abort();
+    expect(a.signal.aborted).toBe(false);
   });
 });
 
