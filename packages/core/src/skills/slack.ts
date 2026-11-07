@@ -34,8 +34,11 @@ export const slack: Skill = {
         type: "object",
         properties: {
           text: { type: "string", description: "Message text (Slack mrkdwn supported)" },
-          channel: { type: "string", description:
-              "Channel ID or name. Requires SLACK_BOT_TOKEN; with only a webhook configured, setting this is an error. Omit to post to the webhook's channel." },
+          channel: {
+            type: "string",
+            description:
+              "Channel ID or name. Requires SLACK_BOT_TOKEN; with only a webhook configured, setting this is an error. Omit to post to the webhook's channel.",
+          },
           blocks: {
             type: "array",
             description: "Optional Block Kit blocks for rich formatting",

@@ -17,7 +17,7 @@ The Slack skill lets Claude send messages to your Slack workspace. It supports t
 
 | Tool | Description |
 |------|-------------|
-| `slack_send_message` | Send a message to a Slack channel via webhook or API |
+| `slack_send_message` | Send a message to Slack (webhook channel, or a named channel with a bot token) |
 | `slack_send_thread_reply` | Reply to an existing message thread (requires bot token) |
 
 ## Setup
