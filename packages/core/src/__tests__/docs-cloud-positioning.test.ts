@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 import { Command } from "commander";
 import { registerImplementCommand, registerTriageCommand } from "../cli/config.js";
 import { SUPPORTED_AGENTS, unsupportedAgentError } from "../harness/agents.js";
@@ -316,4 +317,45 @@ describe("supported agents are listed the same way everywhere", () => {
       expect(text).toContain("acp:");
     });
   }
+});
+
+/**
+ * The Action inputs page documents swenyai/sweny's action.yml and nothing
+ * else. It once listed ~100 inputs that belong to the separate triage and e2e
+ * actions, so a reader copying them got silent no-ops (#531).
+ */
+describe("action inputs page matches action.yml", () => {
+  const actionInputs = (
+    parseYaml(read("action.yml")) as {
+      inputs: Record<string, { required?: boolean; default?: string }>;
+    }
+  ).inputs;
+
+  const documented = new Map<string, { required: boolean; def: string }>();
+  for (const line of read("packages/web/src/content/docs/action/inputs.md").split("\n")) {
+    // | `name` | description (may hold \|) | Yes/No | `default` or -- |
+    const m = line.match(/^\| `([a-z][a-z0-9-]*)` \|.*\| (Yes|No) \| (`[^`]*`|--) \|$/);
+    if (!m) continue;
+    expect(documented.has(m[1]), `${m[1]} is documented twice`).toBe(false);
+    documented.set(m[1], { required: m[2] === "Yes", def: m[3] === "--" ? "" : m[3].slice(1, -1) });
+  }
+
+  it("documents every action.yml input", () => {
+    const missing = Object.keys(actionInputs).filter((n) => !documented.has(n));
+    expect(missing, "in action.yml but not on the inputs page").toEqual([]);
+  });
+
+  it("documents no input action.yml lacks", () => {
+    const extra = [...documented.keys()].filter((n) => !(n in actionInputs));
+    expect(extra, "on the inputs page but not in action.yml").toEqual([]);
+  });
+
+  it("matches required flag and default for every input", () => {
+    for (const [name, spec] of Object.entries(actionInputs)) {
+      const doc = documented.get(name);
+      if (!doc) continue;
+      expect(doc.required, `${name} required`).toBe(spec.required === true);
+      expect(doc.def, `${name} default`).toBe(spec.default ?? "");
+    }
+  });
 });
