@@ -6,6 +6,13 @@
  */
 
 import type { BranchPusher, Skill, ToolContext, SkillCategory, ToolRefusal } from "../types.js";
+import {
+  PR_COMMENT_SKIP_REASON,
+  isRunPullRequest,
+  prCommentSummaryLine,
+  upsertPrComment,
+  type CommentAuthor,
+} from "../pr-comment.js";
 
 // #473: the sweny-side head-branch push arrives as `ctx.pushBranch`, bound to
 // the run's checkout by the Node executor (skills/git-push.ts). This module
@@ -55,6 +62,69 @@ async function gh(path: string, ctx: ToolContext, init?: RequestInit): Promise<u
   });
   if (!res.ok) throw new GitHubApiError(res.status, await res.text());
   return res.json();
+}
+
+/** The GraphQL endpoint beside the REST base: `/api/graphql` on GHES, `/graphql` on github.com. */
+export function githubGraphqlUrl(apiUrl: string | undefined): string {
+  const base = githubApiBase(apiUrl);
+  return /\/api\/v3$/.test(base) ? base.replace(/\/api\/v3$/, "/api/graphql") : `${base}/graphql`;
+}
+
+/**
+ * The account this token posts as (#536). A PAT or OAuth token: `GET /user`.
+ * An installation token (the Actions `github.token`, a GitHub App) gets 403
+ * there, so ask GraphQL's `viewer`. Probed live on Actions (2026-11-07): the
+ * job token answers `{ login: "github-actions[bot]", __typename: "User" }`,
+ * so a "[bot]" suffix (which a user login cannot contain) or a `Bot` typename
+ * means a bot, shown by REST as `<name>[bot]` with type `Bot`; anything else
+ * is a user (a PAT whose `/user` read failed once). An HTTP error, a GraphQL
+ * `errors` array or an odd login leaves the account unknown.
+ */
+export async function resolveCommentAuthor(ctx: ToolContext): Promise<CommentAuthor | undefined> {
+  try {
+    const user = (await gh("/user", ctx)) as { login?: unknown; type?: unknown } | null;
+    if (typeof user?.login === "string" && user.login) {
+      return { login: user.login, type: user.type === "Bot" ? "Bot" : "User" };
+    }
+  } catch {
+    // An installation token cannot read /user; ask GraphQL.
+  }
+  try {
+    const res = await fetch(githubGraphqlUrl(ctx.githubApiUrl), {
+      method: "POST",
+      headers: { Authorization: `bearer ${ctx.config.GITHUB_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ query: "query { viewer { login __typename } }" }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) return undefined;
+    const json = (await res.json()) as {
+      data?: { viewer?: { login?: unknown; __typename?: unknown } | null } | null;
+      errors?: unknown;
+    } | null;
+    if (json?.errors !== undefined && json?.errors !== null) return undefined;
+    const login = json?.data?.viewer?.login;
+    const kind = json?.data?.viewer?.__typename;
+    if (typeof login !== "string" || !/^[A-Za-z0-9-]+(\[bot\])?$/.test(login)) return undefined;
+    if (login.endsWith("[bot]") || kind === "Bot") {
+      return { login: `${login.replace(/\[bot\]$/, "")}[bot]`, type: "Bot" };
+    }
+    if (kind === "User") return { login, type: "User" };
+  } catch {
+    // Unknown account: handled by upsertPrComment.
+  }
+  return undefined;
+}
+
+/** One lookup per run: the run context object is the same for every tool call in a run. */
+const commentAuthors = new WeakMap<object, Promise<CommentAuthor | undefined>>();
+
+function commentAuthorFor(ctx: ToolContext, run: object): Promise<CommentAuthor | undefined> {
+  let author = commentAuthors.get(run);
+  if (!author) {
+    author = resolveCommentAuthor(ctx);
+    commentAuthors.set(run, author);
+  }
+  return author;
 }
 
 /**
@@ -309,11 +379,30 @@ export const github: Skill = {
         },
         required: ["repo", "issue_number", "body"],
       },
-      handler: async (input: { repo: string; issue_number: number; body: string }, ctx) =>
-        gh(`/repos/${input.repo}/issues/${input.issue_number}/comments`, ctx, {
+      handler: async (input: { repo: string; issue_number: number; body: string }, ctx) => {
+        // #536: on the run's own PR (identified by the runtime, not the input), one
+        // marked comment per workflow, updated in place; nothing written when the
+        // findings are empty or unchanged. Every other target appends as before.
+        if (ctx.run && isRunPullRequest(ctx.run, input.repo, Number(input.issue_number))) {
+          const result = await upsertPrComment(
+            { repo: input.repo, number: Number(input.issue_number), body: String(input.body ?? "") },
+            ctx.run,
+            (path, init) => gh(path, ctx, init),
+            () => commentAuthorFor(ctx, ctx.run!),
+          );
+          ctx.summary?.(prCommentSummaryLine(ctx.run, result));
+          const skipped = PR_COMMENT_SKIP_REASON[result.outcome];
+          return {
+            ...(result.id !== undefined ? { id: result.id } : {}),
+            ...(result.html_url ? { html_url: result.html_url } : {}),
+            ...(skipped ? { skipped } : {}),
+          };
+        }
+        return gh(`/repos/${input.repo}/issues/${input.issue_number}/comments`, ctx, {
           method: "POST",
           body: JSON.stringify({ body: input.body }),
-        }),
+        });
+      },
     },
     {
       name: "github_create_pr",

@@ -101,7 +101,7 @@ describe("formatRunComment", () => {
   });
 
   it("marker id is comment-safe", () => {
-    expect(runCommentMarker("a--b>c d")).toBe("<!-- sweny-run-comment:a-b_c_d -->");
+    expect(runCommentMarker("a--b>c d")).toBe("<!-- sweny-run-comment:a%2D-b%3Ec%20d -->");
   });
 
   it("escapes table-breaking node names", () => {
@@ -136,16 +136,32 @@ describe("formatRunComment: since last run", () => {
 });
 
 describe("writeRunComment", () => {
-  it("writes the file, creating parent dirs", () => {
+  it("writes an empty file, creating parent dirs, so the Action posts no metadata comment (#536)", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-comment-"));
     const file = path.join(dir, "nested", "c.md");
-    const results = new Map<string, NodeResult>([["gather", ok()]]);
-    expect(writeRunComment(file, workflow, results, summarizeRun(results, 1))).toBe(true);
-    expect(fs.readFileSync(file, "utf8")).toContain("sweny-run-comment:pr-review");
+    expect(writeRunComment(file)).toBe(true);
+    expect(fs.readFileSync(file, "utf8")).toBe("");
+  });
+  it("empties a file an earlier step left behind", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-comment-"));
+    const file = path.join(dir, "c.md");
+    fs.writeFileSync(file, "<!-- sweny-run-comment:pr-review -->\nold billboard");
+    expect(writeRunComment(file)).toBe(true);
+    expect(fs.readFileSync(file, "utf8")).toBe("");
+  });
+  it("never follows a link on the path", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-comment-"));
+    const target = path.join(dir, "target");
+    const link = path.join(dir, "c.md");
+    fs.writeFileSync(target, "untouched");
+    fs.symlinkSync(target, link);
+    expect(writeRunComment(link)).toBe(true);
+    expect(fs.readFileSync(target, "utf8")).toBe("untouched");
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(link, "utf8")).toBe("");
   });
   it("never throws", () => {
-    const results = new Map<string, NodeResult>([["gather", ok()]]);
-    expect(writeRunComment("/dev/null/x/c.md", workflow, results, summarizeRun(results, 1))).toBe(false);
+    expect(writeRunComment("/dev/null/x/c.md")).toBe(false);
   });
 });
 

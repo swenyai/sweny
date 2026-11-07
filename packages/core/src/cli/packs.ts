@@ -1009,8 +1009,7 @@ nodes:
       (type comment). It can only land on context.input.pr_number; sweny
       posts it after this step.
 
-      Start the body with the line: <!-- sweny-pr-risk -->
-      Then: "Risk: LEVEL" with the size, then the reasons as short bullets
+      Start the body with "Risk: LEVEL" and the size, then the reasons as short bullets
       (each naming its evidence), then the focus pointers, then a last line:
       "Read-only scope review. No code was changed."
       Keep it under 15 lines. No emoji walls, no praise.
@@ -1063,7 +1062,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write # the review comment and the run billboard
+  pull-requests: write # the one review comment, updated in place
 
 concurrency:
   group: sweny-pr-risk-\${{ github.event.pull_request.number }}

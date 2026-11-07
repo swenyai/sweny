@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { github, encodeRepoFilePath } from "./github.js";
+import { github, encodeRepoFilePath, githubGraphqlUrl, resolveCommentAuthor } from "./github.js";
 import { isToolRefusal, type Logger, type ToolContext } from "../types.js";
 
 const ctx = (overrides: Partial<ToolContext> = {}): ToolContext => ({
@@ -20,6 +20,154 @@ function makeLogger(): Logger & { warnings: string[] } {
 }
 
 const createPr = github.tools.find((t) => t.name === "github_create_pr")!;
+const addComment = github.tools.find((t) => t.name === "github_add_comment")!;
+
+describe("github_add_comment on the run's own PR (#536)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  // A fresh run per test: the posting identity is cached per run.
+  const mkRun = () => ({
+    workflowId: "review",
+    repo: "o/r",
+    pullRequest: 2,
+    receiptUrl: "https://github.com/o/r/actions/runs/1",
+  });
+  const BOT = { login: "github-actions[bot]", type: "Bot" };
+  const MARK = "<!-- sweny-run-comment:review -->";
+  /** Answers by URL: an installation token (403 on /user, GraphQL viewer) unless `user` is given. */
+  // The job token's live answer (CI probe, 2026-11-07).
+  const LIVE_VIEWER = { data: { viewer: { login: "github-actions[bot]", __typename: "User" } } };
+  function api(comments: unknown[], opts: { user?: unknown; write?: unknown; graphql?: unknown } = {}) {
+    return vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/user")) {
+        return opts.user
+          ? jsonResponse(200, opts.user)
+          : jsonResponse(403, { message: "Resource not accessible by integration" });
+      }
+      if (url.endsWith("/graphql")) return jsonResponse(200, opts.graphql ?? LIVE_VIEWER);
+      if (url.includes("/comments?")) return jsonResponse(200, comments);
+      return jsonResponse(init?.method === "POST" ? 201 : 200, opts.write ?? { id: 9 });
+    });
+  }
+
+  it("updates our marked comment in place and says so in the job summary", async () => {
+    const fetchMock = api([{ id: 9, body: `${MARK}\nOld finding`, user: BOT }], {
+      write: { id: 9, html_url: "https://github.com/o/r/pull/2#c9" },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const summary = vi.fn();
+    const result = await addComment.handler(
+      { repo: "o/r", issue_number: 2, body: "New finding" },
+      ctx({ run: mkRun(), summary }),
+    );
+    expect(result).toEqual({ id: 9, html_url: "https://github.com/o/r/pull/2#c9" });
+    const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
+    expect(patch?.[0]).toBe("https://api.github.com/repos/o/r/issues/comments/9");
+    expect(summary).toHaveBeenCalledWith("**SWEny review** on PR #2: updated the findings comment in place.");
+  });
+
+  it("ignores a marked comment from another account and creates a fresh one", async () => {
+    const fetchMock = api([{ id: 5, body: `${MARK}\nNew finding`, user: { login: "mallory", type: "User" } }], {
+      write: { id: 12 },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await addComment.handler(
+      { repo: "o/r", issue_number: 2, body: "New finding" },
+      ctx({ run: mkRun() }),
+    );
+    expect(result).toEqual({ id: 12 });
+    const post = fetchMock.mock.calls.find(
+      ([url, init]) => init?.method === "POST" && url.endsWith("/issues/2/comments"),
+    );
+    expect(post).toBeDefined();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+  });
+
+  it("knows a PAT's account from /user", async () => {
+    const fetchMock = api([{ id: 9, body: `${MARK}\nOld`, user: { login: "release-bot", type: "User" } }], {
+      user: { login: "release-bot", type: "User" },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await addComment.handler({ repo: "o/r", issue_number: 2, body: "New" }, ctx({ run: mkRun() }));
+    expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/graphql"))).toBe(false);
+    expect(fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")?.[0]).toContain("/issues/comments/9");
+  });
+
+  it("unknown account and a bot's marked comment exists: skips with a warning, writes nothing", async () => {
+    const fetchMock = api([{ id: 9, body: `${MARK}\nOld`, user: BOT }], {
+      graphql: { data: null, errors: [{ message: "Resource not accessible by integration" }] },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const summary = vi.fn();
+    const result = await addComment.handler(
+      { repo: "o/r", issue_number: 2, body: "New" },
+      ctx({ run: mkRun(), summary }),
+    );
+    expect(result).toEqual({ skipped: "identity unknown" });
+    expect(
+      fetchMock.mock.calls.some(([url, init]) => init?.method === "PATCH" || url.endsWith("/issues/2/comments")),
+    ).toBe(false);
+    expect(summary.mock.calls[0][0]).toMatch(/^\*\*Warning: SWEny review\*\*/);
+  });
+
+  it("looks the account up once per run", async () => {
+    const fetchMock = api([{ id: 9, body: `${MARK}\nSame`, user: BOT }]);
+    vi.stubGlobal("fetch", fetchMock);
+    const c = ctx({ run: mkRun() });
+    await addComment.handler({ repo: "o/r", issue_number: 2, body: "Same" }, c);
+    await addComment.handler({ repo: "o/r", issue_number: 2, body: "Same" }, c);
+    expect(fetchMock.mock.calls.filter(([url]) => url.endsWith("/user"))).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([url]) => url.endsWith("/graphql"))).toHaveLength(1);
+  });
+
+  it("returns skipped and writes nothing when the findings are unchanged", async () => {
+    const fetchMock = api([{ id: 9, body: `${MARK}\nSame finding`, user: BOT }]);
+    vi.stubGlobal("fetch", fetchMock);
+    const summary = vi.fn();
+    const result = await addComment.handler(
+      { repo: "o/r", issue_number: 2, body: "Same finding" },
+      ctx({ run: mkRun(), summary }),
+    );
+    expect(result).toEqual({ id: 9, skipped: "findings unchanged since the last post" });
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+    expect(fetchMock.mock.calls.some(([url, init]) => init?.method === "POST" && !url.endsWith("/graphql"))).toBe(
+      false,
+    );
+    expect(summary.mock.calls[0][0]).toContain("findings unchanged since the last post");
+  });
+
+  it("returns skipped with no API call when the findings are empty", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const summary = vi.fn();
+    expect(
+      await addComment.handler({ repo: "o/r", issue_number: 2, body: "  " }, ctx({ run: mkRun(), summary })),
+    ).toEqual({ skipped: "no findings" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(summary.mock.calls[0][0]).toContain("no findings");
+  });
+
+  it("appends as before on any other issue, repo, or a run with no PR", async () => {
+    for (const [input, c] of [
+      [{ repo: "o/r", issue_number: 5, body: "Issue update" }, ctx({ run: mkRun() })],
+      [{ repo: "other/r", issue_number: 2, body: "Elsewhere" }, ctx({ run: mkRun() })],
+      [{ repo: "o/r", issue_number: 2, body: "Local run" }, ctx()],
+    ] as const) {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse(201, { id: 2 }));
+      vi.stubGlobal("fetch", fetchMock);
+      await addComment.handler(input, c);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][1].method).toBe("POST");
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body).body).toBe(input.body);
+    }
+  });
+});
+
+describe("githubGraphqlUrl", () => {
+  it("sits beside the REST base on github.com and GHES", () => {
+    expect(githubGraphqlUrl(undefined)).toBe("https://api.github.com/graphql");
+    expect(githubGraphqlUrl("https://ghe.test/api/v3")).toBe("https://ghe.test/api/graphql");
+  });
+});
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -610,5 +758,50 @@ describe("github_set_issue_state", () => {
       /reopen/,
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveCommentAuthor", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  function answer(user: [number, unknown], graphql?: [number, unknown]) {
+    const fetchMock = vi.fn(async (url: string) =>
+      url.endsWith("/graphql") && graphql ? jsonResponse(graphql[0], graphql[1]) : jsonResponse(user[0], user[1]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+  const forbidden: [number, unknown] = [403, { message: "Resource not accessible by integration" }];
+
+  it("a PAT: the /user account", async () => {
+    answer([200, { login: "release-bot", type: "User" }]);
+    expect(await resolveCommentAuthor(ctx())).toEqual({ login: "release-bot", type: "User" });
+  });
+
+  it("the Actions job token: GraphQL's live answer is a bot despite __typename User", async () => {
+    answer(forbidden, [200, { data: { viewer: { login: "github-actions[bot]", __typename: "User" } } }]);
+    expect(await resolveCommentAuthor(ctx())).toEqual({ login: "github-actions[bot]", type: "Bot" });
+  });
+
+  it("an app typed Bot without the suffix", async () => {
+    answer(forbidden, [200, { data: { viewer: { login: "my-app", __typename: "Bot" } } }]);
+    expect(await resolveCommentAuthor(ctx())).toEqual({ login: "my-app[bot]", type: "Bot" });
+  });
+
+  it("a PAT whose /user read failed once stays a user, never [bot]", async () => {
+    answer([502, { message: "Bad Gateway" }], [200, { data: { viewer: { login: "octocat", __typename: "User" } } }]);
+    expect(await resolveCommentAuthor(ctx())).toEqual({ login: "octocat", type: "User" });
+  });
+
+  it("unknown on a GraphQL 200 with errors, an HTTP error, or an odd login", async () => {
+    answer(forbidden, [200, { data: { viewer: null }, errors: [{ message: "nope" }] }]);
+    expect(await resolveCommentAuthor(ctx())).toBe(undefined);
+    answer(forbidden, [200, { data: { viewer: { login: "x" } }, errors: [] }]);
+    expect(await resolveCommentAuthor(ctx())).toBe(undefined);
+    answer(forbidden, [401, { message: "Bad credentials" }]);
+    expect(await resolveCommentAuthor(ctx())).toBe(undefined);
+    answer(forbidden, [200, { data: { viewer: { login: "a b<script>", __typename: "User" } } }]);
+    expect(await resolveCommentAuthor(ctx())).toBe(undefined);
+    answer(forbidden, [200, { data: { viewer: { login: "someone" } } }]);
+    expect(await resolveCommentAuthor(ctx())).toBe(undefined);
   });
 });
