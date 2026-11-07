@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/studio",
-  "version": "8.0.39",
+  "version": "8.0.40",
   "type": "module",
   "engines": {
     "node": ">=22"
