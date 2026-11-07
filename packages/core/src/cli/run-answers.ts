@@ -22,7 +22,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { redact } from "../journal.js";
+import { redact, workspaceSecretKey } from "../journal.js";
 import { writeFileNoFollow } from "../safe-file.js";
 import type { NodeResult, Workflow } from "../types.js";
 import { RUN_HISTORY_DIR, RUN_ID_RE, listRuns } from "./run-history.js";
@@ -119,18 +119,22 @@ function pick(value: unknown, schema: unknown): unknown {
 
 /**
  * Secrets in keys too (`redact` scrubs values and keeps keys). A key that redaction changes, or that
- * already looks like a redacted name, becomes `[redacted-<sha256 of the key, 16 hex>]`: injective (no
- * two keys share a name, and no plain key can equal a generated one) and stable (the same key gets
- * the same name in every run, whatever else is present), so a diff still lines them up.
+ * already looks like a redacted name, becomes `[redacted-<first 16 hex of HMAC-SHA256(key)>]`, keyed
+ * with `macKey()`: injective (no two keys share a name, and no plain key can equal a generated one),
+ * stable (the same key gets the same name in every run, whatever else is present, so a diff lines
+ * them up) and not a guessing oracle for a low-entropy secret (a plain hash would be).
  */
-function redactKeys(value: unknown, secrets: string[]): unknown {
-  if (Array.isArray(value)) return value.map((v) => redactKeys(v, secrets));
+function redactKeys(value: unknown, secrets: string[], macKey: () => Buffer): unknown {
+  if (Array.isArray(value)) return value.map((v) => redactKeys(v, secrets, macKey));
   if (!isObj(value)) return value;
   return Object.fromEntries(
     Object.entries(value).map(([k, v]) => {
       const scrubbed = redact(k, secrets).value as string;
-      const name = scrubbed !== k || k.startsWith("[redacted") ? `[redacted-${sha(k).slice(0, 16)}]` : k;
-      return [name, redactKeys(v, secrets)] as const;
+      const name =
+        scrubbed !== k || k.startsWith("[redacted")
+          ? `[redacted-${crypto.createHmac("sha256", macKey()).update(k).digest("hex").slice(0, 16)}]`
+          : k;
+      return [name, redactKeys(v, secrets, macKey)] as const;
     }),
   );
 }
@@ -163,6 +167,11 @@ export interface BuildRunAnswersInput {
   results: Map<string, NodeResult>;
   /** Secret values to redact (the same set the journal and output.md use). */
   secrets?: string[];
+  /**
+   * The key for redacted key names, asked for only when a key needs one. Default: a random key that
+   * lives only in this process (names then differ from run to run, which a diff shows as a change).
+   */
+  macKey?: () => Buffer;
 }
 
 /**
@@ -171,6 +180,8 @@ export interface BuildRunAnswersInput {
  */
 export function buildRunAnswers(i: BuildRunAnswersInput): RunAnswers {
   const secrets = i.secrets ?? [];
+  let ephemeral: Buffer | undefined;
+  const macKey = i.macKey ?? (() => (ephemeral ??= crypto.randomBytes(32)));
   const nodes: Array<[string, unknown]> = [];
   const digests: Array<[string, unknown]> = [];
   for (const [id, r] of i.results) {
@@ -190,7 +201,7 @@ export function buildRunAnswers(i: BuildRunAnswersInput): RunAnswers {
       fields = { summary: data.summary };
     }
     if (!isObj(fields) || Object.keys(fields).length === 0) continue;
-    const clean = redactKeys(redact(fields, secrets).value, secrets);
+    const clean = redactKeys(redact(fields, secrets).value, secrets, macKey);
     const [shown, digs] = clipTree(clean);
     nodes.push([id, shown]);
     if (digs !== undefined) digests.push([id, digs]);
@@ -574,7 +585,10 @@ export function sinceLastRun(runId: string, workflowId: string, cwd: string = pr
 /** Save this run's answers, then compare with the previous run. Never throws. */
 export function recordRunAnswers(i: BuildRunAnswersInput, cwd: string = process.cwd()): SinceLast | null {
   try {
-    if (!writeRunAnswers(buildRunAnswers(i), cwd)) return null;
+    // The key is per user and workspace and lives in the state dir; none usable means a process-only key.
+    let key: Buffer | undefined;
+    const macKey = i.macKey ?? (() => (key ??= workspaceSecretKey(cwd, "answers") ?? crypto.randomBytes(32)));
+    if (!writeRunAnswers(buildRunAnswers({ ...i, macKey }), cwd)) return null;
     return sinceLastRun(i.runId, i.workflow.id, cwd);
   } catch {
     return null;

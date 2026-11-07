@@ -329,6 +329,61 @@ export function assertStateOutsideWorkspace(dir: string, cwd: string): void {
   }
 }
 
+/** True when `dir` (which may not exist yet) would resolve inside `cwd`: its nearest existing ancestor's real path decides. */
+function resolvesInside(dir: string, cwd: string): boolean {
+  const ws = realOr(cwd);
+  let existing = path.resolve(dir);
+  const rest: string[] = [];
+  while (!fs.existsSync(existing) && path.dirname(existing) !== existing) {
+    rest.unshift(path.basename(existing));
+    existing = path.dirname(existing);
+  }
+  const real = path.join(realOr(existing), ...rest);
+  return real === ws || real.startsWith(ws.endsWith(path.sep) ? ws : ws + path.sep);
+}
+
+/**
+ * A 32-byte random key private to this user and workspace, for MACs that must stay the same from run to
+ * run (a run's journal key is per run, so it cannot serve). Stored hex, mode 0600, at
+ * `<state dir>/keys/<workspace-hash>.<purpose>.key`, read and created without following a link. Null
+ * when the state dir cannot be trusted (inside the workspace, where an agent can read it) or used;
+ * callers then fall back to a key that lives only in the process. Never written anywhere an agent reads.
+ */
+export function workspaceSecretKey(
+  cwd: string,
+  purpose: string,
+  env: Record<string, string | undefined> = process.env,
+): Buffer | null {
+  try {
+    const dir = path.join(swenyStateDir(env), "keys");
+    if (resolvesInside(dir, cwd)) return null;
+    makePrivateDir(dir);
+    if (resolvesInside(dir, cwd)) return null;
+    const file = path.join(dir, `${workspaceScope(cwd)}.${purpose.replace(/[^A-Za-z0-9_-]/g, "_")}.key`);
+    const read = (): Buffer | null => {
+      const text = readNoFollow(file).toString("utf8").trim();
+      if (!/^[0-9a-f]{64}$/.test(text)) return null;
+      if (process.platform !== "win32" && (fs.lstatSync(file).mode & 0o077) !== 0) return null;
+      return Buffer.from(text, "hex");
+    };
+    try {
+      return read();
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") return null;
+    }
+    const key = crypto.randomBytes(32);
+    try {
+      writeNew(file, key.toString("hex") + "\n");
+      return key;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") return null;
+      return read(); // another run created it first
+    }
+  } catch {
+    return null;
+  }
+}
+
 /** Thrown when a journal's key is missing or unreadable: its records cannot be checked. */
 export class JournalKeyError extends Error {
   constructor(file: string, why: string) {
