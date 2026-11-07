@@ -28,12 +28,14 @@ export const slack: Skill = {
     {
       name: "slack_send_message",
       access: "write",
-      description: "Send a message to a Slack channel via webhook or API",
+      description:
+        "Send a message to Slack. Posts to the webhook's own channel, or to a named channel via the bot token API. Naming a channel requires SLACK_BOT_TOKEN; with only a webhook the call fails rather than post elsewhere.",
       input_schema: {
         type: "object",
         properties: {
           text: { type: "string", description: "Message text (Slack mrkdwn supported)" },
-          channel: { type: "string", description: "Channel ID or name (required for API, ignored for webhook)" },
+          channel: { type: "string", description:
+              "Channel ID or name. Requires SLACK_BOT_TOKEN; with only a webhook configured, setting this is an error. Omit to post to the webhook's channel." },
           blocks: {
             type: "array",
             description: "Optional Block Kit blocks for rich formatting",
@@ -43,7 +45,8 @@ export const slack: Skill = {
         required: ["text"],
       },
       handler: async (input: { text: string; channel?: string; blocks?: any[] }, ctx) => {
-        // Prefer bot token API for channel targeting; fall back to webhook
+        // A requested channel is only honored via the bot token API. A webhook is bound to its own
+        // channel, so never fall back to it when another channel was asked for.
         if (ctx.config.SLACK_BOT_TOKEN && input.channel) {
           const res = await fetch("https://slack.com/api/chat.postMessage", {
             method: "POST",
@@ -64,7 +67,13 @@ export const slack: Skill = {
           return data;
         }
 
-        if (ctx.config.SLACK_WEBHOOK_URL) {
+        if (input.channel && !ctx.config.SLACK_BOT_TOKEN && ctx.config.SLACK_WEBHOOK_URL) {
+          throw new Error(
+            `[Slack] cannot post to ${input.channel}: only SLACK_WEBHOOK_URL is configured, and a webhook posts to its own channel. Set SLACK_BOT_TOKEN to target a channel, or omit channel.`,
+          );
+        }
+
+        if (!input.channel && ctx.config.SLACK_WEBHOOK_URL) {
           const res = await fetch(ctx.config.SLACK_WEBHOOK_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
