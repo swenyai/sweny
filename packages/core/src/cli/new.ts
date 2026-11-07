@@ -21,6 +21,7 @@ import { configuredSkills } from "../skills/custom-loader.js";
 import { builtinSkills } from "../skills/index.js";
 import { DagRenderer } from "./renderer.js";
 import { runE2eInit } from "./e2e.js";
+import { SCHEDULING_DOCS_URL } from "./first-success.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -976,7 +977,20 @@ export async function runNew(options?: {
 
   p.note(steps.join("\n"), "Next steps");
 
-  p.outro(hasExistingConfig ? "Workflow added!" : "You're all set!");
+  p.outro(outroMessage(hasExistingConfig, Boolean(template) && !template?.pack));
+}
+
+export { SCHEDULING_DOCS_URL };
+
+/**
+ * The closing line (#534). A pack already shows its own trigger step, so it
+ * closes as before. Any other workflow that was written (a starter or a
+ * described one) says how to schedule THIS workflow; it never names another
+ * pack, because no template metadata says which pack would suit it.
+ */
+export function outroMessage(hasExistingConfig: boolean, offerSchedule: boolean): string {
+  const done = hasExistingConfig ? "Workflow added!" : "You're all set!";
+  return offerSchedule ? `${done} Run it on a schedule: ${SCHEDULING_DOCS_URL}` : done;
 }
 
 // ── Custom workflow branch ────────────────────────────────────────────

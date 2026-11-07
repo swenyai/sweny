@@ -21,52 +21,21 @@ hero:
 
 import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-```bash
-npm install -g @sweny-ai/core
-```
+## Your first run
 
-SWEny runs nodes on Claude Code by default; Codex is shipped and pi and ACP agents are experimental (see [Agents and policies](/getting-started/agents-and-policies/)). Credentials by agent: Claude Code needs an `ANTHROPIC_API_KEY`, a `CLAUDE_CODE_OAUTH_TOKEN`, or a Claude Code login; Codex needs `CODEX_API_KEY` or `OPENAI_API_KEY`, or a `codex login`; pi needs the API key of the model provider it calls; ACP agents authenticate on their own (pass their key var through `SWENY_ENV_PASSTHROUGH`). See the [README](https://github.com/swenyai/sweny#quickstart).
+SWEny runs nodes on Claude Code by default; Codex is shipped and pi and ACP agents are experimental (see [Agents and policies](/getting-started/agents-and-policies/)). Before you start, credentials by agent: Claude Code needs a `CLAUDE_CODE_OAUTH_TOKEN`, an `ANTHROPIC_API_KEY`, or a Claude Code login; Codex needs `CODEX_API_KEY` or `OPENAI_API_KEY`, or a `codex login`; pi needs the API key of the model provider it calls; ACP agents authenticate on their own (pass their key var through `SWENY_ENV_PASSTHROUGH`).
 
 ```bash
-sweny new   # pick "Describe your own", then describe the task:
-            # "scan our repo for security issues, check dependencies for
-            #  vulnerabilities, and create Linear tickets for anything critical"
+npx @sweny-ai/core new      # pick a named workflow; explain-repo needs no skill credentials
+npx @sweny-ai/core check    # preflight: is your agent logged in?
+npx @sweny-ai/core workflow run .sweny/workflows/explain-repo.yml
 ```
 
-```
-GitHub Security Audit
+Install once with `npm install -g @sweny-ai/core` and the binary is `sweny`. The run ends with an answer and a receipt: nodes, tool calls, duration, tokens, cost, and the policy the agent ran under. Then `sweny runs` lists your history and `sweny runs diff` shows what changed between two runs.
 
-┌─────────────────────────────────┐
-│ ○ Scan Commits for Secrets      │
-└───────────────┬─────────────────┘
-                │
-┌───────────────▼─────────────────┐
-│ ○ Scan Deps for Vulnerabilities │
-└───────────────┬─────────────────┘
-                │
-┌───────────────▼─────────────────┐
-│ ○ Compile Security Report       │
-└───────────────┬─────────────────┘
-                │
-┌───────────────▼─────────────────┐
-│ ○ Create Linear Tickets         │
-└─────────────────────────────────┘
+Want to watch it first? `sweny try` replays a recorded demo with no login and no network. It is sample data, not a real run.
 
-Save to security_audit.yml? [Y/n/refine]
-```
-
-```bash
-sweny workflow run .sweny/workflows/github_security_audit.yml
-```
-
-One sentence in, a workflow YAML out. You review it before it runs.
-
-Don't like the result? Edit it the same way you created it:
-
-```bash
-sweny workflow edit security_audit.yml "add a quality gate that rejects \
-  vague findings, and loop back to re-scan if rejected"
-```
+[Full quick start](/getting-started/quick-start/)
 
 ---
 
@@ -124,18 +93,17 @@ SWEny workflows aren't limited to triage and fixes. They can also drive data ext
 
 ## Run it on a schedule
 
-Deploy any workflow to GitHub Actions with three secrets and a cron schedule. SWEny monitors your production errors and opens fix PRs while you sleep.
+Recurring packs (`weekly-digest`, `dependency-drift`, `pr-risk-review`) are read-only workflows with a GitHub Actions trigger. `sweny new --template weekly-digest` writes both files. Run it once locally first, then commit them.
 
 ```yaml
-# .github/workflows/sweny-triage.yml
-- uses: swenyai/triage@v1
+# .github/workflows/sweny-weekly-digest.yml (written by sweny new)
+- uses: swenyai/sweny@v5
   with:
+    workflow: .sweny/workflows/weekly-digest.yml
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-    observability-provider: sentry
-    sentry-auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
 ```
 
-[Full Action guide](/action/): setup, scheduling, and service maps.
+[Packs](/workflows/packs/) and the [Action guide](/action/): setup, scheduling, and service maps.
 
 ## Use it from Claude Code
 
