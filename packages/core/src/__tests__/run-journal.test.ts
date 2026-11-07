@@ -40,7 +40,7 @@ import {
 } from "../journal.js";
 import { prepareResume, type ResumeOptions } from "../cli/resume.js";
 import { createWriteStageState } from "../safe-outputs.js";
-import type { Claude, NodeResult, NodeUsage, Skill, Workflow } from "../types.js";
+import type { Claude, NodeResult, NodeUsage, Skill, ToolContext, Workflow } from "../types.js";
 
 // Run keys go to a scratch state dir, never the real ~/.local/state.
 process.env.SWENY_STATE_DIR = mkdtempSync(join(tmpdir(), "sweny-state-"));
@@ -955,5 +955,95 @@ describe("a write handler's refusal in the journal (#544)", () => {
     ]);
     expect(JSON.stringify(result.outputs)).not.toContain("applied");
     expect(JSON.stringify(end)).not.toContain("upstream specifics");
+  });
+
+  /** A provider whose create handler refuses `times` times (then files the issue), optionally after filing it. */
+  function refusingProvider(o: { times: number; transient?: boolean; filesFirst?: boolean }) {
+    const gh = fakeProvider();
+    const create = gh.skill.tools.find((t) => t.name === "github_create_issue")!;
+    const real = create.handler;
+    let calls = 0;
+    create.handler = async (input: unknown, ctx: ToolContext) => {
+      calls++;
+      if (calls > o.times) return real(input, ctx);
+      const filed = o.filesFirst ? ((await real(input, ctx)) as { number: number; html_url: string }) : undefined;
+      return {
+        refused: true,
+        reason: "the tool could not vouch for this write",
+        detail: "upstream specifics stay in the tool result",
+        ...(o.transient ? { transient: true } : {}),
+        ...(filed ? { number: filed.number, html_url: filed.html_url } : {}),
+      };
+    };
+    return { gh, calls: () => calls };
+  }
+
+  it("writes an output:refused record, never output:applied, keeping refused and reason but not detail", async () => {
+    const cwd = tmp();
+    const { gh } = refusingProvider({ times: 1 });
+    await firstRun(cwd, reporting(), fakeAgent({ emit: { report: [ISSUE] } }), [gh.skill]);
+    const records = readJournal(journalFile(cwd)).records;
+    expect(records.some((r) => r.type === "output:applied")).toBe(false);
+    const refused = records.find((r) => r.type === "output:refused")!;
+    expect(refused).toMatchObject({ node: "report", tool: "github_create_issue" });
+    expect(refused.key).toBe(records.find((r) => r.type === "output:intent")!.key);
+    expect(refused.output).toEqual({ refused: true, reason: "the tool could not vouch for this write" });
+  });
+
+  it("resume does not re-send a refused write: the recorded refusal is replayed and the receipt says refused", async () => {
+    const cwd = tmp();
+    const { gh, calls } = refusingProvider({ times: 1 });
+    const agent = fakeAgent({ emit: { report: [ISSUE] } });
+    await firstRun(cwd, reporting(), agent, [gh.skill]);
+    const { results } = await resumeRun(cwd, reporting(), agent, [gh.skill]);
+    expect(calls()).toBe(1);
+    expect(gh.issues).toHaveLength(0);
+    expect(agent.count("report")).toBe(1);
+    expect(results!.get("report")!.status).toBe("failed");
+    expect(results!.get("report")!.outputs).toEqual([
+      expect.objectContaining({ status: "refused", reason: "the tool could not vouch for this write" }),
+    ]);
+    expect(readJournal(journalFile(cwd)).records.some((r) => r.type === "output:applied")).toBe(false);
+  });
+
+  it("--allow-repeat-writes does not re-send a refusal: its outcome is known, not unconfirmed", async () => {
+    const cwd = tmp();
+    const { gh, calls } = refusingProvider({ times: 1 });
+    const agent = fakeAgent({ emit: { report: [ISSUE] } });
+    await firstRun(cwd, reporting(), agent, [gh.skill]);
+    const { results } = await resumeRun(cwd, reporting(), agent, [gh.skill], { allowRepeatWrites: true });
+    expect(calls()).toBe(1);
+    expect(results!.get("report")!.outputs).toEqual([expect.objectContaining({ status: "refused" })]);
+  });
+
+  it("a refusal that names a write it made is never probed into an applied receipt on resume", async () => {
+    const cwd = tmp();
+    const { gh, calls } = refusingProvider({ times: 1, transient: true, filesFirst: true });
+    const agent = fakeAgent({ emit: { report: [ISSUE] } });
+    await firstRun(cwd, reporting(), agent, [gh.skill]);
+    expect(gh.issues).toHaveLength(1);
+    const { results } = await resumeRun(cwd, reporting(), agent, [gh.skill]);
+    // The provider holds the marked issue, but the journal says it was refused: no lookup turns it into applied.
+    expect(gh.searches()).toBe(0);
+    expect(calls()).toBe(1);
+    expect(gh.issues).toHaveLength(1);
+    expect(results!.get("report")!.outputs).toEqual([
+      expect.objectContaining({ status: "refused", ref: 1, url: "https://github.test/acme/api/issues/1" }),
+    ]);
+  });
+
+  it("a transient refusal that wrote nothing is tried again on resume, as a first send", async () => {
+    const cwd = tmp();
+    const { gh, calls } = refusingProvider({ times: 1, transient: true });
+    const agent = fakeAgent({ emit: { report: [ISSUE] } });
+    await firstRun(cwd, reporting(), agent, [gh.skill]);
+    expect(gh.issues).toHaveLength(0);
+    const { results } = await resumeRun(cwd, reporting(), agent, [gh.skill]);
+    expect(calls()).toBe(2);
+    expect(gh.issues).toHaveLength(1);
+    expect(results!.get("report")!.outputs).toEqual([expect.objectContaining({ status: "applied", ref: 1 })]);
+    const types = readJournal(journalFile(cwd)).records.map((r) => r.type);
+    expect(types.filter((t) => t === "output:refused")).toHaveLength(1);
+    expect(types.filter((t) => t === "output:applied")).toHaveLength(1);
   });
 });
