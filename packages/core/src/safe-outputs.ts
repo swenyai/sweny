@@ -29,7 +29,7 @@ import type {
   Tool,
   ToolContext,
 } from "./types.js";
-import { SAFE_OUTPUT_APPLIERS, isToolRefusal, skippedReason } from "./types.js";
+import { SAFE_OUTPUT_APPLIERS, isRefusal, refusalReason, skippedReason } from "./types.js";
 import { trustedEnvValue } from "./startup-env.js";
 
 /** Name of the intent-recording tool a node with `outputs` receives. */
@@ -724,14 +724,13 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       const ref = refOf(output);
       const url = urlOf(output);
       const produced = { ...(ref !== undefined ? { ref } : {}), ...(url ? { url } : {}) };
-      const refused = !!output && typeof output === "object" && (output as Record<string, unknown>).refused === true;
-      if (refused) {
+      if (isRefusal(output)) {
         // #544: the handler declined the write, or could not vouch for it. The
         // receipt says refused with the handler's fixed-wording reason (and
         // names anything it did create); the node fails and the rest are
         // skipped, the same as a failed apply. A refusal without a usable
         // reason still counts as one.
-        const reason = isToolRefusal(output) ? output.reason.slice(0, 200) : "the tool refused the write";
+        const reason = refusalReason(output);
         receipts[index] = { ...receipts[index], ...produced, status: "refused", reason };
         for (const rest of accepted.slice(n + 1)) {
           receipts[rest.index] = { ...receipts[rest.index], status: "skipped", reason: "an earlier write was refused" };

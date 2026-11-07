@@ -634,9 +634,10 @@ describe("buildResumePlan", () => {
         next: "b",
         applied: 0,
         refused: 0,
+        transient: 0,
         unconfirmed: 0,
       },
-      { node: "b", iteration: 1, action: "write-stage", applied: 0, refused: 0, unconfirmed: 0 },
+      { node: "b", iteration: 1, action: "write-stage", applied: 0, refused: 0, transient: 0, unconfirmed: 0 },
     ]);
     expect(plan.freshNode).toBeUndefined();
     expect(plan.finished).toBe(false);
@@ -648,7 +649,7 @@ describe("buildResumePlan", () => {
   it("an unfinished visit with no checkpoint re-runs", () => {
     const plan = buildResumePlan([startRec(), nodeStart("a")]);
     expect(plan.visits).toStrictEqual([
-      { node: "a", iteration: 1, action: "rerun", applied: 0, refused: 0, unconfirmed: 0 },
+      { node: "a", iteration: 1, action: "rerun", applied: 0, refused: 0, transient: 0, unconfirmed: 0 },
     ]);
     expect(plan.freshNode).toBeUndefined();
   });
@@ -718,7 +719,7 @@ describe("buildResumePlan", () => {
       nodeStart("a"),
     ]);
     expect(plan.visits).toStrictEqual([
-      { node: "a", iteration: 1, action: "rerun", applied: 0, refused: 0, unconfirmed: 0 },
+      { node: "a", iteration: 1, action: "rerun", applied: 0, refused: 0, transient: 0, unconfirmed: 0 },
     ]);
     expect(plan.ends.size).toBe(0);
     const again = buildResumePlan([
@@ -826,7 +827,15 @@ describe("mayRepeatWrites", () => {
   } as unknown as Workflow;
   const plan = (...visits: [string, "replay" | "rerun" | "write-stage"][]) =>
     ({
-      visits: visits.map(([node, action]) => ({ node, iteration: 0, action, applied: 0, refused: 0, unconfirmed: 0 })),
+      visits: visits.map(([node, action]) => ({
+        node,
+        iteration: 0,
+        action,
+        applied: 0,
+        refused: 0,
+        transient: 0,
+        unconfirmed: 0,
+      })),
     }) as unknown as ResumePlan;
 
   it("lists re-run nodes that could write outside safe outputs", () => {

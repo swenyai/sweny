@@ -110,11 +110,18 @@ export function formatResumePlan(plan: ResumePlan, mayRepeat: string[]): string[
     (iteration > 1 ? `${node} (#${iteration})` : node).padEnd(width + 5);
   for (const v of plan.visits) {
     if (v.action === "replay") {
-      const writes = v.applied > 0 ? `, ${v.applied} write(s) not re-sent` : "";
-      lines.push(`  ✓ ${label(v.node, v.iteration)} replay from journal (${v.status}${writes})`);
+      const parts: string[] = [String(v.status)];
+      if (v.applied > 0) parts.push(`${v.applied} write(s) not re-sent`);
+      // A replayed visit runs no write stage: its transient refusals stand too.
+      const refused = v.refused + v.transient;
+      if (refused > 0) parts.push(`${refused} refused write(s), not re-sent`);
+      lines.push(`  ✓ ${label(v.node, v.iteration)} replay from journal (${parts.join(", ")})`);
     } else if (v.action === "write-stage") {
       const parts = ["agent result reused"];
       if (v.applied > 0) parts.push(`${v.applied} write(s) already applied, not re-sent`);
+      if (v.refused > 0) parts.push(`${v.refused} refused write(s), not re-sent`);
+      if (v.transient > 0)
+        parts.push(`${v.transient} transient refusal(s) to try again, checked on the provider first`);
       if (v.unconfirmed > 0) parts.push(`${v.unconfirmed} write(s) to confirm on the provider first`);
       lines.push(`  ↻ ${label(v.node, v.iteration)} write stage only: ${parts.join("; ")}`);
     } else {
