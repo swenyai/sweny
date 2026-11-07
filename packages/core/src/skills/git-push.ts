@@ -226,6 +226,12 @@ export interface PushHeadResult {
   attempted: boolean;
   /** Why nothing was pushed, or why the push failed. Never carries the token. */
   reason?: string;
+  /**
+   * The local commit the push tried to publish. Set when the push ran and
+   * failed: `github_create_pr` then opens the PR only if the remote head is
+   * this commit (#544).
+   */
+  sha?: string;
 }
 
 /** `owner/repo` from a GitHub remote URL (https, ssh or scp form), lowercased, or undefined. */
@@ -532,7 +538,7 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
     );
     if (r.code !== 0) {
       const why = (r.stderr || r.stdout).trim().split("\n").at(-1) ?? "";
-      return { pushed: false, attempted: true, reason: `git push failed: ${redact(why, token)}` };
+      return { pushed: false, attempted: true, reason: `git push failed: ${redact(why, token)}`, sha };
     }
     return { pushed: true, attempted: true };
   } catch (err) {

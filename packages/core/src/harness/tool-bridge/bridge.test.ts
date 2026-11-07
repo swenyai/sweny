@@ -18,7 +18,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { startToolBridge, type ToolBridge } from "./server.js";
 import { BridgeClient, parseConnectTarget } from "./shim.js";
-import { TOKEN_ENV, callToolAsMcp, createFrameReader, tokenMatches } from "./protocol.js";
+import { TOKEN_ENV, callToolAsMcp, createFrameReader, tokenMatches, toolOutputToMcpResult } from "./protocol.js";
 import { coreToolToSdkTool, parseToolResultContent } from "../claude-code.js";
 import type { Tool, ToolContext } from "../../types.js";
 
@@ -117,6 +117,28 @@ describe("tool bridge protocol", () => {
     expect(calls).toEqual([]);
     const good = await callToolAsMcp(lookup, { id: "x" }, ctx);
     expect(good).toEqual({ content: [{ type: "text", text: JSON.stringify({ id: "x", found: true, n: null }) }] });
+  });
+
+  it("a handler's ToolRefusal reaches the agent as an MCP tool error with the reason (#544)", async () => {
+    const refusal = { refused: true, reason: "the remote head is not the commit this run produced", local_sha: "a" };
+    const direct = toolOutputToMcpResult(refusal);
+    expect(direct.isError).toBe(true);
+    expect(direct.content[0].text).toContain("the remote head is not the commit this run produced");
+    expect(direct.content[0].text).toContain('"local_sha":"a"');
+
+    const tool: Tool = {
+      name: "refuser",
+      description: "",
+      input_schema: { type: "object", properties: {} },
+      access: "write",
+      handler: async () => refusal,
+    };
+    const viaBridge = await callToolAsMcp(tool, {}, ctx);
+    expect(viaBridge.isError).toBe(true);
+
+    // Ordinary outputs, including ones with a stray refused field, are not errors.
+    expect(toolOutputToMcpResult({ number: 1 }).isError).toBeUndefined();
+    expect(toolOutputToMcpResult({ refused: false, reason: "x" }).isError).toBeUndefined();
   });
 });
 
