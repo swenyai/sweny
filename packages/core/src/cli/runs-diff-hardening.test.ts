@@ -2,7 +2,8 @@
  * #540 hardening of `sweny runs diff` against agent-writable history. Every spec seeds files on disk
  * (`.sweny/runs/`) and reads them back through the real readers.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -23,7 +24,14 @@ function tmp(): string {
   dirs.push(d);
   return d;
 }
+let stateDir = "";
+beforeEach(() => {
+  // The workspace key for redacted names lives in the state dir: keep tests out of the real one.
+  stateDir = tmp();
+  vi.stubEnv("SWENY_STATE_DIR", stateDir);
+});
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
 });
 
@@ -221,6 +229,59 @@ describe("redacted keys are injective and stable", () => {
     const t = io(cwd);
     expect(runRunsDiff([], {}, t.io)).toBe(0);
     expect(t.out.join("")).toContain("answers: 0 added, 0 resolved, 1 changed, 2 unchanged");
+  });
+});
+
+describe("redacted key names are keyed, not a plain hash of the secret", () => {
+  const K = "zq-one-9f3a8b7c";
+  const workflow = wf({ type: "object", properties: { [K]: { type: "string" } } });
+  const build = (cwd: string, id: string) =>
+    recordRunAnswers({ runId: id, workflow, results: new Map([["n", ok({ [K]: "v" })]]), secrets: [K] }, cwd);
+  const keyFiles = () =>
+    fs.existsSync(path.join(stateDir, "keys")) ? fs.readdirSync(path.join(stateDir, "keys")) : [];
+
+  it("no plain sha256 of the secret appears; the name is an HMAC under a 0600 key in the state dir", () => {
+    const cwd = tmp();
+    build(cwd, A);
+    const raw = fs.readFileSync(path.join(cwd, RUN_HISTORY_DIR, A, "answers.json"), "utf8");
+    const plain = crypto.createHash("sha256").update(K).digest("hex");
+    expect(raw).not.toContain(plain.slice(0, 16));
+    expect(raw).not.toContain(K);
+    const [file] = keyFiles();
+    expect(file).toBeDefined();
+    const keyPath = path.join(stateDir, "keys", file);
+    expect(fs.statSync(keyPath).mode & 0o077).toBe(0);
+    const keyHex = fs.readFileSync(keyPath, "utf8").trim();
+    expect(keyHex).toMatch(/^[0-9a-f]{64}$/);
+    expect(raw).not.toContain(keyHex);
+    const name = Object.keys(readRunAnswers(A, cwd)!.nodes.n)[0];
+    const mac = crypto.createHmac("sha256", Buffer.from(keyHex, "hex")).update(K).digest("hex").slice(0, 16);
+    expect(name).toBe(`[redacted-${mac}]`);
+  });
+
+  it("the same key gives the same name across runs; another workspace or state dir gives another name", () => {
+    const cwd = tmp();
+    build(cwd, A);
+    build(cwd, B);
+    const nameA = Object.keys(readRunAnswers(A, cwd)!.nodes.n)[0];
+    expect(Object.keys(readRunAnswers(B, cwd)!.nodes.n)[0]).toBe(nameA);
+    const other = tmp();
+    build(other, A);
+    expect(Object.keys(readRunAnswers(A, other)!.nodes.n)[0]).not.toBe(nameA);
+  });
+
+  it("a state dir inside the workspace is not trusted: no key is written there, names stay distinct and secret-free", () => {
+    const cwd = tmp();
+    vi.stubEnv("SWENY_STATE_DIR", path.join(cwd, ".state"));
+    const two = wf({ type: "object", properties: { [K]: { type: "string" }, other: { type: "string" } } });
+    recordRunAnswers(
+      { runId: A, workflow: two, results: new Map([["n", ok({ [K]: "v", other: "w" })]]), secrets: [K] },
+      cwd,
+    );
+    expect(fs.existsSync(path.join(cwd, ".state", "keys"))).toBe(false);
+    const fields = readRunAnswers(A, cwd)!.nodes.n;
+    expect(Object.keys(fields)).toHaveLength(2);
+    expect(JSON.stringify(fields)).not.toContain("zq-");
   });
 });
 
