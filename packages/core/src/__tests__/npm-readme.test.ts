@@ -10,7 +10,12 @@ import { fileURLToPath } from "node:url";
  */
 
 const CORE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const pkg = JSON.parse(readFileSync(join(CORE_DIR, "package.json"), "utf-8")) as { files: string[] };
+const pkg = JSON.parse(readFileSync(join(CORE_DIR, "package.json"), "utf-8")) as {
+  files: string[];
+  description: string;
+  keywords: string[];
+};
+const rootReadme = readFileSync(join(CORE_DIR, "..", "..", "README.md"), "utf-8");
 const readme = existsSync(join(CORE_DIR, "README.md")) ? readFileSync(join(CORE_DIR, "README.md"), "utf-8") : "";
 
 /** Commands registered as `.command("<name> ...").description("[DEPRECATED] ...")`. */
@@ -24,6 +29,19 @@ describe("@sweny-ai/core npm README", () => {
     expect(existsSync(join(CORE_DIR, "README.md"))).toBe(true);
     expect(pkg.files).toContain("README.md");
     expect(pkg.files).toContain("dist");
+  });
+
+  it("the npm description is the project tagline, verbatim from the root README hero", () => {
+    const hero = rootReadme.match(/<strong>([^<]+)<\/strong>/)?.[1];
+    expect(hero).toBeTruthy();
+    expect(pkg.description).toBe(hero);
+    expect(readme).toContain(pkg.description);
+  });
+
+  it("keywords are what an engineer would search for", () => {
+    for (const k of ["ai-agents", "coding-agents", "claude-code", "codex", "workflow", "github-action", "sandbox"]) {
+      expect(pkg.keywords).toContain(k);
+    }
   });
 
   it("is short enough to scan", () => {

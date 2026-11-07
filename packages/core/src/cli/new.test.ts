@@ -19,7 +19,7 @@ import {
   writeWorkflowFile,
 } from "./new.js";
 import type { InitSelections, Credential } from "./new.js";
-import { ensureGitignoreEnv, nonInteractiveUsage } from "./new.js";
+import { ensureGitignoreEnv, nonInteractiveUsage, outroMessage } from "./new.js";
 import { WORKFLOW_TEMPLATES } from "./templates.js";
 import { parseWorkflow } from "../schema.js";
 
@@ -1351,6 +1351,33 @@ describe("runNew first-run paths", () => {
     const cwd = tmp();
     await runNew({ template: "explain-repo", yes: true });
     expect(fs.existsSync(path.join(cwd, ".github"))).toBe(false);
+  });
+
+  it("the outro of a non-pack template points at the schedule step (#534)", async () => {
+    tmp();
+    vi.stubEnv("npm_command", "");
+    const p = await import("@clack/prompts");
+    await runNew({ template: "explain-repo", yes: true });
+    const line = (p.outro as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as string;
+    expect(line).toBe("You're all set! Put it on a schedule in CI: sweny new --template weekly-digest");
+    expect(line).not.toContain("\n");
+    vi.unstubAllEnvs();
+  });
+
+  it("the outro of a pack stays as it was: the pack's own trigger step covers scheduling (#534)", async () => {
+    tmp();
+    vi.stubEnv("npm_command", "");
+    const p = await import("@clack/prompts");
+    await runNew({ template: "weekly-digest", yes: true });
+    expect((p.outro as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]).toBe("You're all set!");
+    vi.unstubAllEnvs();
+  });
+
+  it("outroMessage: existing config, npx form, and no schedule offer without a template (#534)", () => {
+    expect(outroMessage(true, "npx @sweny-ai/core", true)).toBe(
+      "Workflow added! Put it on a schedule in CI: npx @sweny-ai/core new --template weekly-digest",
+    );
+    expect(outroMessage(false, "sweny", false)).toBe("You're all set!");
   });
 
   it("rejects an unknown --template with exit 1", async () => {

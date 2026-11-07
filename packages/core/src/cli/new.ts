@@ -976,7 +976,18 @@ export async function runNew(options?: {
 
   p.note(steps.join("\n"), "Next steps");
 
-  p.outro(hasExistingConfig ? "Workflow added!" : "You're all set!");
+  p.outro(outroMessage(hasExistingConfig, cli, Boolean(template) && !template?.pack));
+}
+
+/**
+ * The closing line. After a non-pack template (the zero-credential starter
+ * included) it points at the schedule step, in the same words as the "Next"
+ * note a first successful run prints (#534). Packs already show their own
+ * trigger step; a start with no workflow written has nothing to schedule yet.
+ */
+export function outroMessage(hasExistingConfig: boolean, cli: string, offerSchedule: boolean): string {
+  const done = hasExistingConfig ? "Workflow added!" : "You're all set!";
+  return offerSchedule ? `${done} Put it on a schedule in CI: ${cli} new --template weekly-digest` : done;
 }
 
 // ── Custom workflow branch ────────────────────────────────────────────
