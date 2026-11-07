@@ -4,7 +4,8 @@
  *
  * METADATA ONLY. A record holds ids, statuses, durations, counts, token and
  * cost totals, and routing edges. It never holds prompts, node outputs, tool
- * inputs/outputs, error text, or environment values.
+ * inputs/outputs, error text, or environment values. What a run answered is
+ * kept apart, in `<run-id>/answers.json` (run-answers.ts).
  *
  * `schema_version` is the compatibility contract: a future resume journal
  * builds on this format, so readers skip records with a version they do not
@@ -86,7 +87,8 @@ export function hashWorkflow(workflow: Workflow): string {
     .digest("hex");
 }
 
-const RUN_ID_RE = /^\d{8}-\d{6}-[0-9a-f]{6}$/;
+/** The shape `newRunId` generates. Anything else is not a run id. */
+export const RUN_ID_RE = /^\d{8}-\d{6}-[0-9a-f]{6}$/;
 
 /** Sortable id: `YYYYMMDD-HHMMSS-<6 hex>` in UTC, so filename order is run order. */
 export function newRunId(
@@ -275,7 +277,12 @@ function isRecord(v: unknown): v is RunRecord {
   );
 }
 
-/** All readable records, newest first. Corrupt files and unknown schema versions are skipped. */
+/**
+ * All readable records, newest first. Corrupt files and unknown schema versions
+ * are skipped. History is agent-writable, so a record is trusted only when its
+ * run_id has the generated shape, matches its filename, and is not repeated:
+ * a planted copy of another run's id is dropped, not merged.
+ */
 export function listRuns(cwd: string = process.cwd()): RunRecord[] {
   const dir = path.join(cwd, RUN_HISTORY_DIR);
   let files: string[];
@@ -288,14 +295,18 @@ export function listRuns(cwd: string = process.cwd()): RunRecord[] {
   for (const f of files) {
     try {
       const parsed = JSON.parse(fs.readFileSync(path.join(dir, f), "utf-8"));
-      if (isRecord(parsed)) out.push(parsed);
+      if (isRecord(parsed) && RUN_ID_RE.test(parsed.run_id) && f === `${parsed.run_id}.json`) out.push(parsed);
     } catch {
       // corrupt record: skip
     }
   }
-  return out.sort((a, b) =>
-    a.started_at === b.started_at ? b.run_id.localeCompare(a.run_id) : b.started_at.localeCompare(a.started_at),
-  );
+  const seen = new Map<string, number>();
+  for (const r of out) seen.set(r.run_id, (seen.get(r.run_id) ?? 0) + 1);
+  return out
+    .filter((r) => seen.get(r.run_id) === 1)
+    .sort((a, b) =>
+      a.started_at === b.started_at ? b.run_id.localeCompare(a.run_id) : b.started_at.localeCompare(a.started_at),
+    );
 }
 
 /** Exact run id, or a unique prefix. */
