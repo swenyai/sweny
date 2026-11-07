@@ -16,20 +16,48 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { classifySource, sourceZ, type SourceResolutionContext } from "./sources.js";
+import { classifySource, sourceZ, type DnsLookup, type SourceResolutionContext } from "./sources.js";
 import { hashContent, resolveSource, resolveSources } from "./source-resolver.js";
 
 const fileTmp = path.join(tmpdir(), `sweny-sources-validation-test-${randomBytes(4).toString("hex")}`);
+
+// Deterministic public address for fixture hosts: the SSRF guard must never do real DNS in tests.
+const publicLookup = (): DnsLookup => vi.fn<DnsLookup>(async () => ["93.184.216.34"]);
 
 const baseCtx = (): SourceResolutionContext => ({
   cwd: "/tmp",
   env: {} as NodeJS.ProcessEnv,
   authConfig: {},
   offline: false,
+  dnsLookup: publicLookup(),
   logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
 });
 
 // ── fetchWithRetry behavior ──────────────────────────────────────
+
+describe("SSRF guard uses the injected dnsLookup", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("looks up the fixture host and fetches when it resolves public", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("ok", { status: 200 }));
+    const ctx = baseCtx();
+    await resolveSource("https://x.test/guard", "f", ctx);
+    expect(ctx.dnsLookup).toHaveBeenCalledWith("x.test");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("blocks without fetching when the injected lookup returns a private address", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const dnsLookup = vi.fn<DnsLookup>(async () => ["10.0.0.7"]);
+    await expect(resolveSource("https://x.test/guard", "f", { ...baseCtx(), dnsLookup })).rejects.toThrow(
+      /SOURCE_URL_BLOCKED.*10\.0\.0\.7/,
+    );
+    expect(dnsLookup).toHaveBeenCalledWith("x.test");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
 
 describe("fetchWithRetry", () => {
   beforeEach(() => {
@@ -143,7 +171,9 @@ describe("SOURCE_INVALID_TYPE", () => {
 
   it("accepts tagged URL with type: fetch", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("ok", { status: 200 }));
-    const resolved = await resolveSource({ url: "https://x.test/ok", type: "fetch" }, "f", baseCtx());
+    const ctx = baseCtx();
+    const resolved = await resolveSource({ url: "https://x.test/ok", type: "fetch" }, "f", ctx);
+    expect(ctx.dnsLookup).toHaveBeenCalledWith("x.test");
     expect(resolved.content).toBe("ok");
   });
 
