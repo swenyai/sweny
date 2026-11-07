@@ -50,6 +50,8 @@ Send defects back to the same lane (it keeps its context). A lane cut off by a r
 scripts/land-pr.sh <pr>          # update branch, wait for clean, squash-merge; exits 2 on conflicts
 ```
 
+Advisory checks: `ADVISORY_CHECKS` (default `review`, the AI review bot; comma-separated, env-overridable) only warn when red and `unstable` with nothing pending lands; any other failing check exits 3, and a merge that keeps failing exits 5 with the reason. Never `--admin`.
+
 On exit 2 send the lane back to `git merge origin/main`, keep both sides, rerun gates. Order: correctness first, then the PRs that others rebase onto.
 
 Lessons from running many lanes at once:
