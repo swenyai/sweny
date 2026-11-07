@@ -244,6 +244,9 @@ export const DEFAULT_TRY_PACE_MS = 1200;
 
 const silentLogger: Logger = { info() {}, warn() {}, error() {}, debug() {} };
 
+/** The line that opens the job summary preview (record.ts cuts the preview from here). */
+export const SUMMARY_PREVIEW_LEAD = "In CI, the job summary gets this heading, this DAG and the receipt below:";
+
 /** Replay the recording. Returns the process exit code. */
 export async function runTry(opts: TryOptions = {}): Promise<number> {
   const write = opts.write ?? ((s: string) => void process.stdout.write(s));
@@ -326,7 +329,7 @@ export async function runTry(opts: TryOptions = {}): Promise<number> {
 
   // Compact preview of CI's job summary: heading and DAG here, receipt below.
   const comment = formatRunComment(workflow, results as Map<string, NodeResult>, receipt, { trace, durationsMs });
-  write(`  ${paint.muted("CI puts this heading, this DAG and the receipt below in the job summary:")}\n\n`);
+  write(`  ${paint.muted(SUMMARY_PREVIEW_LEAD)}\n\n`);
   const tone = receipt.ok ? paint.success : paint.error;
   write(`    ${tone(receipt.ok ? g.success : g.failure)} ${paint.strong(workflow.name)}\n\n`);
   write(

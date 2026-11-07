@@ -199,7 +199,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write # the updating review findings comment
+  pull-requests: write # the one review comment, updated in place
 
 concurrency:
   group: sweny-pr-risk-${{ github.event.pull_request.number }}

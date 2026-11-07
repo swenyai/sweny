@@ -106,8 +106,7 @@ describe("runTry", () => {
     // the receipt line, from the real formatter, with the policy segment
     expect(out).toContain("✓ 2/2 nodes · 12 tool calls · 28s · 30k tokens · $0.13 · policy: env scoped, sandbox on");
     // a compact job summary preview: heading and the DAG, not raw markdown
-    expect(out).toContain("CI puts");
-    expect(out).toContain("job summary");
+    expect(out).toContain("the job summary gets this heading");
     expect(out).toContain("✓ Explain This Repo");
     expect(out).toContain("┌");
     expect(out).not.toContain("<!-- sweny-run-comment");

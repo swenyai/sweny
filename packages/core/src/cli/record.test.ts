@@ -111,9 +111,9 @@ describe("recordTrySvg", () => {
     expect(css).toMatch(/prefers-reduced-motion:reduce\)\{\.r\{animation:none!important\}\.sp\{display:none\}\}/);
   });
 
-  it("is README-sized: no PR-comment preview, under 900px tall", async () => {
+  it("is README-sized: no job summary preview, under 900px tall", async () => {
     const svg = await recordTrySvg();
-    expect(svg).not.toContain("On a pull request");
+    expect(svg).not.toContain("job summary gets");
     expect(svg).toContain("passed");
     const h = Number(/viewBox="0 0 \d+ (\d+)"/.exec(svg)![1]);
     expect(h).toBeLessThan(900);
