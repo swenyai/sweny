@@ -721,13 +721,6 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
         ...(o.run ? { run: o.run } : {}),
         ...(o.summary ? { summary: o.summary } : {}),
       });
-      // The skill decided nothing needed writing (e.g. unchanged findings).
-      const skipped = skippedReason(output);
-      if (skipped) {
-        receipts[index] = { ...receipts[index], status: "skipped", reason: skipped };
-        o.logger.info(`  safe output: ${write.type} via ${write.via} skipped (${skipped})`, { node: o.nodeId });
-        continue;
-      }
       const ref = refOf(output);
       const url = urlOf(output);
       const produced = { ...(ref !== undefined ? { ref } : {}), ...(url ? { url } : {}) };
@@ -744,6 +737,13 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
           receipts[rest.index] = { ...receipts[rest.index], status: "skipped", reason: "an earlier write was refused" };
         }
         return { receipts, error: `safe output ${write.type} via ${write.via} was refused: ${reason}` };
+      }
+      // The skill decided nothing needed writing (e.g. unchanged findings). A refusal wins over a skip.
+      const skipped = skippedReason(output);
+      if (skipped) {
+        receipts[index] = { ...receipts[index], status: "skipped", reason: skipped };
+        o.logger.info(`  safe output: ${write.type} via ${write.via} skipped (${skipped})`, { node: o.nodeId });
+        continue;
       }
       receipts[index] = { ...receipts[index], ...produced };
       o.logger.info(`  safe output: ${write.type} via ${write.via} applied${ref !== undefined ? ` (${ref})` : ""}`, {

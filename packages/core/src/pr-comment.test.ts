@@ -3,6 +3,7 @@ import {
   formatPrComment,
   isRunPullRequest,
   normalizeFindings,
+  legacyPrCommentMarker,
   prCommentMarker,
   prCommentSummaryLine,
   upsertPrComment,
@@ -24,11 +25,22 @@ const ours = { user: { login: "github-actions[bot]", type: "Bot" } };
 const target = (body = findings, repo = "o/r", number = 3) => ({ repo, number, body });
 
 describe("marker", () => {
-  it("is one hidden line per workflow, the same format the billboard used", () => {
+  it("is one hidden line per workflow; common ids match the billboard's marker", () => {
     expect(prCommentMarker("pr-review")).toBe("<!-- sweny-run-comment:pr-review -->");
-    // Existing billboard comments carry this marker, so they become the findings comment.
-    expect(prCommentMarker("a--b>c d")).toBe("<!-- sweny-run-comment:a-b_c_d -->");
-    expect(prCommentMarker("")).toBe("<!-- sweny-run-comment:workflow -->");
+    expect(prCommentMarker("pr-review")).toBe(legacyPrCommentMarker("pr-review"));
+    expect(prCommentMarker("a--b>c d")).toBe("<!-- sweny-run-comment:a%2D-b%3Ec%20d -->");
+  });
+
+  it("is injective: distinct ids never share a marker, and the id decodes back", () => {
+    const ids = ["a b", "a_b", "a/b", "a-b", "a--b", "a-%2Db", "a%2D-b", "A_B", "", "workflow", "é", "e\u0301"];
+    const markers = ids.map(prCommentMarker);
+    expect(new Set(markers).size).toBe(ids.length);
+    for (const id of ids) {
+      const enc = /sweny-run-comment:(.*) -->$/.exec(prCommentMarker(id))![1];
+      expect(decodeURIComponent(enc)).toBe(id);
+    }
+    // The old format merged these; it is only read, for migration.
+    expect(legacyPrCommentMarker("a b")).toBe(legacyPrCommentMarker("a_b"));
   });
 
   it("cannot close the HTML comment early", () => {
@@ -177,11 +189,52 @@ describe("upsertPrComment", () => {
     expect((await upsertPrComment(target(), run, request, pat)).outcome).toBe("updated");
   });
 
-  it("creates without listing when the author cannot be resolved", async () => {
-    const request = vi.fn().mockResolvedValueOnce({ id: 11 });
-    expect((await upsertPrComment(target(), run, request, async () => undefined)).outcome).toBe("created");
+  it("unknown account, no bot comment yet: creates one and flags it for a warning", async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { id: 3, body: formatPrComment("planted", run), user: { login: "mallory", type: "User" } },
+      ])
+      .mockResolvedValueOnce({ id: 11 });
+    expect(await upsertPrComment(target(), run, request, async () => undefined)).toEqual({
+      outcome: "created",
+      id: 11,
+      identityUnknown: true,
+    });
+    expect(request.mock.calls[1][1].method).toBe("POST");
+  });
+
+  it("unknown account and a bot already left a marked comment: skips, never stacks a duplicate", async () => {
+    const request = vi.fn().mockResolvedValueOnce([{ id: 8, body: formatPrComment("old", run), ...ours }]);
+    expect(await upsertPrComment(target(), run, request, async () => undefined)).toEqual({
+      outcome: "identity-unknown",
+      identityUnknown: true,
+    });
     expect(request).toHaveBeenCalledTimes(1);
-    expect(request.mock.calls[0][1].method).toBe("POST");
+  });
+
+  it("migrates our comment under the old marker, re-marking it", async () => {
+    const wf = { ...run, workflowId: "a b" };
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 4, body: `${legacyPrCommentMarker("a b")}\nold billboard`, ...ours }])
+      .mockResolvedValueOnce({ id: 4 });
+    expect((await upsertPrComment(target(), wf, request, me)).outcome).toBe("updated");
+    expect(request.mock.calls[1][0]).toBe("/repos/o/r/issues/comments/4");
+    expect(JSON.parse(request.mock.calls[1][1].body).body.startsWith(prCommentMarker("a b"))).toBe(true);
+  });
+
+  it("prefers a comment with the current marker over an old-format one", async () => {
+    const wf = { ...run, workflowId: "a b" };
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { id: 4, body: `${legacyPrCommentMarker("a b")}\nold`, ...ours },
+        { id: 5, body: formatPrComment("newer", wf), ...ours },
+      ])
+      .mockResolvedValueOnce({ id: 5 });
+    await upsertPrComment(target(), wf, request, me);
+    expect(request.mock.calls[1][0]).toBe("/repos/o/r/issues/comments/5");
   });
 
   it("does not look up the author for empty findings", async () => {
@@ -212,6 +265,22 @@ describe("formatPrComment", () => {
     expect(body.trimEnd().endsWith("<!-- sweny-output swenykabc -->")).toBe(true);
     expect(normalizeFindings(body)).toBe(findings);
   });
+
+  it("drops journal-style markers the agent wrote into the findings", () => {
+    const body = formatPrComment(
+      `<!-- sweny-output swenykdead -->\n${findings}\n<!-- sweny-output forged -->\n\n<!-- sweny-output swenykabc -->`,
+      run,
+    );
+    expect(body.match(/sweny-output/g)).toHaveLength(1);
+    expect(body).toContain("<!-- sweny-output swenykabc -->");
+    expect(body).not.toContain("swenykdead");
+  });
+
+  it("collapses blank lines and strips markers before comparing", () => {
+    expect(normalizeFindings(`<!-- sweny-run-comment:x -->\n${findings.replace("\n\n", "\n\n\n\n")}  \r\n`)).toBe(
+      findings,
+    );
+  });
 });
 
 describe("isRunPullRequest", () => {
@@ -226,12 +295,23 @@ describe("isRunPullRequest", () => {
 
 describe("prCommentSummaryLine", () => {
   it("says why a comment was skipped, with only the run's own values", () => {
-    expect(prCommentSummaryLine(run, "unchanged")).toBe(
+    expect(prCommentSummaryLine(run, { outcome: "unchanged" })).toBe(
       "**SWEny pr-review** on PR #3: skipped the comment: findings unchanged since the last post.",
     );
-    expect(prCommentSummaryLine(run, "empty")).toBe("**SWEny pr-review** on PR #3: skipped the comment: no findings.");
-    expect(prCommentSummaryLine({ ...run, workflowId: "x*`<b>`" }, "created")).toBe(
+    expect(prCommentSummaryLine(run, { outcome: "empty" })).toBe(
+      "**SWEny pr-review** on PR #3: skipped the comment: no findings.",
+    );
+    expect(prCommentSummaryLine({ ...run, workflowId: "x*`<b>`" }, { outcome: "created" })).toBe(
       "**SWEny x_b_** on PR #3: posted the findings comment.",
+    );
+  });
+
+  it("warns when the posting account is unknown", () => {
+    expect(prCommentSummaryLine(run, { outcome: "identity-unknown", identityUnknown: true })).toMatch(
+      /^\*\*Warning: SWEny pr-review\*\* on PR #3: skipped the comment: a bot already left/,
+    );
+    expect(prCommentSummaryLine(run, { outcome: "created", identityUnknown: true })).toContain(
+      "later runs will not update it",
     );
   });
 });

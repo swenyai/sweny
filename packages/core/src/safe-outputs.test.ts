@@ -98,6 +98,23 @@ describe("skipped writes and the job summary (#536)", () => {
     expect(result.error).toBe(undefined);
   });
 
+  it("a refusal wins over a skip in the same output", async () => {
+    const skill = fakeGithub().skill;
+    skill.tools.find((t) => t.name === "github_add_comment")!.handler = async () => ({
+      refused: true,
+      reason: "the tool refused the write",
+      skipped: "no findings",
+    });
+    const { o } = opts({
+      declarations: [{ type: "comment", number: 2 }],
+      intents: [intent({ type: "comment", body: "Finding", number: "2" })],
+      skills: new Map([["github", skill]]),
+    });
+    const result = await applySafeOutputs(o);
+    expect(result.receipts[0]).toMatchObject({ status: "refused", reason: "the tool refused the write" });
+    expect(result.error).toMatch(/was refused/);
+  });
+
   it("hands the run identity and summary writer to every write handler", async () => {
     const run = { workflowId: "review", repo: "acme/api", pullRequest: 2 };
     const summary = vi.fn();

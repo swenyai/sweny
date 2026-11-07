@@ -15,18 +15,33 @@
 
 import type { ToolRunContext } from "./types.js";
 
-/** Hidden first line that identifies a workflow's comment. Safe inside an HTML comment. */
+/**
+ * Hidden first line that identifies a workflow's comment. The id is percent
+ * encoded, with a "-" that precedes another "-" encoded too, so distinct ids
+ * give distinct markers (decodeURIComponent restores the id) and nothing can
+ * close the HTML comment early. Common ids (`pr-risk-review`) are unchanged.
+ */
 export function prCommentMarker(workflowId: string): string {
+  return `<!-- sweny-run-comment:${encodeURIComponent(workflowId).replace(/-(?=-)/g, "%2D")} -->`;
+}
+
+/** The marker before #536 (lossy: `a b` and `a_b` shared one). Read once to migrate, never written. */
+export function legacyPrCommentMarker(workflowId: string): string {
   const safe = workflowId.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/-{2,}/g, "-") || "workflow";
   return `<!-- sweny-run-comment:${safe} -->`;
+}
+
+function startsWithMarker(body: string, marker: string): boolean {
+  return body === marker || body.startsWith(`${marker}\n`) || body.startsWith(`${marker}\r\n`);
 }
 
 const RECEIPT_LABEL = "Run receipt";
 
 /**
- * The findings, without what changes on every run: the marker, the receipt
- * link, the run journal's idempotency markers, line endings and trailing
- * whitespace. Two runs with the same findings normalize to the same text.
+ * The findings, without what changes on every run: every sweny marker, the
+ * receipt link, the run journal's idempotency markers, line endings, trailing
+ * whitespace and runs of blank lines (collapsed to one). Two runs with the same
+ * findings normalize to the same text.
  */
 export function normalizeFindings(body: string): string {
   return body
@@ -46,15 +61,20 @@ function receiptLine(url: string | undefined): string {
   return url && /^https:\/\/[^\s<>()[\]]+$/.test(url) ? `\n\n[${RECEIPT_LABEL}](${url})` : "";
 }
 
-/** Marker, findings, one receipt link, then the run journal's markers (kept for crash recovery). */
+/**
+ * Marker, findings, one receipt link, then the run journal's idempotency
+ * marker (kept for crash recovery). The journal appends its marker as the
+ * body's last line; only that one is kept, so a marker the agent wrote into
+ * the findings is dropped with the rest of the markers.
+ */
 export function formatPrComment(findings: string, run: ToolRunContext): string {
-  const journal = findings.match(/<!-- sweny-output [^\n]*? -->/g) ?? [];
+  const journal = /<!-- sweny-output swenyk[0-9a-f]+ -->\s*$/.exec(findings)?.[0].trim();
   return [
     prCommentMarker(run.workflowId),
     "\n",
     normalizeFindings(findings),
     receiptLine(run.receiptUrl),
-    journal.length > 0 ? `\n\n${journal.join("\n")}` : "",
+    journal ? `\n\n${journal}` : "",
     "\n",
   ].join("");
 }
@@ -70,12 +90,14 @@ export function isRunPullRequest(run: ToolRunContext | undefined, repo: string, 
   );
 }
 
-export type PrCommentOutcome = "created" | "updated" | "unchanged" | "empty";
+export type PrCommentOutcome = "created" | "updated" | "unchanged" | "empty" | "identity-unknown";
 
 export interface PrCommentResult {
   outcome: PrCommentOutcome;
   id?: number;
   html_url?: string;
+  /** The posting account could not be resolved (see {@link upsertPrComment}). */
+  identityUnknown?: boolean;
 }
 
 type Request = (path: string, init?: RequestInit) => Promise<unknown>;
@@ -106,8 +128,11 @@ const MAX_PAGES = 30;
  *
  * Only a marked comment written by `author()` (the account sweny posts as,
  * looked up only when there is something to post) is ours: anyone can paste
- * the marker into a comment. With no known author, none is ours and a new
- * comment is created.
+ * the marker into a comment. The pre-#536 marker is accepted too, once, so an
+ * old billboard is taken over and re-marked. When the account is unknown,
+ * nothing is ours: if a bot already left a marked comment, the write is
+ * skipped ("identity-unknown") rather than stacking a duplicate; otherwise a
+ * new comment is created and `identityUnknown` is set so the caller warns.
  */
 export async function upsertPrComment(
   target: { repo: string; number: number; body: string },
@@ -124,21 +149,31 @@ export async function upsertPrComment(
   if (!findings) return { outcome: "empty" };
 
   const marker = prCommentMarker(run.workflowId);
+  const legacy = legacyPrCommentMarker(run.workflowId);
   const ours = await author();
   let existing: Comment | undefined;
-  for (let page = 1; ours && page <= MAX_PAGES && !existing; page++) {
+  let legacyMatch: Comment | undefined;
+  let botMarked = false;
+  for (let page = 1; page <= MAX_PAGES && !existing; page++) {
     const comments = await request(`/repos/${repo}/issues/${number}/comments?per_page=100&page=${page}`);
     if (!Array.isArray(comments)) throw new Error("GitHub comment list is unavailable");
-    existing = comments.find(
-      (c): c is Comment =>
-        typeof c?.id === "number" &&
-        typeof c?.body === "string" &&
-        (c.body === marker || c.body.startsWith(`${marker}\n`) || c.body.startsWith(`${marker}\r\n`)) &&
-        isAuthoredBy(c, ours),
-    );
+    for (const c of comments as Comment[]) {
+      if (typeof c?.id !== "number" || typeof c?.body !== "string") continue;
+      const exact = startsWithMarker(c.body, marker);
+      if (!exact && !startsWithMarker(c.body, legacy)) continue;
+      if (c.user?.type === "Bot") botMarked = true;
+      if (!isAuthoredBy(c, ours)) continue;
+      if (exact) {
+        existing = c;
+        break;
+      }
+      legacyMatch ??= c;
+    }
     if (comments.length < 100) break;
   }
+  existing ??= legacyMatch;
 
+  if (!ours && botMarked) return { outcome: "identity-unknown", identityUnknown: true };
   if (existing && normalizeFindings(existing.body) === findings) {
     return { outcome: "unchanged", id: existing.id, ...(existing.html_url ? { html_url: existing.html_url } : {}) };
   }
@@ -150,6 +185,7 @@ export async function upsertPrComment(
     outcome: existing ? "updated" : "created",
     ...(typeof out?.id === "number" ? { id: out.id } : {}),
     ...(typeof out?.html_url === "string" ? { html_url: out.html_url } : {}),
+    ...(ours ? {} : { identityUnknown: true }),
   };
 }
 
@@ -157,13 +193,17 @@ export async function upsertPrComment(
 export const PR_COMMENT_SKIP_REASON: Partial<Record<PrCommentOutcome, string>> = {
   empty: "no findings",
   unchanged: "findings unchanged since the last post",
+  "identity-unknown": "identity unknown",
 };
 
 /**
  * The job summary line for an outcome. Only the run's own values: a
  * sanitized workflow id, the PR number and a fixed phrase. No findings.
  */
-export function prCommentSummaryLine(run: ToolRunContext, outcome: PrCommentOutcome): string {
+export function prCommentSummaryLine(
+  run: ToolRunContext,
+  result: Pick<PrCommentResult, "outcome" | "identityUnknown">,
+): string {
   const id = run.workflowId.replace(/[^A-Za-z0-9._-]+/g, "_") || "workflow";
   const pr = run.pullRequest !== undefined ? ` on PR #${run.pullRequest}` : "";
   const what = {
@@ -171,6 +211,13 @@ export function prCommentSummaryLine(run: ToolRunContext, outcome: PrCommentOutc
     updated: "updated the findings comment in place",
     unchanged: "skipped the comment: findings unchanged since the last post",
     empty: "skipped the comment: no findings",
-  }[outcome];
-  return `**SWEny ${id}**${pr}: ${what}.`;
+    "identity-unknown":
+      "skipped the comment: a bot already left this workflow's comment, and the account this token posts as is unknown, so it cannot be updated safely",
+  }[result.outcome];
+  if (!result.identityUnknown) return `**SWEny ${id}**${pr}: ${what}.`;
+  const later =
+    result.outcome === "identity-unknown"
+      ? ""
+      : " The account this token posts as is unknown, so later runs will not update it.";
+  return `**Warning: SWEny ${id}**${pr}: ${what}.${later}`;
 }

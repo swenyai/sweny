@@ -50,14 +50,16 @@ SWEny is quiet by default. The run receipt (cost, tokens, duration, policy) and 
 
 When a workflow comments on the pull request it runs for (a `comment` safe output or the GitHub skill's `github_add_comment`), SWEny keeps **one comment per workflow per PR** and edits it in place:
 
-- It finds the comment by the hidden first line `<!-- sweny-run-comment:<workflow-id> -->`, and only among comments written by the account SWEny posts as (the token's user, or `github-actions[bot]` / your app's bot). A marked comment from anyone else is ignored. A sticky billboard from an older version has the same marker and author, so it becomes the findings comment.
+- It finds the comment by the hidden first line `<!-- sweny-run-comment:<workflow-id> -->` (the id percent-encoded), and only among comments written by the account the skill's `GITHUB_TOKEN` posts as: the token's user for a PAT, `github-actions[bot]` for the job's `github.token`, or your app's bot. A marked comment from anyone else is ignored.
+- The sticky billboard older versions posted was written with the job's `github.token`, so it becomes the findings comment only when the skill's `GITHUB_TOKEN` is also `github.token`. With a PAT or an app token, SWEny starts a new comment and the old billboard stays as it was.
+- If SWEny cannot tell which account the token posts as, the job summary says so. It then skips the write when a bot already left this workflow's marked comment, rather than post a duplicate.
 - The comment holds the findings and one **Run receipt** link to the Actions run.
 - Empty findings post nothing.
-- Findings unchanged since the last post are not written again. The comparison ignores the receipt link, line endings and trailing whitespace.
+- Findings unchanged since the last post are not written again. The comparison strips SWEny's markers and the receipt link, and ignores line endings, trailing whitespace and runs of blank lines.
 - Each run adds one line to the job summary saying what it did: posted, updated, or skipped and why.
 - If one run writes to the comment twice (two nodes each post a comment on the PR), the last write wins.
 
-The PR is the one the runner names (`PR_NUMBER`, which the Action sets, or `GITHUB_REF` on a `pull_request` event) in the run's own repository (`GITHUB_REPOSITORY`). Nothing in the workflow input or the agent's request can point the updating comment at another PR or repository. Comments on any other issue or PR are posted as before.
+The PR is the one the runner names (`PR_NUMBER`, which the Action sets, or `GITHUB_REF` on a `pull_request` event) in the run's own repository (`GITHUB_REPOSITORY`). Nothing in the workflow input or the agent's request can point the updating comment at another PR or repository. Only that comment is pinned this way: a comment on any other issue or PR is posted as a new comment, as before, wherever the workflow's own rules allow.
 
 `pr-comment: false` skips the Action's comment step. It does not stop comments a workflow asks for itself; to stop those, remove the workflow's comment output or make it read-only.
 

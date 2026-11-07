@@ -10,26 +10,6 @@ permissions:
   contents: read
 
 jobs:
-  # TEMPORARY (#536): what the default Actions token reports as its identity. Removed before review.
-  identity-probe:
-    name: Identity probe (temporary)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - name: Ask GitHub who github.token is
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set +e
-          echo "== GET /user"
-          gh api user --include 2>&1 | grep -iv '^x-github-request-id\|^set-cookie' | head -40
-          echo "exit=${PIPESTATUS[0]}"
-          echo "== GraphQL viewer"
-          gh api graphql --include -f query='{viewer{login __typename}}' 2>&1 | grep -iv '^x-github-request-id\|^set-cookie' | head -40
-          echo "exit=${PIPESTATUS[0]}"
-
   lint:
     name: Lint
     runs-on: ubuntu-latest

@@ -101,7 +101,7 @@ describe("formatRunComment", () => {
   });
 
   it("marker id is comment-safe", () => {
-    expect(runCommentMarker("a--b>c d")).toBe("<!-- sweny-run-comment:a-b_c_d -->");
+    expect(runCommentMarker("a--b>c d")).toBe("<!-- sweny-run-comment:a%2D-b%3Ec%20d -->");
   });
 
   it("escapes table-breaking node names", () => {

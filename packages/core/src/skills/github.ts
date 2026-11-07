@@ -72,9 +72,13 @@ export function githubGraphqlUrl(apiUrl: string | undefined): string {
 
 /**
  * The account this token posts as (#536). A PAT or OAuth token: `GET /user`.
- * An installation token (the Actions GITHUB_TOKEN, a GitHub App) gets 403
- * there, so its bot is GraphQL's `viewer` (a bot login without "[bot]"),
- * which REST shows as `<login>[bot]`. Undefined when neither answers.
+ * An installation token (the Actions `github.token`, a GitHub App) gets 403
+ * there, so ask GraphQL's `viewer`. Probed live on Actions (2026-11-07): the
+ * job token answers `{ login: "github-actions[bot]", __typename: "User" }`,
+ * so a "[bot]" suffix (which a user login cannot contain) or a `Bot` typename
+ * means a bot, shown by REST as `<name>[bot]` with type `Bot`; anything else
+ * is a user (a PAT whose `/user` read failed once). An HTTP error, a GraphQL
+ * `errors` array or an odd login leaves the account unknown.
  */
 export async function resolveCommentAuthor(ctx: ToolContext): Promise<CommentAuthor | undefined> {
   try {
@@ -89,16 +93,24 @@ export async function resolveCommentAuthor(ctx: ToolContext): Promise<CommentAut
     const res = await fetch(githubGraphqlUrl(ctx.githubApiUrl), {
       method: "POST",
       headers: { Authorization: `bearer ${ctx.config.GITHUB_TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ query: "query { viewer { login } }" }),
+      body: JSON.stringify({ query: "query { viewer { login __typename } }" }),
       signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) return undefined;
-    const login = ((await res.json()) as { data?: { viewer?: { login?: unknown } } } | null)?.data?.viewer?.login;
-    if (typeof login === "string" && /^[A-Za-z0-9-]+(\[bot\])?$/.test(login)) {
+    const json = (await res.json()) as {
+      data?: { viewer?: { login?: unknown; __typename?: unknown } | null } | null;
+      errors?: unknown;
+    } | null;
+    if (json?.errors !== undefined && json?.errors !== null) return undefined;
+    const login = json?.data?.viewer?.login;
+    const kind = json?.data?.viewer?.__typename;
+    if (typeof login !== "string" || !/^[A-Za-z0-9-]+(\[bot\])?$/.test(login)) return undefined;
+    if (login.endsWith("[bot]") || kind === "Bot") {
       return { login: `${login.replace(/\[bot\]$/, "")}[bot]`, type: "Bot" };
     }
+    if (kind === "User") return { login, type: "User" };
   } catch {
-    // Unknown author: no existing comment counts as ours.
+    // Unknown account: handled by upsertPrComment.
   }
   return undefined;
 }
@@ -378,7 +390,7 @@ export const github: Skill = {
             (path, init) => gh(path, ctx, init),
             () => commentAuthorFor(ctx, ctx.run!),
           );
-          ctx.summary?.(prCommentSummaryLine(ctx.run, result.outcome));
+          ctx.summary?.(prCommentSummaryLine(ctx.run, result));
           const skipped = PR_COMMENT_SKIP_REASON[result.outcome];
           return {
             ...(result.id !== undefined ? { id: result.id } : {}),
