@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import {
   collectCredentials,
@@ -19,7 +20,7 @@ import {
   writeWorkflowFile,
 } from "./new.js";
 import type { InitSelections, Credential } from "./new.js";
-import { ensureGitignoreEnv, nonInteractiveUsage } from "./new.js";
+import { SCHEDULING_DOCS_URL, ensureGitignoreEnv, nonInteractiveUsage, outroMessage } from "./new.js";
 import { WORKFLOW_TEMPLATES } from "./templates.js";
 import { parseWorkflow } from "../schema.js";
 
@@ -1351,6 +1352,46 @@ describe("runNew first-run paths", () => {
     const cwd = tmp();
     await runNew({ template: "explain-repo", yes: true });
     expect(fs.existsSync(path.join(cwd, ".github"))).toBe(false);
+  });
+
+  it("the outro of the starter says how to schedule this workflow, and names no other pack (#534)", async () => {
+    tmp();
+    const p = await import("@clack/prompts");
+    await runNew({ template: "explain-repo", yes: true });
+    const line = (p.outro as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as string;
+    expect(line).toBe("You're all set! Run it on a schedule: https://docs.sweny.ai/action/scheduling/");
+    expect(line).not.toContain("weekly-digest");
+    expect(line).not.toContain("\n");
+  });
+
+  it("the outro of any other non-pack template is the same scheduling line (#534)", async () => {
+    tmp();
+    const p = await import("@clack/prompts");
+    await runNew({ template: "pr-review", yes: true });
+    expect((p.outro as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]).toBe(
+      `You're all set! Run it on a schedule: ${SCHEDULING_DOCS_URL}`,
+    );
+  });
+
+  it("the outro of a pack stays as it was: the pack's own trigger step covers scheduling (#534)", async () => {
+    tmp();
+    const p = await import("@clack/prompts");
+    await runNew({ template: "weekly-digest", yes: true });
+    expect((p.outro as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]).toBe("You're all set!");
+  });
+
+  it("outroMessage: existing config, and no schedule offer when no workflow was written (#534)", () => {
+    expect(outroMessage(true, true)).toBe(`Workflow added! Run it on a schedule: ${SCHEDULING_DOCS_URL}`);
+    expect(outroMessage(false, false)).toBe("You're all set!");
+  });
+
+  it("the scheduling page the outro links to exists in the docs (#534)", () => {
+    const rel = new URL(SCHEDULING_DOCS_URL).pathname.replace(/^\/|\/$/g, "");
+    expect(
+      fs.existsSync(
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../web/src/content/docs", `${rel}.md`),
+      ),
+    ).toBe(true);
   });
 
   it("rejects an unknown --template with exit 1", async () => {

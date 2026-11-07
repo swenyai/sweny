@@ -3,15 +3,17 @@ title: Introduction
 description: What SWEny is, how it works, and why the DAG matters.
 ---
 
-SWEny turns natural language into reliable AI workflows. Describe what you want done, and SWEny builds a DAG — a directed acyclic graph of nodes, each with a focused instruction, scoped tools, and structured output. Then it runs it, tracking every node, tool call, and routing decision.
+SWEny runs workflows for coding agents. A workflow is a DAG of nodes, each with a focused instruction, scoped tools, and structured output. SWEny runs it on Claude Code, Codex, pi or an ACP agent under one set of rules, tracks every node, tool call and routing decision, and ends every run with a receipt.
+
+## Your first run
 
 ```bash
-sweny new   # pick "Describe your own", then describe the task:
-            # "research competitors, gather pricing and features,
-            #  synthesize a comparison, and produce an executive brief"
+npx @sweny-ai/core new      # pick a named workflow; explain-repo needs no skill credentials
+npx @sweny-ai/core check    # preflight: is your agent logged in?
+npx @sweny-ai/core workflow run .sweny/workflows/explain-repo.yml
 ```
 
-One sentence in, a full workflow out. Refine it with natural language, run it immediately, or deploy it to GitHub Actions.
+You need a login or API key for the agent that runs your nodes (Claude Code by default). The [Quick Start](/getting-started/quick-start/) lists the credentials for each agent, shows the receipt you should see, and says what to do after. To replay a recorded demo first, run `sweny try` (sample data, not a real run).
 
 ## Why a DAG?
 
@@ -84,7 +86,7 @@ You can also [build custom workflows](/workflows/custom/) from natural language,
 
 ## Next steps
 
-- **[Quick Start](/getting-started/quick-start/)** — install and create your first workflow in under a minute
+- **[Quick Start](/getting-started/quick-start/)** — credentials, a named workflow, a preflight check, your first run and its receipt
 - **[Core Concepts](/getting-started/concepts/)** — understand workflows, nodes, edges, and skills in depth
 - **[CLI Examples](/cli/examples/)** — real-world workflow examples from one-liners to complex pipelines
 - **[End-to-End Walkthrough](/getting-started/walkthrough/)** — follow a real triage run from error spike to fix PR
