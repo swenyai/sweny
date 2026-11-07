@@ -959,7 +959,8 @@ describe("a write handler's refusal in the journal (#544)", () => {
 
   /** A provider whose create handler refuses `times` times (then files the issue), optionally after filing it. */
   function refusingProvider(o: { times: number; transient?: boolean; filesFirst?: boolean }) {
-    const gh = fakeProvider();
+    // With a listing tool the lookup on resume can prove a write absent (search alone cannot).
+    const gh = fakeProvider({ listing: true });
     const create = gh.skill.tools.find((t) => t.name === "github_create_issue")!;
     const real = create.handler;
     let calls = 0;
@@ -1025,6 +1026,7 @@ describe("a write handler's refusal in the journal (#544)", () => {
     const { results } = await resumeRun(cwd, reporting(), agent, [gh.skill]);
     // The provider holds the marked issue, but the journal says it was refused: no lookup turns it into applied.
     expect(gh.searches()).toBe(0);
+    expect(gh.lists()).toBe(0);
     expect(calls()).toBe(1);
     expect(gh.issues).toHaveLength(1);
     expect(results!.get("report")!.outputs).toEqual([
@@ -1039,6 +1041,8 @@ describe("a write handler's refusal in the journal (#544)", () => {
     await firstRun(cwd, reporting(), agent, [gh.skill]);
     expect(gh.issues).toHaveLength(0);
     const { results } = await resumeRun(cwd, reporting(), agent, [gh.skill]);
+    // The existing unconfirmed-intent rule: looked up on the provider first, then sent.
+    expect(gh.lists()).toBeGreaterThan(0);
     expect(calls()).toBe(2);
     expect(gh.issues).toHaveLength(1);
     expect(results!.get("report")!.outputs).toEqual([expect.objectContaining({ status: "applied", ref: 1 })]);
