@@ -12,8 +12,10 @@ Create a new SWEny workflow. Interactive picker offering templates, AI-generated
 ```bash
 sweny new          # interactive picker
 sweny new e2e      # jump straight into the end-to-end browser-testing wizard
-sweny new <id>     # use a built-in template by id
+sweny new <id>     # use a built-in template by id, or a workflow from the marketplace
 ```
+
+An id that is not a built-in template is installed from [swenyai/marketplace](https://github.com/swenyai/marketplace) (`workflows/official/<id>.yml`, then `workflows/community/<id>.yml`). The interactive picker's "Browse marketplace" entry lists the same workflows, and only appears when GitHub is reachable. Set `GITHUB_TOKEN` to raise GitHub's rate limit.
 
 In a fresh repo, walks you through provider inference, credential collection, and writes `.sweny.yml` + `.env` + `.sweny/workflows/<id>.yml`. In a repo that already has `.sweny.yml`, adds the new workflow non-destructively — existing config is preserved and `.env` is append-only.
 
@@ -73,7 +75,7 @@ sweny triage [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--agent <provider>` | Coding agent: `claude`, `codex` or `pi` (experimental); other values are rejected (alias: `--coding-agent-provider`) | `claude` |
+| `--agent <provider>` | Coding agent: `claude`, `codex`, `pi` (experimental) or `acp:<command>` for any ACP agent (experimental); other values are rejected (alias: `--coding-agent-provider`) | `claude` |
 | `--observability-provider <provider>` | Observability platform | `datadog` |
 | `--issue-tracker-provider <provider>` | Issue tracker: `github-issues`, `linear`, `jira`, `file` | `github-issues` |
 | `--source-control-provider <provider>` | Source control: `github`, `gitlab`, `file` | `github` |
@@ -87,8 +89,8 @@ sweny triage [options]
 | `--severity-focus <focus>` | Severity level focus | `errors` |
 | `--service-filter <filter>` | Service filter glob pattern | `*` |
 | `--investigation-depth <depth>` | Investigation depth: `quick`, `standard`, `thorough` | `standard` |
-| `--max-investigate-turns <n>` | Max Claude turns for investigation (1-500) | `50` |
-| `--max-implement-turns <n>` | Max Claude turns for implementation (1-500) | `30` |
+| `--max-investigate-turns <n>` | Max coding agent turns for investigation (1-500) | `50` |
+| `--max-implement-turns <n>` | Max coding agent turns for implementation (1-500) | `30` |
 
 ### PR and branch options
 
@@ -109,7 +111,6 @@ sweny triage [options]
 | `--no-novelty-mode` | Allow +1 on existing issues instead of skipping duplicates | -- |
 | `--issue-override <issue>` | Work on a specific existing issue instead of scanning for new ones | -- |
 | `--additional-instructions <text>` | Extra instructions passed to the coding agent | -- |
-| `--service-map-path <path>` | Path to service map YAML | `.github/service-map.yml` |
 
 ### Output options
 
@@ -119,29 +120,10 @@ sweny triage [options]
 | `--stream` | Stream NDJSON `ExecutionEvent` objects to stdout (for Studio / automation) | `false` |
 | `--bell` | Ring terminal bell on completion | `false` |
 
-### Cache options
-
-The executor caches each completed node's result. If a workflow crashes mid-execution and is restarted, previously completed nodes are loaded from cache instead of re-executed. This saves time and API costs during development and crash recovery.
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--cache-dir <path>` | Step cache directory | `.sweny/cache` |
-| `--cache-ttl <seconds>` | Cache TTL in seconds (0 = infinite) | `86400` |
-| `--no-cache` | Disable step cache entirely | -- |
-| `--output-dir <path>` | Output directory for file providers | `.sweny/output` |
-
-Disable caching with `--no-cache` when debugging or when input data has changed but the workflow definition hasn't.
-
 ### Provider-specific options
 
 | Option | Description |
 |--------|-------------|
-| `--linear-team-id <id>` | Linear team ID |
-| `--linear-bug-label-id <id>` | Linear bug label ID |
-| `--linear-triage-label-id <id>` | Linear triage label ID |
-| `--linear-state-backlog <name>` | Linear backlog state name |
-| `--linear-state-in-progress <name>` | Linear in-progress state name |
-| `--linear-state-peer-review <name>` | Linear peer-review state name |
 | `--log-file <path>` | Path to JSON log file (for `--observability-provider file`) |
 | `--dd-site <site>` | Datadog site (default: `datadoghq.com`) |
 | `--sentry-org <org>` | Sentry organization slug |
@@ -161,7 +143,6 @@ Disable caching with `--no-cache` when debugging or when input data has changed 
 | `--axiom-org-id <id>` | Axiom org ID |
 | `--betterstack-source-id <id>` | Better Stack log source ID |
 | `--betterstack-table-name <name>` | Better Stack ClickHouse table name |
-| `--gitlab-base-url <url>` | GitLab base URL (default: `https://gitlab.com`) |
 | `--workspace-tools <tools>` | Comma-separated workspace tool integrations: `slack`, `notion`, `pagerduty`, `monday` |
 
 ## sweny implement
@@ -176,7 +157,7 @@ The `<issueId>` argument is the issue identifier from your tracker (e.g. `ENG-12
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--agent <provider>` | Coding agent: `claude`, `codex` or `pi` (experimental); other values are rejected (alias: `--coding-agent-provider`) | `claude` |
+| `--agent <provider>` | Coding agent: `claude`, `codex`, `pi` (experimental) or `acp:<command>` for any ACP agent (experimental); other values are rejected (alias: `--coding-agent-provider`) | `claude` |
 | `--issue-tracker-provider <provider>` | Issue tracker: `linear`, `jira`, `github-issues`, `file` | `linear` |
 | `--source-control-provider <provider>` | Source control: `github`, `gitlab`, `file` | `github` |
 | `--dry-run` | Analyze and plan only. Runs with read-only tools (no code edits, no PR, and no shell (on Codex, a shell confined to its OS read-only sandbox: no writes, no network)). See [Dry run](/workflows/#dry-run). | `false` |
@@ -187,10 +168,6 @@ The `<issueId>` argument is the issue identifier from your tracker (e.g. `ENG-12
 | `--review-mode <mode>` | PR merge: `auto` or `review` | `review` |
 | `--additional-instructions <text>` | Extra instructions for the coding agent | -- |
 | `--stream` | Stream NDJSON events to stdout (for Studio / automation) | `false` |
-| `--linear-team-id <id>` | Linear team ID | -- |
-| `--linear-state-in-progress <name>` | Linear in-progress state name | -- |
-| `--linear-state-peer-review <name>` | Linear peer-review state name | -- |
-| `--output-dir <path>` | Output directory for file providers | `.sweny/output` |
 | `--workspace-tools <tools>` | Comma-separated workspace tool integrations | -- |
 
 ### No push under --stage and --dry-run
@@ -270,7 +247,7 @@ sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 | `--max-tokens <n>` | Run-wide token budget (input plus output) for a single workflow file. The lowest of this and the workflow's `budget.tokens` wins. A crossing stops the agent, fails the node and halts the run. See [Spend budgets](/workflows/yaml-reference/#spend-budgets) | none |
 | `--max-cost <usd>` | Run-wide cost budget in US dollars, from harness-reported cost (never estimated). The lowest of this and the workflow's `budget.cost_usd` wins | none |
 | `-y, --yes` | Skip the batch confirmation prompt (use in CI) | `false` |
-| `--agent <id>` | Coding agent that runs the nodes: `claude`, `codex` or `pi` (experimental) | `claude` |
+| `--agent <id>` | Coding agent that runs the nodes: `claude`, `codex`, `pi` (experimental) or `acp:<command>` for any ACP agent (experimental) | `claude` |
 | `--harness-policy <mode>` | `strict` refuses a node whose policy the agent cannot enforce; `warn` runs it and reports it as degraded. Env: `SWENY_HARNESS_POLICY` | `strict` under GitHub Actions, else `warn` |
 | `--no-decider` | Skip the decision model for this run: the agent decides the routes of `route_by: decider` nodes. See [Decision models](/advanced/decision-models/) | decider on when configured |
 | `--no-journal` | Do not write the run journal (kept in the sweny state dir, see [Resume a run](/cli/resume/#the-journal)). The run cannot be resumed. Or set `journal: off` in `.sweny.yml` | journal on |
@@ -353,6 +330,8 @@ sweny workflow export triage > my-triage.yml
 
 ### sweny workflow create
 
+**Deprecated.** Use [`sweny new`](#sweny-new) and pick "Describe your own"; this command prints a deprecation warning.
+
 Generate a new workflow from a natural language description.
 
 ```bash
@@ -407,6 +386,109 @@ sweny workflow list [options]
 | `--json` | Output as JSON array | `false` |
 
 Prints each configured skill's ID, category, and description. For the full picture (built-in plus custom, configured plus unconfigured), use [`sweny skill list`](#sweny-skill-list) instead.
+
+## sweny runs
+
+Every `sweny workflow run` leaves a record in `.sweny/runs/`. Two commands read it back; neither calls an agent or the network.
+
+```bash
+sweny runs                      # recent runs, newest first
+sweny runs diff                 # what changed since the run before, for the newest workflow with two runs
+sweny runs diff <a> <b>         # two specific runs (a run id prefix is enough when it is unique)
+sweny runs diff --workflow triage
+```
+
+| Option | Applies to | Description | Default |
+|--------|-----------|-------------|---------|
+| `--workflow <id>` | `runs`, `runs diff` | Only runs of this workflow; for `diff`, the pair is its last two runs | all workflows |
+| `--limit <n>` | `runs` | Max runs to show | `20` |
+| `--json` | `runs`, `runs diff` | Machine-readable output, no color | `false` |
+
+### sweny runs diff
+
+The diff leads with the answers: what each node's declared outputs gained, lost or changed between the older run (`a`) and the newer one (`b`). How the runs ran (status, duration, tokens, cost, retries, routes) follows. The last line is always plain text with the counts.
+
+```text
+  a  20261106-100412-3fa9c1  triage  ✓ success  2m10s
+  b  20261107-100455-b71d02  triage  ✓ success  2m31s
+
+  answers
+    investigate
+      findings     1 added · 1 resolved · 1 changed · 1 unchanged
+        + Race in token refresh
+        - Stale cache key
+        ~ Null deref in checkout
+            severity  medium → high
+      novel_count  2 → 3
+
+  workflow   unchanged (3f2a9c1)
+  status     ✓ success (same)
+  duration   2m10s → 2m31s (+21s)
+
+  nodes
+    investigate  ✓  duration 1m40s → 2m02s (+22s)
+    report       ✓  no change
+
+  routes
+    identical
+
+  answers: 1 added, 1 resolved, 3 changed, 1 unchanged
+```
+
+Color follows the usual rules: off under `NO_COLOR`, when output is not a terminal, and under `TERM=dumb`. `SWENY_ASCII=1` swaps the glyphs (`→`, `·`, `✓`) for ASCII.
+
+**What is compared.** `workflow run` saves each successful node's declared output fields to `.sweny/runs/<run-id>/answers.json`: only the paths the node's `output` schema declares, nested ones included (`findings[].title` keeps `title` and nothing else); with no schema, a string `summary`. The file is local only, redacted like `output.md` (keys as well as values), and ignored by git. Strings over 2000 characters are cut in the file, but a change past the cut is still reported as changed. A node that failed or was skipped saves nothing, so it is reported as `not compared` and never as "everything resolved". `--no-history` and `history: off` skip the file.
+
+**What counts as the same finding.** A list field (all objects, or all plain values) is compared item by item:
+
+1. An object is identified by the first of `id`, `key`, `fingerprint`, `title`, `name` that holds a non-empty string or a number, trimmed, lowercased and with whitespace collapsed. `Null deref in checkout` and ` null  deref in CHECKOUT ` are the same finding.
+2. An object with none of those fields is identified by its whole content. Any edit to it reads as one resolved and one added.
+3. A plain string, number or boolean is identified by its normalized value.
+4. Two items in one list with the same identity pair up in order.
+
+A matched pair is `unchanged` when its content is identical and `changed` otherwise, listing the fields that differ. An item only in `b` is `added`; only in `a` is `resolved`. Any other field (a count, a string, an object) is one value: `added`, `resolved`, `changed` or `unchanged`. Long or multi-line strings show as `+2 -1 lines`. If the model rewords a finding's title between runs it reads as resolved plus added; put a stable `id` or `fingerprint` in the node's output schema when you need exact matching.
+
+When two runs are of different workflows, or a run has no saved answers, the answers are not compared and the last line says why. `sweny runs diff` exits `1` when there is nothing to diff (no runs, or fewer than two of the workflow).
+
+### JSON shape
+
+`sweny runs diff --json` prints one object. The shape is stable; fields are only ever added.
+
+```json
+{
+  "schema_version": 1,
+  "a": { "run_id": "...", "workflow_id": "...", "status": "success", "...": "the run record, as in `sweny runs --json`" },
+  "b": { "...": "..." },
+  "answers": {
+    "available": true,
+    "counts": { "added": 1, "resolved": 1, "changed": 3, "unchanged": 1 },
+    "entries": [
+      {
+        "node": "investigate", "field": "findings", "kind": "collection",
+        "added":    [{ "id": "race in token refresh", "label": "Race in token refresh", "value": { "title": "...", "severity": "high" } }],
+        "resolved": [{ "id": "stale cache key", "label": "Stale cache key", "value": { "...": "..." } }],
+        "changed":  [{ "id": "null deref in checkout", "label": "Null deref in checkout",
+                       "fields": [{ "field": "severity", "before": "medium", "after": "high" }] }],
+        "unchanged": 1
+      },
+      { "node": "investigate", "field": "novel_count", "kind": "value", "status": "changed", "before": 2, "after": 3 }
+    ],
+    "not_compared": [{ "node": "report", "only_in": "a" }]
+  }
+}
+```
+
+When the answers cannot be compared, `answers` is `{ "available": false, "reason": "different_workflows" }` or `{ "available": false, "reason": "missing_answers", "missing": ["a"] }`. A value entry's `status` is `added`, `resolved`, `changed` or `unchanged`; `before` and `after` are present when they apply.
+
+### Since the last run
+
+After a run that has an earlier run of the same workflow, `workflow run` prints one dim line under the receipt, adds it to the GitHub step summary and to the PR comment, and links the command:
+
+```text
+since last run: 1 added, 1 resolved (sweny runs diff --workflow triage)
+```
+
+It carries counts only, never the text of an answer, and the workflow id in the command is the current run's own. If a node could not be compared (it failed, was skipped, or had no output in one of the runs) the line says `N not compared` instead of reading as no changes. History is never trusted for what gets printed: records whose id does not match their file name, or that repeat another run's id, are ignored. In GitHub Actions the history is empty on every run unless you keep `.sweny/runs` between runs: see [keep run history between runs](/action/scheduling/#keep-run-history-between-runs).
 
 ## End-to-end browser testing
 
@@ -520,7 +602,7 @@ sweny upgrade --force
 › sweny 0.1.66 is available (you have 0.1.65). Run `sweny upgrade`
 ```
 
-The check is cached for 24 hours and skipped in CI, piped invocations, and when `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1` is set.
+The check asks the npm registry (`registry.npmjs.org`) for the latest `@sweny-ai/core` version and sends nothing else. After a successful check the answer is cached for 24 hours; a failed or timed-out check is not cached, so it is retried on the next command. It is skipped in CI, when stderr is not a terminal, for `sweny try`, and when `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1` is set.
 
 **Homebrew installs** are detected but not driven automatically — the command prints `brew upgrade sweny` for you to run.
 

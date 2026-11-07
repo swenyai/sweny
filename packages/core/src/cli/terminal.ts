@@ -85,6 +85,29 @@ export function glyphs(env: Env = process.env): GlyphSet {
   return glyphsFor(supportsUnicode(env));
 }
 
+/**
+ * Text that came from a file an agent can write (run history, say), made safe to print: terminal
+ * control sequences are removed whole (CSI such as `ESC[2J`, OSC such as the `ESC]8;;url` hyperlink
+ * and title sequences, DCS/PM/APC strings, lone ESC pairs, their 8-bit C1 forms), then any other
+ * C0/C1 control character, bidi override and line separator is dropped or becomes a space; runs of
+ * whitespace collapse to one space. Printable Unicode is kept. `max` caps the length (default 200,
+ * `...` marks a cut).
+ */
+export function sanitizeTerminal(text: unknown, max = 200): string {
+  const s = String(text ?? "")
+    // OSC (ESC ] / 0x9d) up to BEL or ST; DCS, SOS, PM, APC (ESC P X ^ _ / 0x90 0x98 0x9e 0x9f) up to ST
+    .replace(/(?:\x1b\]|\x9d)[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)?/g, "")
+    .replace(/(?:\x1b[PX^_]|[\x90\x98\x9e\x9f])[^\x1b\x9c]*(?:\x1b\\|\x9c)?/g, "")
+    // CSI (ESC [ / 0x9b): parameters, intermediates, final byte
+    .replace(/(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]?/g, "")
+    // any other ESC pair
+    .replace(/\x1b[ -~]?/g, "")
+    .replace(/[\u2028\u2029\s]+/g, " ")
+    .replace(/[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, "")
+    .trim();
+  return s.length > max ? s.slice(0, Math.max(0, max - 3)) + "..." : s;
+}
+
 function truthy(v: string | undefined): boolean {
   return v !== undefined && v !== "" && v !== "0" && v.toLowerCase() !== "false";
 }

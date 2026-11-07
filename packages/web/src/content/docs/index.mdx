@@ -25,11 +25,12 @@ import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
 npm install -g @sweny-ai/core
 ```
 
-SWEny runs nodes on Claude Code by default; Codex is shipped and pi and ACP agents are experimental (see [Agents and policies](/getting-started/agents-and-policies/)). For Claude Code you need an Anthropic API key, OAuth token, or an authenticated Claude Code instance.
+SWEny runs nodes on Claude Code by default; Codex is shipped and pi and ACP agents are experimental (see [Agents and policies](/getting-started/agents-and-policies/)). Credentials by agent: Claude Code needs an `ANTHROPIC_API_KEY`, a `CLAUDE_CODE_OAUTH_TOKEN`, or a Claude Code login; Codex needs `CODEX_API_KEY` or `OPENAI_API_KEY`, or a `codex login`; pi needs the API key of the model provider it calls; ACP agents authenticate on their own (pass their key var through `SWENY_ENV_PASSTHROUGH`). See the [README](https://github.com/swenyai/sweny#quickstart).
 
 ```bash
-sweny workflow create "scan our repo for security issues, check dependencies \
-  for vulnerabilities, and create Linear tickets for anything critical"
+sweny new   # pick "Describe your own", then describe the task:
+            # "scan our repo for security issues, check dependencies for
+            #  vulnerabilities, and create Linear tickets for anything critical"
 ```
 
 ```
@@ -89,7 +90,7 @@ sweny triage --dry-run          # investigate production errors
 sweny implement ENG-123         # fix a tracked issue and open a PR
 ```
 
-Or [build your own](/workflows/custom/) from a single sentence with `sweny workflow create`.
+Or [build your own](/workflows/custom/) from a single sentence with `sweny new` ("Describe your own").
 
 ## E2E browser testing
 

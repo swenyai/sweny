@@ -6,8 +6,9 @@ description: What SWEny is, how it works, and why the DAG matters.
 SWEny turns natural language into reliable AI workflows. Describe what you want done, and SWEny builds a DAG — a directed acyclic graph of nodes, each with a focused instruction, scoped tools, and structured output. Then it runs it, tracking every node, tool call, and routing decision.
 
 ```bash
-sweny workflow create "research competitors, gather pricing and features, \
-  synthesize a comparison, and produce an executive brief"
+sweny new   # pick "Describe your own", then describe the task:
+            # "research competitors, gather pricing and features,
+            #  synthesize a comparison, and produce an executive brief"
 ```
 
 One sentence in, a full workflow out. Refine it with natural language, run it immediately, or deploy it to GitHub Actions.
@@ -22,7 +23,7 @@ A single prompt that says "research competitors and write a report" works someti
 
 ## How it works
 
-You don't need to write YAML. `sweny workflow create` generates workflows from plain English, and `sweny workflow edit` modifies them. But here's what's happening under the hood:
+You don't need to write YAML. `sweny new` ("Describe your own") generates workflows from plain English, and `sweny workflow edit` modifies them. But here's what's happening under the hood:
 
 ```
   ┌─────────────┐

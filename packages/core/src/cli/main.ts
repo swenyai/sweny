@@ -60,6 +60,7 @@ import {
 } from "./final-output.js";
 import { buildRunRecord, createNodeTimer, historyDisabled, newRunId, recordRun } from "./run-history.js";
 import { registerRunsCommand } from "./runs.js";
+import { formatSinceLast, formatSinceLastMarkdown, recordRunAnswers, type SinceLast } from "./run-answers.js";
 import { registerTryCommand } from "./try.js";
 import { JournalLockedError, JournalMismatchError, RunJournal, runSecretValues } from "../journal.js";
 import {
@@ -89,7 +90,6 @@ import {
   registerImplementCommand,
   parseCliInputs,
   validateInputs,
-  validateWarnings,
   parsePositiveInt,
 } from "./config.js";
 import type { CliConfig } from "./config.js";
@@ -351,11 +351,6 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     console.error(formatValidationErrors(errors));
     console.error(c.subtle("\n  Run sweny triage --help for usage information.\n"));
     process.exit(1);
-  }
-
-  // Non-fatal warnings (e.g. missing service map file)
-  for (const warning of validateWarnings(config)) {
-    console.warn(chalk.yellow(`  \u26A0  ${warning}`));
   }
 
   // Banner
@@ -691,11 +686,6 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     maxImplementTurns: parsePositiveInt(options.maxImplementTurns ?? (fileConfig["max-implement-turns"] as string), 40),
     baseBranch: (options.baseBranch as string) || (fileConfig["base-branch"] as string) || "main",
     repository: (options.repository as string) || process.env.GITHUB_REPOSITORY || "",
-    outputDir:
-      (options.outputDir as string) ||
-      process.env.SWENY_OUTPUT_DIR ||
-      (fileConfig["output-dir"] as string) ||
-      ".sweny/output",
   };
 
   // Validate (parity with triage): surface the curated "Missing: ..." errors
@@ -1263,6 +1253,17 @@ export async function workflowRunAction(
     journal?.end(wfHasFailed ? "failed" : "success");
     recordHistory(results, trace, false);
 
+    // What the run answered (declared output fields, redacted), beside the history record, then a
+    // comparison with the previous run of this workflow for the "since last run" line.
+    const sinceLast: SinceLast | null = historyDisabled(options.history, fileConfig["history"])
+      ? null
+      : recordRunAnswers({
+          runId,
+          workflow,
+          results,
+          secrets: runSecretValues([...skills.values(), ...builtinSkills], process.env),
+        });
+
     // Close the cloud lifecycle session BEFORE the JSON early-exit so
     // every workflow run reports a terminal status, regardless of how
     // the CLI returns (json, mermaid, or normal stdout).
@@ -1279,6 +1280,7 @@ export async function workflowRunAction(
         trace,
         durationsMs: Object.fromEntries(nodeTimer.durations),
         runId,
+        sinceLast: sinceLast ? formatSinceLastMarkdown(sinceLast) : null,
       });
     }
 
@@ -1307,7 +1309,14 @@ export async function workflowRunAction(
     // Run receipt (metadata only) + optional $GITHUB_STEP_SUMMARY.
     runLogger.flush();
     const receipt = summarizeRun(results, wfDurationMs, false, trace);
-    writeStepSummary(workflow, results, receipt, trace);
+    writeStepSummary(
+      workflow,
+      results,
+      receipt,
+      trace,
+      process.env,
+      sinceLast ? formatSinceLastMarkdown(sinceLast) : null,
+    );
 
     // The answer, above the receipt: the terminal node's result, or the failed node's error.
     // Also saved to .sweny/runs/<id>/output.md (local only; --no-history skips the file).
@@ -1330,11 +1339,13 @@ export async function workflowRunAction(
     // The receipt: a ticket on a TTY, one plain line in CI and pipes.
     if (wfHasFailed) {
       await writeReceipt(receipt, { workflow: workflow.id, runId, stream: process.stderr });
+      if (sinceLast) console.error(createPaint(colorEnabled(process.stderr)).muted(`  ${formatSinceLast(sinceLast)}`));
       if (journal?.active) console.error(c.subtle(`  resume with: sweny workflow resume ${runId}\n`));
       process.exit(1);
       return;
     }
     await writeReceipt(receipt, { workflow: workflow.id, runId, stream: process.stdout });
+    if (sinceLast) console.log(createPaint(colorEnabled(process.stdout)).muted(`  ${formatSinceLast(sinceLast)}`));
     process.exit(0);
   } catch (err) {
     // A refused resume ran nothing: leave the run's journal and history as they were.

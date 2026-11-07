@@ -5,7 +5,7 @@
 // their run never move, and (checked against the run's head) no more of the
 // journal's end can be lost than the one record the head itself holds.
 
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it as baseIt, expect, afterAll } from "vitest";
 import * as fc from "fast-check";
 import { createHmac, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -36,9 +36,22 @@ const file = join(root, "journal.ndjson");
 const KEY = randomBytes(32);
 // The run id built journals are chained to.
 const RUN = "20260930-120000-0a0b0c";
-// The two exhaustive specs read the journal once per byte (a few thousand
-// authenticated reads, each a file write + read); 5s is too tight on slow runners.
+// Every case writes its bytes to one file and reads them back; file I/O is the
+// only work here that is not plain CPU. Measured on GitHub-hosted
+// ubuntu-26.04 (Node 20, 22, 24, quiet): each 150 to 300 run property takes
+// 0.03 to 0.30s, and each of the three exhaustive specs (a few thousand reads,
+// one per byte) 0.6 to 0.95s. On a busy runner one property has stalled for
+// 5s+ (the default test timeout) while the file as a whole took ~10s instead of
+// the usual 3 to 5s; the other properties in that run finished normally. So the budgets are set
+// from the quiet cost with a stall allowed for, not from the happy path:
+//   PROPERTY_TIMEOUT_MS   30s = 100x the slowest quiet property (0.30s), 6x the stalls seen
+//   EXHAUSTIVE_TIMEOUT_MS 60s = 63x the slowest quiet exhaustive spec (0.95s)
+// A real regression (an O(n^2) read, a fsync per record) is orders of magnitude
+// past either, so these still catch it.
+const PROPERTY_TIMEOUT_MS = 30_000;
 const EXHAUSTIVE_TIMEOUT_MS = 60_000;
+// `it` here defaults to the property budget; the exhaustive specs pass their own.
+const it = (name: string, fn: () => void, timeout = PROPERTY_TIMEOUT_MS) => baseIt(name, fn, timeout);
 process.env.SWENY_STATE_DIR = join(root, "state");
 
 // ─── Building valid journals ─────────────────────────────────────

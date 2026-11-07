@@ -26,6 +26,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      # CHANGELOG.md is retired; release notes are the GitHub Release that
+      # tag-action creates. Read the changes straight from git so this job
+      # does not race the release creation.
+      - name: List changes since the previous release
+        id: changes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          PREV=$(git tag -l 'v5.*' --sort=-v:refname | awk -v t="$TAG" 'f && !done { print; done = 1 } $0 == t { f = 1 }')
+          RANGE="$TAG"
+          if [ -n "$PREV" ]; then RANGE="$PREV..$TAG"; fi
+          {
+            echo "list<<SWENY_CHANGES_EOF"
+            git log --no-merges --max-count=200 --format='- %s (%h)' "$RANGE" \
+              | grep -vE '^- chore(\(action\))?: (release packages|pin cli-version)' || true
+            echo "SWENY_CHANGES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Update docs with Claude
         uses: anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6 # v1.0.264
         with:
@@ -35,12 +53,15 @@ jobs:
 
             Update the docs so they reflect the new release:
 
-            1. Read CHANGELOG.md — find the ${{ github.ref_name }} section and note what changed.
+            1. These commits landed in ${{ github.ref_name }} since the previous release:
+
+            ${{ steps.changes.outputs.list }}
+
             2. In packages/web/src/content/docs/**/*.md and README.md, find all version
                references like `swenyai/sweny@vX.Y` or `@sweny-ai/...@X.Y` and update them
                to ${{ github.ref_name }}.
             3. Review the docs for any descriptions of inputs, providers, or behavior that
-               changed in ${{ github.ref_name }} per the CHANGELOG — update those sections.
+               changed in ${{ github.ref_name }} per those commits — update those sections.
             4. Only change what is factually stale. Do not rewrite or expand docs beyond
                what changed.
 
@@ -55,7 +76,7 @@ jobs:
           body: |
             Auto-generated docs update for release **${{ github.ref_name }}**.
 
-            Claude reviewed the CHANGELOG and updated stale version references and doc sections.
+            Claude reviewed the commits since the previous release and updated stale version references and doc sections.
             Please review before merging.
           commit-message: "docs: update for ${{ github.ref_name }}"
           labels: documentation

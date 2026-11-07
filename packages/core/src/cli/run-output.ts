@@ -276,6 +276,7 @@ export function formatStepSummary(
   results: Map<string, NodeResult>,
   summary: RunSummary,
   trace?: ExecutionTrace,
+  sinceLast?: string | null,
 ): string {
   const state = nodeStates(results);
   return [
@@ -283,6 +284,8 @@ export function formatStepSummary(
     "",
     `\`${formatReceipt(summary)}\``,
     "",
+    // The "since last run" line (run-answers.ts formatSinceLastMarkdown): counts only, never node outputs.
+    ...(sinceLast ? [sinceLast, ""] : []),
     toMermaidBlock(workflow, { state, trace }),
     "",
     "",
@@ -300,13 +303,14 @@ export function writeStepSummary(
   summary: RunSummary,
   trace?: ExecutionTrace,
   env: NodeJS.ProcessEnv = process.env,
+  sinceLast?: string | null,
 ): boolean {
   // The operator's value only: never one a workspace `.env` introduced.
   const file = trustedEnvValue(env, "GITHUB_STEP_SUMMARY");
   if (!file) return false;
   try {
     // Never through a link, in case the path sits in the agent-writable workspace.
-    writeFileNoFollow(file, formatStepSummary(workflow, results, summary, trace), {
+    writeFileNoFollow(file, formatStepSummary(workflow, results, summary, trace, sinceLast), {
       ...workspaceRoot(file),
       append: true,
       mkdirs: false,

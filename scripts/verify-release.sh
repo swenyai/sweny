@@ -6,6 +6,9 @@
 #
 # A green PR is not shipped. Shipped means: release.yml succeeded for the commit,
 # npm serves a new @sweny-ai/core, and `npx @sweny-ai/core@<version>` shows the change.
+#
+# Do not re-run Release runs from before #529 merged: they execute their old workflow,
+# whose tag-action force-moves v5 back to that commit. Later runs are safe to re-run.
 set -euo pipefail
 
 REPO=${SWENY_REPO:-swenyai/sweny}
