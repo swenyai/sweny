@@ -101,8 +101,8 @@ export type BranchPusher = (opts: {
   attempted: boolean;
   reason?: string;
   /**
-   * The local commit the push tried to publish. Set when a push was attempted
-   * and failed, so the caller can check what the remote head holds (#544).
+   * The local commit of the head branch, set whenever the pusher read it
+   * (pushed, failed or skipped), so the caller can bind the PR to it (#544, #558).
    */
   sha?: string;
 }>;
@@ -158,6 +158,29 @@ export function isToolRefusal(output: unknown): output is ToolRefusal {
   if (!output || typeof output !== "object" || Array.isArray(output)) return false;
   const o = output as Record<string, unknown>;
   return o.refused === true && typeof o.reason === "string" && o.reason.length > 0;
+}
+
+/**
+ * Whether a tool handler's output refuses (#558): `refused: true` on an
+ * object. The one predicate the tool bridge, the write stage and the journal
+ * share. A refusal without a usable reason still counts; {@link refusalReason}
+ * gives it fixed wording.
+ */
+export function isRefusal(output: unknown): output is { refused: true } & Record<string, unknown> {
+  return (
+    !!output &&
+    typeof output === "object" &&
+    !Array.isArray(output) &&
+    (output as Record<string, unknown>).refused === true
+  );
+}
+
+/** Longest refusal reason a receipt, the journal or the agent sees. */
+export const REFUSAL_REASON_MAX = 200;
+
+/** A refusal's fixed-wording reason, capped; generic wording when it has no usable one. */
+export function refusalReason(output: unknown): string {
+  return isToolRefusal(output) ? output.reason.slice(0, REFUSAL_REASON_MAX) : "the tool refused the write";
 }
 
 /** Config field declaration — skills say what they need */

@@ -227,9 +227,10 @@ export interface PushHeadResult {
   /** Why nothing was pushed, or why the push failed. Never carries the token. */
   reason?: string;
   /**
-   * The local commit the push tried to publish. Set when the push ran and
-   * failed: `github_create_pr` then opens the PR only if the remote head is
-   * this commit (#544).
+   * The local commit of the head branch, set whenever it was read: on a push,
+   * a failed push and every skip after the read. `github_create_pr` opens the
+   * PR only when its head is this commit (#544, #558). Called without
+   * `remoteSha` or `token` (a lease skip), the pusher only reads it.
    */
   sha?: string;
 }
@@ -413,11 +414,6 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
   if (head === defaultBranch || head === "main" || head === "master") {
     return { pushed: false, attempted: false, reason: `head ${head} is the default branch` };
   }
-  const remoteSha = opts.remoteSha;
-  if (remoteSha === undefined || !/^([0-9a-f]{40}([0-9a-f]{24})?)?$/.test(remoteSha)) {
-    return { pushed: false, attempted: false, reason: `the remote state of ${head} is unknown` };
-  }
-  if (!token) return { pushed: false, attempted: false, reason: "no GITHUB_TOKEN" };
 
   const opEnv = opts.env ?? process.env;
   const cwd = path.resolve(opts.cwd);
@@ -443,6 +439,14 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
 
   const env = hardenedGitEnv(opEnv, trustedPathDirs(startupPath, cwd).join(path.delimiter));
   let tmp: string | undefined;
+  // The local commit, once read: every result after that carries it (#558).
+  let sha: string | undefined;
+  const skip = (reason: string): PushHeadResult => ({
+    pushed: false,
+    attempted: false,
+    reason,
+    ...(sha ? { sha } : {}),
+  });
   try {
     tmp = mkdtempSync(path.join(startupTmpdir(), "sweny-push-"));
     const hooks = path.join(tmp, "hooks");
@@ -452,14 +456,21 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
     const read = (args: string[]) => git([...hard, "-c", "safe.directory=*", ...args], { cwd, env });
 
     const local = await read(["rev-parse", "--verify", "--quiet", `refs/heads/${head}^{commit}`]);
-    const sha = local.stdout.trim();
-    if (local.code !== 0 || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(sha)) {
+    const localSha = local.stdout.trim();
+    if (local.code !== 0 || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(localSha)) {
       return { pushed: false, attempted: false, reason: `no local branch ${head}` };
     }
+    sha = localSha;
+    // Without the API's remote state or a token nothing is pushed; the local commit is still reported.
+    const remoteSha = opts.remoteSha;
+    if (remoteSha === undefined || !/^([0-9a-f]{40}([0-9a-f]{24})?)?$/.test(remoteSha)) {
+      return skip(`the remote state of ${head} is unknown`);
+    }
+    if (!token) return skip("no GITHUB_TOKEN");
     const fetchUrls = await read(["remote", "get-url", "--all", "origin"]);
     const pushUrls = await read(["remote", "get-url", "--push", "--all", "origin"]);
     if (fetchUrls.code !== 0 || pushUrls.code !== 0) {
-      return { pushed: false, attempted: false, reason: "no origin remote" };
+      return skip("no origin remote");
     }
     const urls = `${fetchUrls.stdout}\n${pushUrls.stdout}`
       .split("\n")
@@ -472,12 +483,12 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
         const p = repoFromRemote(u);
         return !p || p.repo !== wanted || p.host !== serverHost;
       });
-    if (bad) return { pushed: false, attempted: false, reason: `origin is not ${opts.repo} on ${serverHost}` };
+    if (bad) return skip(`origin is not ${opts.repo} on ${serverHost}`);
 
     const objectsOut = await read(["rev-parse", "--git-path", "objects"]);
     const shallowOut = await read(["rev-parse", "--git-path", "shallow"]);
     if (objectsOut.code !== 0 || shallowOut.code !== 0) {
-      return { pushed: false, attempted: false, reason: "cannot locate the checkout's object store" };
+      return skip("cannot locate the checkout's object store");
     }
     const objects = path.resolve(cwd, objectsOut.stdout.trim());
     const shallow = path.resolve(cwd, shallowOut.stdout.trim());
@@ -487,10 +498,10 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
     const own = (args: string[], extraEnv?: NodeJS.ProcessEnv) =>
       git([...hard, `--git-dir=${repoDir}`, ...args], { cwd: tmp!, env: { ...env, ...extraEnv } });
     const init = await git([...hard, "init", "--quiet", "--bare", repoDir], { cwd: tmp, env });
-    if (init.code !== 0) return { pushed: false, attempted: false, reason: "cannot create the push repo" };
+    if (init.code !== 0) return skip("cannot create the push repo");
     // The config `init` wrote may only hold plain repo-format keys: no url, http, include or remote.
     if (!isPlainRepoConfig(readFileSync(path.join(repoDir, "config"), "utf8"))) {
-      return { pushed: false, attempted: false, reason: "the private push repo changed before the push" };
+      return skip("the private push repo changed before the push");
     }
     writeFileSync(path.join(repoDir, "objects", "info", "alternates"), `${objects}\n`);
     // A shallow checkout (actions/checkout's default): copy its boundary list. Only a
@@ -508,21 +519,21 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
         readdirSync(hooks).sort(),
       ]);
     const staged = fingerprint();
-    const ref = await own(["update-ref", `refs/heads/${head}`, sha]);
-    if (ref.code !== 0) return { pushed: false, attempted: false, reason: `cannot stage ${head} for the push` };
+    const ref = await own(["update-ref", `refs/heads/${head}`, localSha]);
+    if (ref.code !== 0) return skip(`cannot stage ${head} for the push`);
 
     // An existing remote head (an open PR's branch) is only fast-forwarded:
     // the lease below would otherwise let a diverged commit replace it.
     if (remoteSha) {
-      const ff = await own(["merge-base", "--is-ancestor", remoteSha, sha]);
+      const ff = await own(["merge-base", "--is-ancestor", remoteSha, localSha]);
       if (ff.code !== 0) {
-        return { pushed: false, attempted: false, reason: `${head} is not a fast-forward of the remote ${head}` };
+        return skip(`${head} is not a fast-forward of the remote ${head}`);
       }
     }
 
     const pushEnv = pushAuthConfig(serverBase, token, withCommandConfig({}, pushTransportConfig(destination, env)));
     if (fingerprint() !== staged) {
-      return { pushed: false, attempted: false, reason: "the private push repo changed before the push" };
+      return skip("the private push repo changed before the push");
     }
     const r = await own(
       [
@@ -538,15 +549,11 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
     );
     if (r.code !== 0) {
       const why = (r.stderr || r.stdout).trim().split("\n").at(-1) ?? "";
-      return { pushed: false, attempted: true, reason: `git push failed: ${redact(why, token)}`, sha };
+      return { pushed: false, attempted: true, reason: `git push failed: ${redact(why, token)}`, sha: localSha };
     }
-    return { pushed: true, attempted: true };
+    return { pushed: true, attempted: true, sha: localSha };
   } catch (err) {
-    return {
-      pushed: false,
-      attempted: false,
-      reason: redact(err instanceof Error ? err.message : String(err), token),
-    };
+    return skip(redact(err instanceof Error ? err.message : String(err), token));
   } finally {
     if (tmp) {
       try {

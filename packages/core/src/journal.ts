@@ -93,8 +93,11 @@
  * refusal named would otherwise be taken for an applied one). The one
  * exception is a refusal marked `transient` that names nothing it produced:
  * nothing was written, so it goes through the unconfirmed-intent path above
- * (provider lookup, then a first send). `--allow-repeat-writes` does not
- * override a refusal: its outcome is known, not unconfirmed.
+ * (provider lookup, then a first send). That is decided once, from the
+ * handler's own output when the refusal is recorded, and stored as
+ * `retry: true` on the record (#558); a record without it stands.
+ * `--allow-repeat-writes` does not override a refusal: its outcome is known,
+ * not unconfirmed.
  */
 
 import crypto from "node:crypto";
@@ -102,7 +105,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Logger, NodeResult, NodeUsage, RouteRung, Skill, Tool, ToolContext, Workflow } from "./types.js";
-import { isToolRefusal } from "./types.js";
+import { isRefusal, refusalReason } from "./types.js";
 import type { SafeOutputIntent, WriteStageState } from "./safe-outputs.js";
 import { resolveNodePermissions } from "./node-policy.js";
 import { CURRENT_SPEC_VERSION } from "./migrations.js";
@@ -827,6 +830,8 @@ interface OutputRecord extends JournalRecord {
   tool: string;
   output?: unknown;
   recovered?: boolean;
+  /** On `output:refused`: a transient refusal that named nothing it produced, so resume tries it again (#558). */
+  retry?: boolean;
 }
 
 /** Thrown when the journal was written by a newer sweny, or by an older one without record authentication. */
@@ -1064,6 +1069,8 @@ export interface PlannedVisit {
   applied: number;
   /** Writes whose handler refused (#544): the refusal is replayed, not re-sent. */
   refused: number;
+  /** Transient refusals that wrote nothing (#558): tried again, through the provider lookup first. */
+  transient: number;
   /** Writes with an intent but no receipt: checked on the provider before anything is re-sent. */
   unconfirmed: number;
 }
@@ -1399,7 +1406,9 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
     const keys = (rec: Map<string, OutputRecord>) =>
       [...rec.values()].filter((o) => o.node === v.node && o.iteration === v.iteration).map((o) => o.key);
     const applied = keys(receipts).length;
-    const refused = keys(refusals).filter((k) => !receipts.has(k)).length;
+    const refusedKeys = keys(refusals).filter((k) => !receipts.has(k));
+    const transient = refusedKeys.filter((k) => refusals.get(k)!.retry === true).length;
+    const refused = refusedKeys.length - transient;
     const unconfirmed = keys(intents).filter((k) => !receipts.has(k) && !refusals.has(k)).length;
     if (complete && !resumed) {
       visits.push({
@@ -1411,6 +1420,7 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
         ...(v.rung ? { rung: v.rung } : {}),
         applied,
         refused,
+        transient,
         unconfirmed,
       });
       writeState = v.end!.write_state;
@@ -1423,6 +1433,7 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
       action: v.checkpoint ? "write-stage" : "rerun",
       applied,
       refused,
+      transient,
       unconfirmed,
     });
     break;
@@ -1640,11 +1651,11 @@ async function probeProvider(
 function slimOutput(o: unknown, depth = 0): unknown {
   if (!o || typeof o !== "object" || Array.isArray(o) || depth > 3) return null;
   const out: Record<string, unknown> = {};
-  // A refusal keeps what it is and its fixed-wording reason (#544); never `detail`.
-  if (depth === 0 && (o as Record<string, unknown>).refused === true) {
+  // A refusal keeps what it is and its fixed-wording reason, capped (#544, #558); never `detail`.
+  if (depth === 0 && isRefusal(o)) {
     out.refused = true;
-    if (isToolRefusal(o)) out.reason = o.reason;
-    if ((o as Record<string, unknown>).transient === true) out.transient = true;
+    out.reason = refusalReason(o);
+    if (o.transient === true) out.transient = true;
   }
   for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
     if (["number", "identifier", "id", "html_url", "url", "success", "reused", "skipped"].includes(k)) {
@@ -2234,7 +2245,7 @@ export class RunJournal implements ExecutionJournal {
           return receipt.output ?? null;
         }
         const refusal = plan?.refusals.get(key);
-        if (refusal && !retriesRefusal(refusal.output)) {
+        if (refusal && refusal.retry !== true) {
           this.logger.info(`  run journal: ${tool.name} was refused in an earlier attempt; not re-sent`, { node });
           const prior = refusal.output && typeof refusal.output === "object" ? refusal.output : {};
           return { reason: "the tool refused the write", ...prior, refused: true };
@@ -2262,13 +2273,15 @@ export class RunJournal implements ExecutionJournal {
         // A write the journal cannot record is never sent: append throws first.
         this.append("output:intent", { node, iteration, key, tool: tool.name });
         const output = await tool.handler(withMarker(tool.name, args, key), ctx);
-        const refused = !!output && typeof output === "object" && (output as { refused?: unknown }).refused === true;
+        const refused = isRefusal(output);
         this.append(refused ? "output:refused" : "output:applied", {
           node,
           iteration,
           key,
           tool: tool.name,
           output: slimOutput(output),
+          // Decided here, from the handler's own output, not from the slimmed record (#558).
+          ...(refused && retriesRefusal(output) ? { retry: true } : {}),
         });
         return output;
       },
@@ -2277,14 +2290,24 @@ export class RunJournal implements ExecutionJournal {
 }
 
 /**
- * Whether a journaled refusal is tried again on resume (#544): only a
- * transient one that names nothing it produced. Anything else stands.
+ * Whether a refusal is tried again on resume (#544): only a transient one that
+ * names nothing it produced. Decided from the handler's full output when the
+ * refusal is recorded (#558). Anything else stands.
  */
-function retriesRefusal(output: unknown): boolean {
-  if (!output || typeof output !== "object") return false;
-  const o = output as Record<string, unknown>;
-  // Anything besides the refusal itself is something the write produced.
-  return o.transient === true && Object.keys(o).every((k) => k === "refused" || k === "reason" || k === "transient");
+function retriesRefusal(output: { refused: true } & Record<string, unknown>): boolean {
+  return output.transient === true && !namesProduced(output);
+}
+
+const PRODUCED_KEYS = new Set(["number", "identifier", "id", "html_url", "url", "reused"]);
+
+/** Whether an output names anything a write produced, at any depth or in any array; too deep counts as yes. */
+function namesProduced(o: unknown, depth = 0): boolean {
+  if (!o || typeof o !== "object") return false;
+  if (depth > 8) return true;
+  if (Array.isArray(o)) return o.some((v) => namesProduced(v, depth + 1));
+  return Object.entries(o as Record<string, unknown>).some(
+    ([k, v]) => (PRODUCED_KEYS.has(k) && v !== undefined && v !== null) || namesProduced(v, depth + 1),
+  );
 }
 
 /** What a node result needs to continue a run. Tool call inputs and outputs are dropped. */

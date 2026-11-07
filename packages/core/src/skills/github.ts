@@ -184,6 +184,11 @@ const REFUSE_NO_LOCAL = "the head push failed and the pusher did not report the 
 const REFUSE_UNREADABLE = "the head push failed and the remote head could not be read";
 const REFUSE_MISMATCH = "the head push failed and the remote head is not the commit this run produced";
 const REFUSE_PR_MISMATCH = "the PR was opened but its head is not the commit this run produced";
+// #558: the paths where sweny did not push, or pushed without naming the commit.
+const REFUSE_SKIP_UNREADABLE = "the head branch was not pushed and the remote head could not be read";
+const REFUSE_SKIP_MISMATCH = "the head branch was not pushed and the remote head is not the commit this run produced";
+const REFUSE_NO_COMMIT = "the run has no local commit for the head branch";
+const REFUSE_PUSHED_NO_LOCAL = "the head was pushed but the pusher did not report the local commit";
 const REFUSE_PR_UNVERIFIED = "the PR was opened but its head commit could not be verified";
 
 /**
@@ -432,7 +437,7 @@ export const github: Skill = {
         let reused = false;
         // The remote head this run saw, for the result (#544).
         let observedHead: string | undefined;
-        // Set after sweny's own push failed: the PR's head must be this commit (#544).
+        // With a checkout, the PR's head must be this run's local commit (#544, #558).
         let mustHead: string | undefined;
         // #473: push the head branch from sweny with this skill's token, so the
         // recommended `persist-credentials: false` checkout still ships the
@@ -449,59 +454,87 @@ export const github: Skill = {
             // The pusher refuses without it; the PR request below reports the API error.
           }
           const lease = await headPushLease(input.repo, input.head, input.base ?? "main", ctx);
-          const push: Awaited<ReturnType<BranchPusher>> =
-            "skip" in lease
-              ? { pushed: false, attempted: false, reason: lease.skip }
-              : await ctx.pushBranch({
-                  repo: input.repo,
-                  head: input.head,
-                  base: input.base ?? "main",
-                  ...(defaultBranch ? { defaultBranch } : {}),
-                  remoteSha: lease.remoteSha,
-                  token: ctx.config.GITHUB_TOKEN,
-                });
+          // #558: on a lease skip the pusher is still asked for the local
+          // commit, with no lease and no token, so it cannot push.
+          const push: Awaited<ReturnType<BranchPusher>> = await ctx.pushBranch({
+            repo: input.repo,
+            head: input.head,
+            base: input.base ?? "main",
+            ...(defaultBranch ? { defaultBranch } : {}),
+            ...("skip" in lease ? {} : { remoteSha: lease.remoteSha, token: ctx.config.GITHUB_TOKEN }),
+          });
           if (lease.remoteSha) observedHead = lease.remoteSha;
+          const notPushed = "skip" in lease ? lease.skip : push.reason;
           if ("skip" in lease) ctx.logger?.warn?.(`  github_create_pr: not pushing: ${lease.skip}`);
           else if (push.pushed) ctx.logger?.info?.(`  github_create_pr: pushed ${input.head} to ${input.repo}`);
-          else if (push.attempted) {
-            // #544: a push sweny ran and that failed. The PR would publish
-            // whatever the remote branch holds, so open it only when that is
-            // the commit this run would have pushed. Anything else, or a
-            // remote head that cannot be read, refuses.
-            const local = typeof push.sha === "string" && SHA.test(push.sha) ? push.sha : null;
-            const remote = local ? await remoteHeadSha(input.repo, input.head, ctx) : undefined;
-            const remoteSha = remote && "sha" in remote ? remote.sha : null;
-            if (!local || !remoteSha || remoteSha !== local) {
-              const [reason, why] = !local
-                ? [REFUSE_NO_LOCAL, "the pusher did not report the local commit"]
-                : remote && "error" in remote
-                  ? [REFUSE_UNREADABLE, `cannot read the remote head of ${input.head}: ${remote.error}`]
-                  : remoteSha
-                    ? [
-                        REFUSE_MISMATCH,
-                        `the remote head of ${input.head} is ${remoteSha}, not the local commit ${local}`,
-                      ]
-                    : [REFUSE_MISMATCH, `${input.head} does not exist on ${input.repo}; the local commit is ${local}`];
-              const detail = `sweny's push failed (${push.reason}) and ${why}`;
-              ctx.logger?.warn?.(`  github_create_pr: refusing to open the PR: ${detail}`);
-              const refusal: ToolRefusal & Record<string, unknown> = {
-                refused: true,
-                reason,
-                detail,
-                // A ref read that failed may succeed later; nothing was written.
-                ...(reason === REFUSE_UNREADABLE ? { transient: true } : {}),
-                head: input.head,
-                local_sha: local,
-                remote_sha: remoteSha,
-              };
-              return refusal;
+          else if (push.attempted) ctx.logger?.warn?.(`  github_create_pr: ${push.reason}`);
+          else ctx.logger?.debug?.(`  github_create_pr: no sweny-side push (${push.reason})`);
+          const local = typeof push.sha === "string" && SHA.test(push.sha) ? push.sha : null;
+          const failed = !push.pushed && push.attempted;
+          const refuse = (reason: string, detail: string, remoteSha: string | null, transient = false) => {
+            ctx.logger?.warn?.(`  github_create_pr: refusing to open the PR: ${detail}`);
+            const refusal: ToolRefusal & Record<string, unknown> = {
+              refused: true,
+              reason,
+              detail,
+              // A ref read that failed may succeed later; nothing was written.
+              ...(transient ? { transient: true } : {}),
+              head: input.head,
+              local_sha: local,
+              remote_sha: remoteSha,
+            };
+            return refusal;
+          };
+          if (!local) {
+            // #558: no local commit for the head. Nothing ties the remote branch
+            // (the agent named it) to this run, so no PR. A failed push keeps #544's wording.
+            if (push.pushed) {
+              return refuse(
+                REFUSE_PUSHED_NO_LOCAL,
+                `sweny pushed ${input.head} but did not get the local commit`,
+                null,
+              );
             }
-            observedHead = remoteSha;
-            mustHead = local;
-            ctx.logger?.warn?.(
-              `  github_create_pr: ${push.reason}; the remote head is already the local commit ${local}, requesting the PR`,
+            return failed
+              ? refuse(
+                  REFUSE_NO_LOCAL,
+                  `sweny's push failed (${push.reason}) and the pusher did not report the local commit`,
+                  null,
+                )
+              : refuse(
+                  REFUSE_NO_COMMIT,
+                  `sweny did not push (${notPushed}) and the checkout has no commit for ${input.head}`,
+                  lease.remoteSha || null,
+                );
+          }
+          if (!push.pushed) {
+            // #544, #558: sweny did not push, or its push failed. The PR would
+            // publish whatever the remote branch holds, so open it only when that
+            // is this run's local commit. Anything else, or a remote head that
+            // cannot be read, refuses.
+            const remote = await remoteHeadSha(input.repo, input.head, ctx);
+            const remoteSha = "sha" in remote ? remote.sha : null;
+            const lead = failed ? `sweny's push failed (${push.reason})` : `sweny did not push (${notPushed})`;
+            if ("error" in remote) {
+              return refuse(
+                failed ? REFUSE_UNREADABLE : REFUSE_SKIP_UNREADABLE,
+                `${lead} and cannot read the remote head of ${input.head}: ${remote.error}`,
+                null,
+                true,
+              );
+            }
+            if (remoteSha !== local) {
+              const why = remoteSha
+                ? `the remote head of ${input.head} is ${remoteSha}, not the local commit ${local}`
+                : `${input.head} does not exist on ${input.repo}; the local commit is ${local}`;
+              return refuse(failed ? REFUSE_MISMATCH : REFUSE_SKIP_MISMATCH, `${lead} and ${why}`, remoteSha);
+            }
+            ctx.logger?.info?.(
+              `  github_create_pr: the remote head is already the local commit ${local}, requesting the PR`,
             );
-          } else ctx.logger?.debug?.(`  github_create_pr: no sweny-side push (${push.reason})`);
+          }
+          observedHead = local;
+          mustHead = local;
         }
         try {
           pr = (await gh(`/repos/${input.repo}/pulls`, ctx, {
@@ -538,9 +571,10 @@ export const github: Skill = {
           pr = existing as { number?: number };
           reused = true;
         }
-        // #544: the remote could move between the ref read and the request. The
-        // PR exists now; it is not closed (that would be another write nobody
-        // asked for), but the result refuses to vouch for it.
+        // #544, #558: the remote could move between the push or the ref read and
+        // the request, and a reused PR (the 422 recovery) may sit on another
+        // commit. The PR exists now; it is not closed (that would be another
+        // write nobody asked for), but the result refuses to vouch for it.
         const prHead = (pr.head as { sha?: unknown } | undefined)?.sha;
         const prHeadSha = typeof prHead === "string" && SHA.test(prHead) ? prHead : null;
         if (mustHead && prHeadSha !== mustHead) {

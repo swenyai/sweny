@@ -18,7 +18,7 @@
 
 import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
-import { isToolRefusal, type JSONSchema, type Tool, type ToolContext } from "../../types.js";
+import { isRefusal, refusalReason, type JSONSchema, type Tool, type ToolContext } from "../../types.js";
 
 export const BRIDGE_PROTOCOL_VERSION = 1;
 
@@ -130,11 +130,13 @@ export function parseRequest(value: unknown): BridgeRequest | undefined {
 /**
  * A handler's return value as MCP content. Strings pass through; anything else
  * is JSON. A {@link ToolRefusal} is a tool error (#544): the agent and the
- * tool-call status (and so evals) see that the write did not happen.
+ * tool-call status (and so evals) see that the write did not happen. Any
+ * refusal counts, by the predicate the write stage and the journal use (#558).
  */
 export function toolOutputToMcpResult(output: unknown): McpCallToolResult {
-  if (isToolRefusal(output)) {
-    return { content: [{ type: "text", text: `Refused: ${output.reason}\n${JSON.stringify(output)}` }], isError: true };
+  if (isRefusal(output)) {
+    const text = `Refused: ${refusalReason(output)}\n${JSON.stringify(output)}`;
+    return { content: [{ type: "text", text }], isError: true };
   }
   return {
     content: [{ type: "text", text: typeof output === "string" ? output : JSON.stringify(output) }],
