@@ -22,7 +22,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { redact } from "../journal.js";
+import { redact, workspaceSecretKey } from "../journal.js";
 import { writeFileNoFollow } from "../safe-file.js";
 import type { NodeResult, Workflow } from "../types.js";
 import { RUN_HISTORY_DIR, RUN_ID_RE, listRuns } from "./run-history.js";
@@ -53,13 +53,53 @@ const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 const has = (o: object, k: string): boolean => Object.hasOwn(o, k);
 const sha = (s: string): string => crypto.createHash("sha256").update(s).digest("hex");
 
+/** The JSON Schema types a schema declares: `type`, else implied by `properties` / `items`. */
+function declaredTypes(sch: Record<string, unknown>): string[] | undefined {
+  if (typeof sch.type === "string") return [sch.type];
+  if (Array.isArray(sch.type)) return sch.type.filter((t): t is string => typeof t === "string");
+  if (isObj(sch.properties)) return ["object"];
+  if (isObj(sch.items)) return ["array"];
+  return undefined;
+}
+
+function typeMatches(value: unknown, types: string[]): boolean {
+  return types.some((t) => {
+    switch (t) {
+      case "string":
+        return typeof value === "string";
+      case "number":
+        return typeof value === "number" && Number.isFinite(value);
+      case "integer":
+        return typeof value === "number" && Number.isInteger(value);
+      case "boolean":
+        return typeof value === "boolean";
+      case "null":
+        return value === null;
+      case "object":
+        return isObj(value);
+      case "array":
+        return Array.isArray(value);
+      default:
+        return false;
+    }
+  });
+}
+
 /**
- * Keep only what the schema declares, deep: `findings[].title` keeps `title` and nothing else. An
- * object with no declared properties is dropped (nothing in it was declared); scalars are kept.
- * Undefined means "drop".
+ * Keep only what the schema declares, deep, and only values whose shape matches it: `findings[].title`
+ * keeps `title` and nothing else, a string where an object is declared is dropped, as is a value of
+ * the wrong `type` or outside an `enum`. An object with no declared properties is dropped (nothing in
+ * it was declared). Undefined means "drop".
  */
 function pick(value: unknown, schema: unknown): unknown {
   const sch = isObj(schema) ? schema : undefined;
+  if (sch) {
+    const types = declaredTypes(sch);
+    if (types && !typeMatches(value, types)) return undefined;
+    if (Array.isArray(sch.enum) && !isObj(value) && !Array.isArray(value) && !sch.enum.includes(value)) {
+      return undefined;
+    }
+  }
   if (Array.isArray(value)) {
     const items = sch && isObj(sch.items) ? sch.items : undefined;
     return value.map((v) => pick(v, items)).filter((v) => v !== undefined);
@@ -77,18 +117,24 @@ function pick(value: unknown, schema: unknown): unknown {
   return value;
 }
 
-/** Secrets in keys too (`redact` scrubs values and keeps keys). */
-function redactKeys(value: unknown, secrets: string[]): unknown {
-  if (Array.isArray(value)) return value.map((v) => redactKeys(v, secrets));
+/**
+ * Secrets in keys too (`redact` scrubs values and keeps keys). A key that redaction changes, or that
+ * already looks like a redacted name, becomes `[redacted-<first 16 hex of HMAC-SHA256(key)>]`, keyed
+ * with `macKey()`: injective (no two keys share a name, and no plain key can equal a generated one),
+ * stable (the same key gets the same name in every run, whatever else is present, so a diff lines
+ * them up) and not a guessing oracle for a low-entropy secret (a plain hash would be).
+ */
+function redactKeys(value: unknown, secrets: string[], macKey: () => Buffer): unknown {
+  if (Array.isArray(value)) return value.map((v) => redactKeys(v, secrets, macKey));
   if (!isObj(value)) return value;
-  const seen = new Map<string, number>();
   return Object.fromEntries(
     Object.entries(value).map(([k, v]) => {
-      let name = redact(k, secrets).value as string;
-      const n = (seen.get(name) ?? 0) + 1;
-      seen.set(name, n);
-      if (n > 1) name = `${name}#${n}`;
-      return [name, redactKeys(v, secrets)] as const;
+      const scrubbed = redact(k, secrets).value as string;
+      const name =
+        scrubbed !== k || k.startsWith("[redacted")
+          ? `[redacted-${crypto.createHmac("sha256", macKey()).update(k).digest("hex").slice(0, 16)}]`
+          : k;
+      return [name, redactKeys(v, secrets, macKey)] as const;
     }),
   );
 }
@@ -121,6 +167,11 @@ export interface BuildRunAnswersInput {
   results: Map<string, NodeResult>;
   /** Secret values to redact (the same set the journal and output.md use). */
   secrets?: string[];
+  /**
+   * The key for redacted key names, asked for only when a key needs one. Default: a random key that
+   * lives only in this process (names then differ from run to run, which a diff shows as a change).
+   */
+  macKey?: () => Buffer;
 }
 
 /**
@@ -129,6 +180,8 @@ export interface BuildRunAnswersInput {
  */
 export function buildRunAnswers(i: BuildRunAnswersInput): RunAnswers {
   const secrets = i.secrets ?? [];
+  let ephemeral: Buffer | undefined;
+  const macKey = i.macKey ?? (() => (ephemeral ??= crypto.randomBytes(32)));
   const nodes: Array<[string, unknown]> = [];
   const digests: Array<[string, unknown]> = [];
   for (const [id, r] of i.results) {
@@ -139,11 +192,16 @@ export function buildRunAnswers(i: BuildRunAnswersInput): RunAnswers {
     let fields: unknown;
     if (isObj(props) && Object.keys(props).length > 0) {
       fields = pick(data, schema);
-    } else if (typeof data.summary === "string" && data.summary.trim() !== "") {
+    } else if (
+      typeof data.summary === "string" &&
+      data.summary.trim() !== "" &&
+      !(isObj(schema) && (schema as Record<string, unknown>).additionalProperties === false)
+    ) {
+      // The free-form summary, unless the node's schema closes the object to its declared fields.
       fields = { summary: data.summary };
     }
     if (!isObj(fields) || Object.keys(fields).length === 0) continue;
-    const clean = redactKeys(redact(fields, secrets).value, secrets);
+    const clean = redactKeys(redact(fields, secrets).value, secrets, macKey);
     const [shown, digs] = clipTree(clean);
     nodes.push([id, shown]);
     if (digs !== undefined) digests.push([id, digs]);
@@ -527,7 +585,10 @@ export function sinceLastRun(runId: string, workflowId: string, cwd: string = pr
 /** Save this run's answers, then compare with the previous run. Never throws. */
 export function recordRunAnswers(i: BuildRunAnswersInput, cwd: string = process.cwd()): SinceLast | null {
   try {
-    if (!writeRunAnswers(buildRunAnswers(i), cwd)) return null;
+    // The key is per user and workspace and lives in the state dir; none usable means a process-only key.
+    let key: Buffer | undefined;
+    const macKey = i.macKey ?? (() => (key ??= workspaceSecretKey(cwd, "answers") ?? crypto.randomBytes(32)));
+    if (!writeRunAnswers(buildRunAnswers({ ...i, macKey }), cwd)) return null;
     return sinceLastRun(i.runId, i.workflow.id, cwd);
   } catch {
     return null;
