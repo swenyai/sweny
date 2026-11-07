@@ -39,6 +39,11 @@ import { consoleLogger } from "../types.js";
 import {
   PI_AUTH_VARS,
   PI_ENV_PREFIXES,
+  PI_NON_SECRET_VARS,
+  agentEnvOverlay,
+  applyEnvOverlay,
+  overlaidProcessEnv,
+  resolveExecutable,
   finishAgentEnv,
   heldCredentials,
   parseList,
@@ -50,6 +55,8 @@ import {
   withPushBlocked,
   mcpWithheld,
   type AgentAccess,
+  type AgentEnvOverlay,
+  type HarnessEnvOptions,
   type PiProviderResolution,
   type SandboxMode,
 } from "../agent-env.js";
@@ -80,6 +87,9 @@ import {
 import { TOKEN_ENV } from "./tool-bridge/protocol.js";
 
 export { PI_CAPABILITIES };
+
+/** The provider secrets an `env` overlay replaces as a set ({@link applyEnvOverlay}); region and project settings are not among them. */
+const PI_CREDENTIAL_VARS: readonly string[] = PI_AUTH_VARS.filter((v) => !PI_NON_SECRET_VARS.has(v));
 
 /**
  * Oldest pi this adapter is written against. The docs and source were read at
@@ -178,7 +188,7 @@ export function piBackendHosts(env: Record<string, string | undefined> = process
   return [...hosts];
 }
 
-export interface PiHarnessOptions {
+export interface PiHarnessOptions extends HarnessEnvOptions {
   /** Model passed to `--model`. Free text (`provider/id`, `id:thinking`); sweny has no model opinion. */
   model?: string;
   /**
@@ -458,10 +468,12 @@ export class PiHarness implements AgentHarness {
   private defaultMcpServers: Record<string, McpServerConfig>;
   private envPassthrough: string[] | undefined;
   private envScope: boolean | undefined;
+  private envOverlay: AgentEnvOverlay | undefined;
   private sandboxMode: SandboxMode | undefined;
   private sandboxWrapper: SandboxWrapper | null | undefined;
   private policyMode: HarnessPolicyMode;
   private piCommand: { command: string; args: string[] };
+  private resolvedCommand: string | undefined;
   private modelsFile: string | undefined;
   private toolBridgeShim: { command: string; args: string[] } | undefined;
   private abortGraceMs: number;
@@ -482,6 +494,7 @@ export class PiHarness implements AgentHarness {
     this.defaultMcpServers = opts.defaultMcpServers ?? {};
     this.envPassthrough = opts.envPassthrough;
     this.envScope = opts.envScope;
+    this.envOverlay = agentEnvOverlay(opts);
     this.sandboxMode = opts.sandbox;
     this.sandboxWrapper = opts.sandboxWrapper;
     this.policyMode = opts.policy ?? resolveHarnessPolicy(process.env, undefined, this.logger);
@@ -497,11 +510,20 @@ export class PiHarness implements AgentHarness {
     return { id: this.id, version: this.version };
   }
 
+  /** The pi executable to spawn: the one the version check resolved and ran. */
+  private cliPath(): string {
+    return this.resolvedCommand ?? this.piCommand.command;
+  }
+
   /** `pi --version`, checked against {@link MIN_PI_VERSION}. Cached per instance. */
   preflight(): Promise<{ ok: true; version: string } | { ok: false; reason: string }> {
     this.preflightResult ??= new Promise((resolve) => {
       const { command, args } = this.piCommand;
-      execFile(command, [...args, "--version"], { timeout: 30_000 }, (err, stdout, stderr) => {
+      // Probe the file the spawn will run: resolved on the run's PATH and cwd, then reused at spawn.
+      const hostEnv = overlaidProcessEnv(this.envOverlay, PI_CREDENTIAL_VARS);
+      this.resolvedCommand = resolveExecutable(command, hostEnv, this.cwd);
+      const opts = { timeout: 30_000, cwd: this.cwd, env: hostEnv };
+      execFile(this.resolvedCommand ?? command, [...args, "--version"], opts, (err, stdout, stderr) => {
         if (err) {
           const code = (err as NodeJS.ErrnoException).code;
           resolve({
@@ -530,17 +552,19 @@ export class PiHarness implements AgentHarness {
     return this.preflightResult;
   }
 
-  /** Which provider's credential this call gets ({@link resolvePiProvider}). */
+  /** Which provider's credential this call gets ({@link resolvePiProvider}), over the env with the overlay applied. */
   private resolveProvider(model: string | undefined): PiProviderResolution {
-    return resolvePiProvider(process.env, model, this.provider);
+    return resolvePiProvider(overlaidProcessEnv(this.envOverlay, PI_CREDENTIAL_VARS), model, this.provider);
   }
 
   /**
    * Env for the pi process: scoped like Claude Code's, with ONE provider's
    * credentials instead of Anthropic's (`providerVars`, from
    * {@link resolvePiProvider}). Every other provider key is dropped, scoped or
-   * not, since pi's bash tool inherits this env. Skill credentials are dropped
-   * too ({@link finishAgentEnv}) unless the node granted them with `agent_env`.
+   * not, since pi's bash tool inherits this env. The caller's `envRemove` /
+   * `env` are applied after scoping ({@link applyEnvOverlay}), so the same rules
+   * hold for overlaid names. Skill credentials are dropped too, overlaid ones
+   * included ({@link finishAgentEnv}), unless the node granted them with `agent_env`.
    */
   private buildEnv(
     access: Pick<AgentAccess, "envVars" | "withhold"> | undefined,
@@ -562,6 +586,7 @@ export class PiHarness implements AgentHarness {
       reportWithheldEnv(scoped.withheld, this.logger);
       env = scoped.env;
     }
+    env = applyEnvOverlay(env, this.envOverlay, PI_CREDENTIAL_VARS);
     // Other providers' keys never reach pi, even when scoping is off, passed through or granted.
     const otherProviders = PI_AUTH_VARS.filter((v) => !providerVars.includes(v));
     env = Object.fromEntries(Object.entries(env).filter(([k]) => !otherProviders.includes(k)));
@@ -1010,7 +1035,7 @@ export class PiHarness implements AgentHarness {
       const prep = await prepareAgentSpawn({
         caps: this.capabilities,
         policy,
-        spawn: { command: this.piCommand.command, args, env, cwd: this.cwd },
+        spawn: { command: this.cliPath(), args, env, cwd: this.cwd },
         wrapper: wrapper ?? null,
         harnessEgress,
         env: process.env,
@@ -1131,7 +1156,7 @@ export class PiHarness implements AgentHarness {
       const env = { ...this.buildEnv(undefined, provider.vars), PI_CODING_AGENT_DIR: agentDir };
       const out = await this.exec({
         spawn: {
-          command: this.piCommand.command,
+          command: this.cliPath(),
           args: [...this.baseArgs(model, false, provider.explicit ? provider.provider : undefined), "--no-tools"],
           env,
           cwd: this.cwd,

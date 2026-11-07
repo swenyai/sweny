@@ -20,7 +20,17 @@ import {
   resolveEnvScope,
   formatWithheldWarning,
   scopeAgentEnv,
+  agentEnvOverlay,
+  applyEnvOverlay,
+  overlaidProcessEnv,
+  buildSandboxSettings,
+  claudeCredentialFiles,
+  resolveExecutable,
+  hasCodexLogin,
 } from "../agent-env.js";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import * as nodePath from "node:path";
 import { github } from "../skills/github.js";
 import { linear } from "../skills/linear.js";
 import { createSkillMap } from "../skills/index.js";
@@ -695,5 +705,141 @@ describe("ClaudeClient env scope wiring", () => {
     const env: NodeJS.ProcessEnv = {};
     applyAgentFileConfig({ "env-scope": "off" }, env);
     expect(env.SWENY_ENV_SCOPE).toBe("off");
+  });
+});
+
+describe("caller env overlay (harness env / envRemove)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("agentEnvOverlay: undefined when neither option is set, a frozen copy otherwise", () => {
+    expect(agentEnvOverlay({})).toBeUndefined();
+    const env = { A: "1" };
+    const remove = ["B"];
+    const o = agentEnvOverlay({ env, envRemove: remove })!;
+    env.A = "2";
+    remove.push("C");
+    expect(o.env).toEqual({ A: "1" });
+    expect(o.remove).toEqual(["B"]);
+    expect(Object.isFrozen(o.env)).toBe(true);
+    expect(Object.isFrozen(o.remove)).toBe(true);
+    // An empty overlay is still an overlay: the harness takes the copy path.
+    expect(agentEnvOverlay({ env: {} })).toEqual({ env: {}, remove: [] });
+  });
+
+  it("agentEnvOverlay rejects non-string values and invalid names", () => {
+    const bad = (o: unknown) => () => agentEnvOverlay(o as Parameters<typeof agentEnvOverlay>[0]);
+    expect(bad({ env: { A: 1 } })).toThrow(/env: value for A must be a string, got number/);
+    expect(bad({ env: { A: undefined } })).toThrow(/value for A must be a string/);
+    expect(bad({ env: { "": "x" } })).toThrow(/env: invalid env var name ""/);
+    expect(bad({ env: { "A=B": "x" } })).toThrow(/invalid env var name/);
+    expect(bad({ env: { "A\0": "x" } })).toThrow(/invalid env var name/);
+    expect(bad({ env: { A: "x\0y" } })).toThrow(/contains NUL/);
+    expect(bad({ env: null })).toThrow(/env: must be a plain object/);
+    expect(bad({ env: new Map([["A", "1"]]) })).toThrow(/env: must be a plain object/);
+    expect(bad({ env: { "A B": "x" } })).toThrow(/invalid env var name/);
+    expect(bad({ env: { "A\n": "x" } })).toThrow(/invalid env var name/);
+    expect(bad({ envRemove: ["A B"] })).toThrow(/envRemove: invalid env var name/);
+    expect(bad({ env: { A: undefined } })).toThrow(/leave the key out, or name it in envRemove to unset it/);
+    for (const k of ["HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]) {
+      expect(bad({ env: { [k]: "relative/dir" } })).toThrow(new RegExp(`env: ${k} must be an absolute path`));
+      expect(bad({ env: { [k]: "/abs/dir" } })).not.toThrow();
+    }
+    // Case is kept as given.
+    expect(agentEnvOverlay({ env: { path: "/x" } })!.env).toEqual({ path: "/x" });
+    expect(bad({ envRemove: [""] })).toThrow(/envRemove: invalid env var name/);
+    expect(bad({ envRemove: [1] })).toThrow(/envRemove: invalid env var name/);
+  });
+
+  it("applyEnvOverlay: remove, then drop the inherited login when the overlay names one, then lay values on", () => {
+    const base = { A: "a", B: "b", KEY: "parent-key", TOKEN: "parent-token" };
+    expect(applyEnvOverlay(base, undefined, ["KEY", "TOKEN"])).toBe(base);
+    const out = applyEnvOverlay(base, { env: { B: "overlay", TOKEN: "run-token" }, remove: ["A", "B"] }, [
+      "KEY",
+      "TOKEN",
+    ]);
+    expect(out).toEqual({ B: "overlay", TOKEN: "run-token" });
+    expect(base).toEqual({ A: "a", B: "b", KEY: "parent-key", TOKEN: "parent-token" });
+    // No credential in the overlay: the inherited login stays.
+    expect(applyEnvOverlay(base, { env: { C: "c" }, remove: [] }, ["KEY", "TOKEN"]).KEY).toBe("parent-key");
+  });
+
+  it("overlaidProcessEnv applies the overlay but leaves SWENY_* as process.env has them", () => {
+    vi.stubEnv("SWENY_AUTH", "auto");
+    vi.stubEnv("SWENY_OVERLAY_TEST_KEY", "parent-key");
+    const env = overlaidProcessEnv(
+      { env: { SWENY_AUTH: "oauth", SWENY_OVERLAY_TEST_TOKEN: "run" }, remove: ["SWENY_AUTH"] },
+      ["SWENY_OVERLAY_TEST_KEY"],
+    );
+    expect(env.SWENY_AUTH).toBe("auto");
+    expect(env.SWENY_OVERLAY_TEST_TOKEN).toBeUndefined();
+    expect(env.SWENY_OVERLAY_TEST_KEY).toBe("parent-key");
+    const swapped = overlaidProcessEnv({ env: { OVERLAY_TEST_KEY: "run-key" }, remove: [] }, [
+      "OVERLAY_TEST_KEY",
+      "SWENY_OVERLAY_TEST_KEY",
+    ]);
+    expect(swapped.OVERLAY_TEST_KEY).toBe("run-key");
+    expect(swapped).not.toHaveProperty("SWENY_OVERLAY_TEST_KEY");
+  });
+});
+
+describe("sandbox credential files follow the agent env (harness env overlay)", () => {
+  const files = (agentEnv?: Record<string, string>) =>
+    buildSandboxSettings(["api.anthropic.com"], { home: "/home/op", agentEnv }).credentials!.files!.map((f) => f.path);
+
+  it("denies the host login file, and the one an overlaid HOME or CLAUDE_CONFIG_DIR selects", () => {
+    expect(files()).toContain("/home/op/.claude/.credentials.json");
+    expect(files({ HOME: "/run/home" })).toEqual(
+      expect.arrayContaining(["/home/op/.claude/.credentials.json", "/run/home/.claude/.credentials.json"]),
+    );
+    expect(files({ CLAUDE_CONFIG_DIR: "/run/claude" })).toEqual(
+      expect.arrayContaining(["/home/op/.claude/.credentials.json", "/run/claude/.credentials.json"]),
+    );
+  });
+
+  it("claudeCredentialFiles dedupes the host file", () => {
+    expect(claudeCredentialFiles({ HOME: "/home/op" }, "/home/op")).toEqual(["/home/op/.claude/.credentials.json"]);
+  });
+});
+
+describe("overlay-aware lookups", () => {
+  it("buildAgentEnv keeps the cloud vars an overlaid CLAUDE_CODE_USE_BEDROCK / _VERTEX turns on", () => {
+    const source = { PATH: "/usr/bin", AWS_REGION: "us-east-1", AWS_ACCESS_KEY_ID: "k", GOOGLE_CLOUD_PROJECT: "p" };
+    expect(buildAgentEnv(source)).not.toHaveProperty("AWS_REGION");
+    const bedrock = buildAgentEnv(source, { routing: { ...source, CLAUDE_CODE_USE_BEDROCK: "1" } });
+    expect(bedrock.AWS_REGION).toBe("us-east-1");
+    expect(bedrock.AWS_ACCESS_KEY_ID).toBe("k");
+    const vertex = buildAgentEnv(source, { routing: { CLAUDE_CODE_USE_VERTEX: "1" } });
+    expect(vertex.GOOGLE_CLOUD_PROJECT).toBe("p");
+  });
+
+  it("claudeCredentialFiles resolves a relative value against the agent cwd", () => {
+    expect(claudeCredentialFiles({ CLAUDE_CONFIG_DIR: "cfg" }, "/home/op", "/work")).toContain(
+      "/work/cfg/.credentials.json",
+    );
+  });
+
+  it("resolveExecutable looks a bare name up on the given PATH and a relative path against cwd", () => {
+    const dir = mkdtempSync(nodePath.join(tmpdir(), "sweny-exe-"));
+    try {
+      const bin = nodePath.join(dir, "bin");
+      mkdirSync(bin);
+      const exe = nodePath.join(bin, "sweny-fake-tool");
+      writeFileSync(exe, "#!/bin/sh\n");
+      chmodSync(exe, 0o755);
+      expect(resolveExecutable("sweny-fake-tool", { PATH: "/nonexistent" }, dir)).toBeUndefined();
+      expect(resolveExecutable("sweny-fake-tool", { PATH: bin }, dir)).toBe(exe);
+      expect(resolveExecutable("./bin/sweny-fake-tool", {}, dir)).toBe(exe);
+      expect(resolveExecutable("./bin/sweny-fake-tool", {}, "/")).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("hasCodexLogin reads the env's HOME, not the process's", () => {
+    const seen: string[] = [];
+    const exists = (p: string) => (seen.push(p), p === "/run/home/.codex/auth.json");
+    expect(hasCodexLogin({ HOME: "/run/home" }, exists)).toBe(true);
+    expect(hasCodexLogin({ HOME: "/other" }, exists)).toBe(false);
+    expect(hasCodexLogin({ HOME: "/other", CODEX_HOME: "/run/home/.codex" }, exists)).toBe(true);
   });
 });

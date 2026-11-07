@@ -96,6 +96,54 @@ describe("buildSrtSettings", () => {
     expect(s.filesystem.allowWrite).toEqual(["/scratch/home"]);
   });
 
+  it("also denies the login files an overlaid HOME, CLAUDE_CONFIG_DIR or CODEX_HOME selects", () => {
+    const present = new Set([
+      "/home/op/.ssh",
+      "/run/home/.ssh",
+      "/run/home/.claude/.credentials.json",
+      "/run/claude/.credentials.json",
+      "/run/codex/auth.json",
+    ]);
+    const s = buildSrtSettings(
+      {
+        cwd: "/work",
+        egress: [],
+        env: { HOME: "/run/home", CLAUDE_CONFIG_DIR: "/run/claude", CODEX_HOME: "/run/codex" },
+      },
+      { home: "/scratch/home", credentialHome: "/home/op", exists: (p) => present.has(p) },
+    );
+    expect(s.filesystem.denyRead).toEqual(expect.arrayContaining([...present]));
+    // The host HOME as the env's HOME adds nothing twice.
+    const same = buildSrtSettings(
+      { cwd: "/work", egress: [], env: { HOME: "/home/op" } },
+      { home: "/scratch/home", credentialHome: "/home/op", exists },
+    );
+    expect(same.filesystem.denyRead).toEqual(["/home/op/.ssh", "/home/op/.npmrc"]);
+  });
+
+  it("denies an inherited CODEX_HOME / CLAUDE_CONFIG_DIR login outside HOME with no overlay at all", () => {
+    // Declared policy: the agent env's own login dirs are denied, inherited or overlaid.
+    const present = new Set(["/opt/codexhome/auth.json", "/opt/claudecfg/.credentials.json"]);
+    const s = buildSrtSettings(
+      {
+        cwd: "/work",
+        egress: [],
+        env: { HOME: "/home/op", CODEX_HOME: "/opt/codexhome", CLAUDE_CONFIG_DIR: "/opt/claudecfg" },
+      },
+      { home: "/scratch/home", credentialHome: "/home/op", exists: (p) => present.has(p) },
+    );
+    expect(s.filesystem.denyRead).toEqual(expect.arrayContaining([...present]));
+  });
+
+  it("resolves a relative login dir against the agent cwd, not sweny's", () => {
+    const want = "/work/cfg/.credentials.json";
+    const s = buildSrtSettings(
+      { cwd: "/work", egress: [], env: { CLAUDE_CONFIG_DIR: "cfg" } },
+      { home: "/scratch/home", credentialHome: "/home/op", exists: (p) => p === want },
+    );
+    expect(s.filesystem.denyRead).toContain(want);
+  });
+
   it("denies reading the operator's existing credential files only", () => {
     const s = buildSrtSettings(
       { cwd: "/work", egress: [] },

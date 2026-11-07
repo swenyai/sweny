@@ -180,11 +180,35 @@ function real(p: string): string {
 }
 
 /**
+ * Credential files an agent env points at outside `credentialHome`: the
+ * {@link CREDENTIAL_PATHS} under its `HOME` when that is another directory (a
+ * harness `env` overlay), `$CLAUDE_CONFIG_DIR/.credentials.json` and
+ * `$CODEX_HOME/auth.json`. A relative value resolves against the agent's
+ * `cwd`, where the agent would resolve it, never sweny's. Absolute paths.
+ */
+export function envCredentialPaths(
+  env: Record<string, string> | undefined,
+  credentialHome: string,
+  cwd: string,
+): string[] {
+  if (!env) return [];
+  const at = (dir: string, ...rest: string[]) => path.resolve(cwd, dir, ...rest);
+  const out: string[] = [];
+  if (env.HOME && at(env.HOME) !== path.resolve(credentialHome)) {
+    out.push(...CREDENTIAL_PATHS.map((rel) => at(env.HOME, rel)));
+  }
+  if (env.CLAUDE_CONFIG_DIR) out.push(at(env.CLAUDE_CONFIG_DIR, ".credentials.json"));
+  if (env.CODEX_HOME) out.push(at(env.CODEX_HOME, "auth.json"));
+  return out;
+}
+
+/**
  * The srt settings for one wrapped spawn. Pure apart from `exists`.
- * `credentialHome` is the operator's real HOME (not the scratch HOME).
+ * `credentialHome` is the operator's real HOME (not the scratch HOME); the
+ * login files `req.env` selects elsewhere are denied too ({@link envCredentialPaths}).
  */
 export function buildSrtSettings(
-  req: Pick<SandboxWrapRequest, "cwd" | "egress" | "readOnly" | "denyRead">,
+  req: Pick<SandboxWrapRequest, "cwd" | "egress" | "readOnly" | "denyRead"> & { env?: Record<string, string> },
   opts: {
     home: string;
     credentialHome: string;
@@ -196,9 +220,14 @@ export function buildSrtSettings(
 ): SrtSettings {
   const exists = opts.exists ?? existsSync;
   const allowedDomains = [...new Set(req.egress.map((d) => d.trim()).filter(isSrtDomainPattern))];
-  const denyRead = (opts.credentialPaths ?? CREDENTIAL_PATHS)
-    .map((rel) => (path.isAbsolute(rel) ? rel : path.join(opts.credentialHome, rel)))
-    .filter((p) => exists(p));
+  const denyRead = [
+    ...new Set([
+      ...(opts.credentialPaths ?? CREDENTIAL_PATHS).map((rel) =>
+        path.isAbsolute(rel) ? rel : path.join(opts.credentialHome, rel),
+      ),
+      ...envCredentialPaths(req.env, opts.credentialHome, req.cwd),
+    ]),
+  ].filter((p) => exists(p));
   // Deny the parent, not a snapshot of sibling homes: later-created runs
   // must stay hidden too. srt allowRead carves out only our own HOME.
   if (opts.isolationRoot) denyRead.push(opts.isolationRoot);

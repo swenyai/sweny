@@ -49,7 +49,8 @@ export function detectClaudeCodeLogin(
   } = {},
 ): boolean {
   const env = opts.env ?? process.env;
-  const home = opts.home ?? os.homedir();
+  // The env's HOME, not the process's: a harness `env` overlay may give the run its own.
+  const home = opts.home ?? (env.HOME || os.homedir());
   const platform = opts.platform ?? process.platform;
   const configDir = env.CLAUDE_CONFIG_DIR || path.join(home, ".claude");
   try {

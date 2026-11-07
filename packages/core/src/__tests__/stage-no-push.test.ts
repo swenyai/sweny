@@ -82,6 +82,12 @@ describe("withPushBlocked (#442)", () => {
     expect(keys.length).toBe(Number(out.GIT_CONFIG_COUNT));
   });
 
+  it("drops GIT_CONFIG_PARAMETERS, which git would apply after the block's entries", () => {
+    const out = withPushBlocked({ PATH: "/usr/bin", GIT_CONFIG_PARAMETERS: "'push.default'='current'" }, true);
+    expect(out).not.toHaveProperty("GIT_CONFIG_PARAMETERS");
+    expect(out.PATH).toBe("/usr/bin");
+  });
+
   it("does not touch the caller's env object", () => {
     const src = { GITHUB_TOKEN: "t" };
     withPushBlocked(src, true);
@@ -120,6 +126,16 @@ describe.skipIf(!posix)("git under withPushBlocked (#442, real git)", () => {
         git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "c2"], f.work, blocked)
           .status,
       ).toBe(0);
+
+      // GIT_CONFIG_PARAMETERS outranks GIT_CONFIG_COUNT: one that sets a push URL and its own hooks
+      // dir would push past the block if it reached git.
+      const emptyHooks = path.join(f.root, "no-hooks");
+      const params = `'remote.origin.pushurl'='${f.remote}' 'core.hooksPath'='${emptyHooks}'`;
+      const viaParams = git(["push", "origin", "HEAD:refs/heads/params"], f.work, {
+        ...withPushBlocked({ ...f.env, GIT_CONFIG_PARAMETERS: params }, true),
+      });
+      expect(viaParams.status, viaParams.out).not.toBe(0);
+      expect(f.refs()).toBe("");
 
       // Normal mode unchanged.
       const normal = git(["push", "-q", "origin", "HEAD:refs/heads/ok"], f.work, f.env);
