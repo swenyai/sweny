@@ -79,7 +79,20 @@ export interface PrCommentResult {
 }
 
 type Request = (path: string, init?: RequestInit) => Promise<unknown>;
-type Comment = { id: number; body: string; html_url?: string };
+type Comment = { id: number; body: string; html_url?: string; user?: { login?: unknown; type?: unknown } | null };
+
+/** The account sweny posts as: a user (a PAT) or an app's bot (an installation token). */
+export interface CommentAuthor {
+  login: string;
+  type: "User" | "Bot";
+}
+
+/** Whether `c` was written by `author`. Login and account kind must both match. */
+export function isAuthoredBy(c: Comment, author: CommentAuthor | undefined): boolean {
+  if (!author || !c.user || typeof c.user.login !== "string") return false;
+  const bot = c.user.type === "Bot";
+  return c.user.login.toLowerCase() === author.login.toLowerCase() && bot === (author.type === "Bot");
+}
 
 /** Pages of 100 comments read while looking for the marker. */
 const MAX_PAGES = 30;
@@ -90,11 +103,17 @@ const MAX_PAGES = 30;
  * (after normalization) make no write. A list failure never falls back to a
  * new comment. Any target other than the run's own pull request is refused
  * before a request is made.
+ *
+ * Only a marked comment written by `author()` (the account sweny posts as,
+ * looked up only when there is something to post) is ours: anyone can paste
+ * the marker into a comment. With no known author, none is ours and a new
+ * comment is created.
  */
 export async function upsertPrComment(
   target: { repo: string; number: number; body: string },
   run: ToolRunContext,
   request: Request,
+  author: () => Promise<CommentAuthor | undefined>,
 ): Promise<PrCommentResult> {
   if (!isRunPullRequest(run, target.repo, target.number)) {
     throw new Error("the updating PR comment may only target the run's own pull request");
@@ -105,15 +124,17 @@ export async function upsertPrComment(
   if (!findings) return { outcome: "empty" };
 
   const marker = prCommentMarker(run.workflowId);
+  const ours = await author();
   let existing: Comment | undefined;
-  for (let page = 1; page <= MAX_PAGES && !existing; page++) {
+  for (let page = 1; ours && page <= MAX_PAGES && !existing; page++) {
     const comments = await request(`/repos/${repo}/issues/${number}/comments?per_page=100&page=${page}`);
     if (!Array.isArray(comments)) throw new Error("GitHub comment list is unavailable");
     existing = comments.find(
       (c): c is Comment =>
         typeof c?.id === "number" &&
         typeof c?.body === "string" &&
-        (c.body === marker || c.body.startsWith(`${marker}\n`) || c.body.startsWith(`${marker}\r\n`)),
+        (c.body === marker || c.body.startsWith(`${marker}\n`) || c.body.startsWith(`${marker}\r\n`)) &&
+        isAuthoredBy(c, ours),
     );
     if (comments.length < 100) break;
   }

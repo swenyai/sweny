@@ -18,6 +18,7 @@ import {
   type SafeOutputIntent,
 } from "./safe-outputs.js";
 import { validateWorkflow } from "./schema.js";
+import { markWorkspaceEnv, unmarkWorkspaceEnv } from "./startup-env.js";
 import type { SafeOutputDeclaration, SafeOutputType, Skill, Tool, ToolContext, Workflow } from "./types.js";
 
 function mkLogger() {
@@ -55,6 +56,25 @@ function fakeGithub() {
 }
 
 const T0 = 1_000_000;
+
+describe("the run's repo pin", () => {
+  it("never comes from a GITHUB_REPOSITORY the workspace .env introduced", async () => {
+    markWorkspaceEnv("GITHUB_REPOSITORY");
+    try {
+      const { o, gh } = opts({ env: { GITHUB_REPOSITORY: "attacker/x" } });
+      const { receipts } = await applySafeOutputs(o);
+      expect(receipts[0].target).not.toBe("attacker/x");
+      expect(gh.calls.some((c) => c.input.repo === "attacker/x")).toBe(false);
+    } finally {
+      unmarkWorkspaceEnv("GITHUB_REPOSITORY");
+    }
+  });
+
+  it("is the operator's GITHUB_REPOSITORY otherwise", async () => {
+    const { o } = opts({ env: { GITHUB_REPOSITORY: "acme/api" } });
+    expect((await applySafeOutputs(o)).receipts[0]).toMatchObject({ status: "applied", target: "acme/api" });
+  });
+});
 
 describe("skipped writes and the job summary (#536)", () => {
   it("records a tool's { skipped } output as a skipped receipt", async () => {

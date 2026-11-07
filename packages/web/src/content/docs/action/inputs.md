@@ -50,11 +50,12 @@ SWEny is quiet by default. The run receipt (cost, tokens, duration, policy) and 
 
 When a workflow comments on the pull request it runs for (a `comment` safe output or the GitHub skill's `github_add_comment`), SWEny keeps **one comment per workflow per PR** and edits it in place:
 
-- It finds the comment by the hidden first line `<!-- sweny-run-comment:<workflow-id> -->`. A sticky billboard from an older version has the same marker, so it becomes the findings comment.
+- It finds the comment by the hidden first line `<!-- sweny-run-comment:<workflow-id> -->`, and only among comments written by the account SWEny posts as (the token's user, or `github-actions[bot]` / your app's bot). A marked comment from anyone else is ignored. A sticky billboard from an older version has the same marker and author, so it becomes the findings comment.
 - The comment holds the findings and one **Run receipt** link to the Actions run.
 - Empty findings post nothing.
 - Findings unchanged since the last post are not written again. The comparison ignores the receipt link, line endings and trailing whitespace.
 - Each run adds one line to the job summary saying what it did: posted, updated, or skipped and why.
+- If one run writes to the comment twice (two nodes each post a comment on the PR), the last write wins.
 
 The PR is the one the runner names (`PR_NUMBER`, which the Action sets, or `GITHUB_REF` on a `pull_request` event) in the run's own repository (`GITHUB_REPOSITORY`). Nothing in the workflow input or the agent's request can point the updating comment at another PR or repository. Comments on any other issue or PR are posted as before.
 

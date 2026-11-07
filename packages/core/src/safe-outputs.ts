@@ -30,6 +30,7 @@ import type {
   ToolContext,
 } from "./types.js";
 import { SAFE_OUTPUT_APPLIERS, isToolRefusal, skippedReason } from "./types.js";
+import { trustedEnvValue } from "./startup-env.js";
 
 /** Name of the intent-recording tool a node with `outputs` receives. */
 export const EMIT_OUTPUT_TOOL = "emit_output";
@@ -507,7 +508,9 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       refuse("no skill can apply this type");
       continue;
     }
-    const pinned = decl.target ?? (via === "github" ? o.env.GITHUB_REPOSITORY || undefined : undefined);
+    // The run's repo from the operator's env, never one a workspace .env introduced.
+    const pinned =
+      decl.target ?? (via === "github" ? trustedEnvValue(o.env, "GITHUB_REPOSITORY") || undefined : undefined);
     if (intent.target && pinned && intent.target.toLowerCase() !== pinned.toLowerCase()) {
       refuse("target outside the declared target", { via });
       continue;

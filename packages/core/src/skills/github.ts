@@ -6,7 +6,13 @@
  */
 
 import type { BranchPusher, Skill, ToolContext, SkillCategory, ToolRefusal } from "../types.js";
-import { PR_COMMENT_SKIP_REASON, isRunPullRequest, prCommentSummaryLine, upsertPrComment } from "../pr-comment.js";
+import {
+  PR_COMMENT_SKIP_REASON,
+  isRunPullRequest,
+  prCommentSummaryLine,
+  upsertPrComment,
+  type CommentAuthor,
+} from "../pr-comment.js";
 
 // #473: the sweny-side head-branch push arrives as `ctx.pushBranch`, bound to
 // the run's checkout by the Node executor (skills/git-push.ts). This module
@@ -56,6 +62,57 @@ async function gh(path: string, ctx: ToolContext, init?: RequestInit): Promise<u
   });
   if (!res.ok) throw new GitHubApiError(res.status, await res.text());
   return res.json();
+}
+
+/** The GraphQL endpoint beside the REST base: `/api/graphql` on GHES, `/graphql` on github.com. */
+export function githubGraphqlUrl(apiUrl: string | undefined): string {
+  const base = githubApiBase(apiUrl);
+  return /\/api\/v3$/.test(base) ? base.replace(/\/api\/v3$/, "/api/graphql") : `${base}/graphql`;
+}
+
+/**
+ * The account this token posts as (#536). A PAT or OAuth token: `GET /user`.
+ * An installation token (the Actions GITHUB_TOKEN, a GitHub App) gets 403
+ * there, so its bot is GraphQL's `viewer` (a bot login without "[bot]"),
+ * which REST shows as `<login>[bot]`. Undefined when neither answers.
+ */
+export async function resolveCommentAuthor(ctx: ToolContext): Promise<CommentAuthor | undefined> {
+  try {
+    const user = (await gh("/user", ctx)) as { login?: unknown; type?: unknown } | null;
+    if (typeof user?.login === "string" && user.login) {
+      return { login: user.login, type: user.type === "Bot" ? "Bot" : "User" };
+    }
+  } catch {
+    // An installation token cannot read /user; ask GraphQL.
+  }
+  try {
+    const res = await fetch(githubGraphqlUrl(ctx.githubApiUrl), {
+      method: "POST",
+      headers: { Authorization: `bearer ${ctx.config.GITHUB_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ query: "query { viewer { login } }" }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) return undefined;
+    const login = ((await res.json()) as { data?: { viewer?: { login?: unknown } } } | null)?.data?.viewer?.login;
+    if (typeof login === "string" && /^[A-Za-z0-9-]+(\[bot\])?$/.test(login)) {
+      return { login: `${login.replace(/\[bot\]$/, "")}[bot]`, type: "Bot" };
+    }
+  } catch {
+    // Unknown author: no existing comment counts as ours.
+  }
+  return undefined;
+}
+
+/** One lookup per run: the run context object is the same for every tool call in a run. */
+const commentAuthors = new WeakMap<object, Promise<CommentAuthor | undefined>>();
+
+function commentAuthorFor(ctx: ToolContext, run: object): Promise<CommentAuthor | undefined> {
+  let author = commentAuthors.get(run);
+  if (!author) {
+    author = resolveCommentAuthor(ctx);
+    commentAuthors.set(run, author);
+  }
+  return author;
 }
 
 /**
@@ -319,6 +376,7 @@ export const github: Skill = {
             { repo: input.repo, number: Number(input.issue_number), body: String(input.body ?? "") },
             ctx.run,
             (path, init) => gh(path, ctx, init),
+            () => commentAuthorFor(ctx, ctx.run!),
           );
           ctx.summary?.(prCommentSummaryLine(ctx.run, result.outcome));
           const skipped = PR_COMMENT_SKIP_REASON[result.outcome];

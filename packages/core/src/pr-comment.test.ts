@@ -6,6 +6,7 @@ import {
   prCommentMarker,
   prCommentSummaryLine,
   upsertPrComment,
+  type CommentAuthor,
 } from "./pr-comment.js";
 import type { ToolRunContext } from "./types.js";
 
@@ -16,6 +17,10 @@ const run: ToolRunContext = {
   receiptUrl: "https://github.com/o/r/actions/runs/2",
 };
 const findings = "## Findings\n\n- Missing coverage for auth.ts";
+const author: CommentAuthor = { login: "github-actions[bot]", type: "Bot" };
+const me = async () => author;
+const ours = { user: { login: "github-actions[bot]", type: "Bot" } };
+
 const target = (body = findings, repo = "o/r", number = 3) => ({ repo, number, body });
 
 describe("marker", () => {
@@ -34,7 +39,7 @@ describe("marker", () => {
 describe("upsertPrComment", () => {
   it("creates one marked comment: findings plus one receipt link", async () => {
     const request = vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce({ id: 7, html_url: "https://h/7" });
-    expect(await upsertPrComment(target(), run, request)).toEqual({
+    expect(await upsertPrComment(target(), run, request, me)).toEqual({
       outcome: "created",
       id: 7,
       html_url: "https://h/7",
@@ -51,11 +56,11 @@ describe("upsertPrComment", () => {
     const request = vi
       .fn()
       .mockResolvedValueOnce([
-        { id: 1, body: formatPrComment("old", { ...run, workflowId: "another" }) },
-        { id: 8, body: formatPrComment("old", run) },
+        { id: 1, body: formatPrComment("old", { ...run, workflowId: "another" }), ...ours },
+        { id: 8, body: formatPrComment("old", run), ...ours },
       ])
       .mockResolvedValueOnce({ id: 8 });
-    expect(await upsertPrComment(target(), run, request)).toMatchObject({ outcome: "updated", id: 8 });
+    expect(await upsertPrComment(target(), run, request, me)).toMatchObject({ outcome: "updated", id: 8 });
     expect(request).toHaveBeenCalledTimes(2);
     expect(request.mock.calls[1][0]).toBe("/repos/o/r/issues/comments/8");
     expect(request.mock.calls[1][1].method).toBe("PATCH");
@@ -65,9 +70,9 @@ describe("upsertPrComment", () => {
     const billboard = "<!-- sweny-run-comment:pr-review -->\n## ✅ PR Review\n\n```text\nreceipt\n```";
     const request = vi
       .fn()
-      .mockResolvedValueOnce([{ id: 5, body: billboard }])
+      .mockResolvedValueOnce([{ id: 5, body: billboard, ...ours }])
       .mockResolvedValueOnce({ id: 5 });
-    expect((await upsertPrComment(target(), run, request)).outcome).toBe("updated");
+    expect((await upsertPrComment(target(), run, request, me)).outcome).toBe("updated");
     expect(request.mock.calls[1][0]).toBe("/repos/o/r/issues/comments/5");
   });
 
@@ -76,21 +81,23 @@ describe("upsertPrComment", () => {
       ...run,
       receiptUrl: "https://github.com/o/r/actions/runs/1",
     }).replace(/\n/g, "\r\n");
-    const request = vi.fn().mockResolvedValueOnce([{ id: 8, body: previous, html_url: "https://h/8" }]);
-    expect(await upsertPrComment(target(`${findings}  \n\n<!-- sweny-output swenyknew -->`), run, request)).toEqual({
-      outcome: "unchanged",
-      id: 8,
-      html_url: "https://h/8",
-    });
+    const request = vi.fn().mockResolvedValueOnce([{ id: 8, body: previous, html_url: "https://h/8", ...ours }]);
+    expect(await upsertPrComment(target(`${findings}  \n\n<!-- sweny-output swenyknew -->`), run, request, me)).toEqual(
+      {
+        outcome: "unchanged",
+        id: 8,
+        html_url: "https://h/8",
+      },
+    );
     expect(request).toHaveBeenCalledTimes(1);
   });
 
   it("writes when the findings changed", async () => {
     const request = vi
       .fn()
-      .mockResolvedValueOnce([{ id: 8, body: formatPrComment(findings, run) }])
+      .mockResolvedValueOnce([{ id: 8, body: formatPrComment(findings, run), ...ours }])
       .mockResolvedValueOnce({ id: 8 });
-    expect((await upsertPrComment(target(`${findings}\n- New: no test for logout`), run, request)).outcome).toBe(
+    expect((await upsertPrComment(target(`${findings}\n- New: no test for logout`), run, request, me)).outcome).toBe(
       "updated",
     );
   });
@@ -99,18 +106,20 @@ describe("upsertPrComment", () => {
     "skips empty findings without any API call: %j",
     async (body) => {
       const request = vi.fn();
-      expect(await upsertPrComment(target(body), run, request)).toEqual({ outcome: "empty" });
+      expect(await upsertPrComment(target(body), run, request, me)).toEqual({ outcome: "empty" });
       expect(request).not.toHaveBeenCalled();
     },
   );
 
   it("refuses a repo other than the run's own, before any request", async () => {
     const request = vi.fn();
-    await expect(upsertPrComment(target(findings, "attacker/r"), run, request)).rejects.toThrow(
+    await expect(upsertPrComment(target(findings, "attacker/r"), run, request, me)).rejects.toThrow(
       /run's own pull request/,
     );
-    await expect(upsertPrComment(target(findings, "o/r", 4), run, request)).rejects.toThrow(/run's own pull request/);
-    await expect(upsertPrComment(target(), { workflowId: "pr-review" }, request)).rejects.toThrow();
+    await expect(upsertPrComment(target(findings, "o/r", 4), run, request, me)).rejects.toThrow(
+      /run's own pull request/,
+    );
+    await expect(upsertPrComment(target(), { workflowId: "pr-review" }, request, me)).rejects.toThrow();
     expect(request).not.toHaveBeenCalled();
   });
 
@@ -118,25 +127,75 @@ describe("upsertPrComment", () => {
     const request = vi
       .fn()
       .mockResolvedValueOnce(Array.from({ length: 100 }, (_, id) => ({ id, body: "unrelated" })))
-      .mockResolvedValueOnce([{ id: 101, body: formatPrComment("old", run) }])
+      .mockResolvedValueOnce([{ id: 101, body: formatPrComment("old", run), ...ours }])
       .mockResolvedValueOnce({ id: 101 });
-    await upsertPrComment(target(), run, request);
+    await upsertPrComment(target(), run, request, me);
     expect(request.mock.calls[1][0]).toContain("page=2");
     expect(request.mock.calls[2][1].method).toBe("PATCH");
   });
 
   it("never falls back to a new comment when the list fails", async () => {
     const request = vi.fn().mockResolvedValueOnce({ message: "Not Found" });
-    await expect(upsertPrComment(target(), run, request)).rejects.toThrow();
+    await expect(upsertPrComment(target(), run, request, me)).rejects.toThrow();
     expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a marked comment someone else wrote and creates a fresh one", async () => {
+    const spoofs = [
+      { id: 3, body: formatPrComment("planted", run), user: { login: "mallory", type: "User" } },
+      { id: 4, body: formatPrComment("planted", run), user: { login: "other-app[bot]", type: "Bot" } },
+      // A user whose login matches the bot's name is not the bot.
+      { id: 6, body: formatPrComment(findings, run), user: { login: "github-actions[bot]", type: "User" } },
+      { id: 7, body: formatPrComment(findings, run) },
+    ];
+    const request = vi.fn().mockResolvedValueOnce(spoofs).mockResolvedValueOnce({ id: 10 });
+    expect(await upsertPrComment(target(), run, request, me)).toMatchObject({ outcome: "created", id: 10 });
+    expect(request.mock.calls[1][0]).toBe("/repos/o/r/issues/3/comments");
+    expect(request.mock.calls[1][1].method).toBe("POST");
+  });
+
+  it("updates our own marked comment, not an earlier spoofed one", async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { id: 3, body: formatPrComment("planted", run), user: { login: "mallory", type: "User" } },
+        { id: 8, body: formatPrComment("old", run), user: { login: "GitHub-Actions[bot]", type: "Bot" } },
+      ])
+      .mockResolvedValueOnce({ id: 8 });
+    expect((await upsertPrComment(target(), run, request, me)).outcome).toBe("updated");
+    expect(request.mock.calls[1][0]).toBe("/repos/o/r/issues/comments/8");
+  });
+
+  it("matches a PAT's user account by login and kind", async () => {
+    const pat = async (): Promise<CommentAuthor> => ({ login: "release-bot", type: "User" });
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { id: 8, body: formatPrComment("old", run), user: { login: "release-bot", type: "User" } },
+      ])
+      .mockResolvedValueOnce({ id: 8 });
+    expect((await upsertPrComment(target(), run, request, pat)).outcome).toBe("updated");
+  });
+
+  it("creates without listing when the author cannot be resolved", async () => {
+    const request = vi.fn().mockResolvedValueOnce({ id: 11 });
+    expect((await upsertPrComment(target(), run, request, async () => undefined)).outcome).toBe("created");
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0][1].method).toBe("POST");
+  });
+
+  it("does not look up the author for empty findings", async () => {
+    const lookup = vi.fn(me);
+    expect(await upsertPrComment(target(""), run, vi.fn(), lookup)).toEqual({ outcome: "empty" });
+    expect(lookup).not.toHaveBeenCalled();
   });
 
   it("does not treat a quoted marker as the workflow's comment", async () => {
     const request = vi
       .fn()
-      .mockResolvedValueOnce([{ id: 8, body: `> ${prCommentMarker("pr-review")}\nquoted` }])
+      .mockResolvedValueOnce([{ id: 8, body: `> ${prCommentMarker("pr-review")}\nquoted`, ...ours }])
       .mockResolvedValueOnce({ id: 9 });
-    expect((await upsertPrComment(target(), run, request)).outcome).toBe("created");
+    expect((await upsertPrComment(target(), run, request, me)).outcome).toBe("created");
     expect(request.mock.calls[1][1].method).toBe("POST");
   });
 });
