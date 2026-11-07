@@ -948,7 +948,7 @@ describe("github_create_pr pushes the head before it requests the PR", () => {
             ? new Response("Branch not found", { status: 404 })
             : String(url).includes("/git/ref/heads/")
               ? new Response(JSON.stringify({ ref: "refs/heads/x-1-fix", object: { sha: remote } }), { status: 200 })
-              : new Response(JSON.stringify({ number: 8 }), { status: 201 }),
+              : new Response(JSON.stringify({ number: 8, head: { sha: local } }), { status: 201 }),
         );
       const createPr = github.tools.find((t) => t.name === "github_create_pr")!;
       const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };

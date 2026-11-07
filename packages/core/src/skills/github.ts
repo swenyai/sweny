@@ -5,7 +5,7 @@
  * ~800 lines → ~120 lines
  */
 
-import type { BranchPusher, Skill, ToolContext, SkillCategory } from "../types.js";
+import type { BranchPusher, Skill, ToolContext, SkillCategory, ToolRefusal } from "../types.js";
 
 // #473: the sweny-side head-branch push arrives as `ctx.pushBranch`, bound to
 // the run's checkout by the Node executor (skills/git-push.ts). This module
@@ -107,6 +107,14 @@ export async function headPushLease(
 }
 
 const SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+
+// Fixed-wording refusal reasons for `github_create_pr` (#544). Receipts and PR
+// comments carry these; shas and upstream errors go in the result's `detail`.
+const REFUSE_NO_LOCAL = "the head push failed and the pusher did not report the local commit";
+const REFUSE_UNREADABLE = "the head push failed and the remote head could not be read";
+const REFUSE_MISMATCH = "the head push failed and the remote head is not the commit this run produced";
+const REFUSE_PR_MISMATCH = "the PR was opened but its head is not the commit this run produced";
+const REFUSE_PR_UNVERIFIED = "the PR was opened but its head commit could not be verified";
 
 /**
  * The sha the remote `head` branch points at, read through the API (#544), or
@@ -335,6 +343,8 @@ export const github: Skill = {
         let reused = false;
         // The remote head this run saw, for the result (#544).
         let observedHead: string | undefined;
+        // Set after sweny's own push failed: the PR's head must be this commit (#544).
+        let mustHead: string | undefined;
         // #473: push the head branch from sweny with this skill's token, so the
         // recommended `persist-credentials: false` checkout still ships the
         // branch and the agent never holds a write token. Skipped unless the
@@ -373,18 +383,30 @@ export const github: Skill = {
             const remote = local ? await remoteHeadSha(input.repo, input.head, ctx) : undefined;
             const remoteSha = remote && "sha" in remote ? remote.sha : null;
             if (!local || !remoteSha || remoteSha !== local) {
-              const why = !local
-                ? "the pusher did not report the local commit"
+              const [reason, why] = !local
+                ? [REFUSE_NO_LOCAL, "the pusher did not report the local commit"]
                 : remote && "error" in remote
-                  ? `cannot read the remote head of ${input.head}: ${remote.error}`
+                  ? [REFUSE_UNREADABLE, `cannot read the remote head of ${input.head}: ${remote.error}`]
                   : remoteSha
-                    ? `the remote head of ${input.head} is ${remoteSha}, not the local commit ${local}`
-                    : `${input.head} does not exist on ${input.repo}; the local commit is ${local}`;
-              const reason = `refusing to open the PR: sweny's push failed (${push.reason}) and ${why}`;
-              ctx.logger?.warn?.(`  github_create_pr: ${reason}`);
-              return { refused: true, reason, head: input.head, local_sha: local, remote_sha: remoteSha };
+                    ? [
+                        REFUSE_MISMATCH,
+                        `the remote head of ${input.head} is ${remoteSha}, not the local commit ${local}`,
+                      ]
+                    : [REFUSE_MISMATCH, `${input.head} does not exist on ${input.repo}; the local commit is ${local}`];
+              const detail = `sweny's push failed (${push.reason}) and ${why}`;
+              ctx.logger?.warn?.(`  github_create_pr: refusing to open the PR: ${detail}`);
+              const refusal: ToolRefusal & Record<string, unknown> = {
+                refused: true,
+                reason,
+                detail,
+                head: input.head,
+                local_sha: local,
+                remote_sha: remoteSha,
+              };
+              return refusal;
             }
             observedHead = remoteSha;
+            mustHead = local;
             ctx.logger?.warn?.(
               `  github_create_pr: ${push.reason}; the remote head is already the local commit ${local}, requesting the PR`,
             );
@@ -425,6 +447,29 @@ export const github: Skill = {
           pr = existing as { number?: number };
           reused = true;
         }
+        // #544: the remote could move between the ref read and the request. The
+        // PR exists now; it is not closed (that would be another write nobody
+        // asked for), but the result refuses to vouch for it.
+        const prHead = (pr.head as { sha?: unknown } | undefined)?.sha;
+        const prHeadSha = typeof prHead === "string" && SHA.test(prHead) ? prHead : null;
+        if (mustHead && prHeadSha !== mustHead) {
+          const detail = prHeadSha
+            ? `the PR's head is ${prHeadSha}, not the local commit ${mustHead}`
+            : `GitHub did not report the PR's head commit; the local commit is ${mustHead}`;
+          ctx.logger?.warn?.(`  github_create_pr: ${pr.html_url ?? `#${pr.number}`} is not verified: ${detail}`);
+          const refusal: ToolRefusal & Record<string, unknown> = {
+            refused: true,
+            reason: prHeadSha ? REFUSE_PR_MISMATCH : REFUSE_PR_UNVERIFIED,
+            detail,
+            ...(pr.number !== undefined ? { number: pr.number } : {}),
+            ...(pr.html_url ? { html_url: pr.html_url } : {}),
+            ...(reused ? { reused: true } : {}),
+            head: input.head,
+            local_sha: mustHead,
+            remote_sha: prHeadSha,
+          };
+          return refusal;
+        }
         try {
           if (pr.number && !reused) {
             await gh(`/repos/${input.repo}/issues/${pr.number}/labels`, ctx, {
@@ -442,8 +487,7 @@ export const github: Skill = {
           ctx.logger?.warn?.(`  github_create_pr: label POST failed for ${pr.html_url ?? `#${pr.number}`} — ${msg}`);
         }
         // The head the PR was opened from: GitHub's answer, else the remote head this run read.
-        const prHead = (pr.head as { sha?: unknown } | undefined)?.sha;
-        const headSha = typeof prHead === "string" && SHA.test(prHead) ? prHead : observedHead;
+        const headSha = prHeadSha ?? observedHead;
         const out = headSha ? { ...pr, head_sha: headSha } : pr;
         return reused ? { ...out, reused: true } : out;
       },

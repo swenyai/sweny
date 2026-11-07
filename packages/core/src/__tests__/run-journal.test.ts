@@ -934,3 +934,26 @@ describe("replayed control flow must be real", () => {
     expect(agent.calls).toEqual([]);
   });
 });
+
+describe("a write handler's refusal in the journal (#544)", () => {
+  it("node:end records the write as refused with the handler's reason, never applied", async () => {
+    const cwd = tmp();
+    const gh = fakeProvider();
+    const create = gh.skill.tools.find((t) => t.name === "github_create_issue")!;
+    create.handler = async () => ({
+      refused: true,
+      reason: "the tool could not vouch for this write",
+      detail: "upstream specifics stay in the tool result",
+    });
+    const agent = fakeAgent({ emit: { report: [ISSUE] } });
+    expect(await firstRun(cwd, reporting(), agent, [gh.skill])).toBe(false);
+    const end = readJournal(journalFile(cwd)).records.find((r) => r.type === "node:end" && r.node === "report");
+    const result = end!.result as NodeResult;
+    expect(result.status).toBe("failed");
+    expect(result.outputs).toEqual([
+      expect.objectContaining({ type: "issue", status: "refused", reason: "the tool could not vouch for this write" }),
+    ]);
+    expect(JSON.stringify(result.outputs)).not.toContain("applied");
+    expect(JSON.stringify(end)).not.toContain("upstream specifics");
+  });
+});

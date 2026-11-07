@@ -95,6 +95,32 @@ export interface Tool {
   handler: (input: any, ctx: ToolContext) => Promise<unknown>;
 }
 
+/**
+ * A write handler's structured refusal: it declined the write, or could not
+ * vouch for what it wrote, and says why. Returned, not thrown, so the caller
+ * keeps the details. `refused: true` is the same flag a refused node result
+ * carries (`data: { error, refused: true }`). The write stage records it as
+ * refused, never applied (#544).
+ *
+ * `reason` is fixed wording chosen by the handler, never model, agent or
+ * remote text: receipts and PR comments carry it. Specifics (shas, branch
+ * names, upstream errors) go in `detail` and other fields, which only the
+ * tool result carries. A refusal may still name what exists (`number`,
+ * `html_url`) when the write happened but could not be verified.
+ */
+export interface ToolRefusal {
+  refused: true;
+  reason: string;
+  detail?: string;
+}
+
+/** Whether a tool handler's output is a {@link ToolRefusal}. */
+export function isToolRefusal(output: unknown): output is ToolRefusal {
+  if (!output || typeof output !== "object" || Array.isArray(output)) return false;
+  const o = output as Record<string, unknown>;
+  return o.refused === true && typeof o.reason === "string" && o.reason.length > 0;
+}
+
 /** Config field declaration — skills say what they need */
 export interface ConfigField {
   description: string;

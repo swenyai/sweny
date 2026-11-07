@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { github, encodeRepoFilePath } from "./github.js";
-import type { Logger, ToolContext } from "../types.js";
+import { isToolRefusal, type Logger, type ToolContext } from "../types.js";
 
 const ctx = (overrides: Partial<ToolContext> = {}): ToolContext => ({
   config: { GITHUB_TOKEN: "test-token" },
@@ -267,7 +267,7 @@ describe("github_create_pr after the sweny-side push", () => {
   });
 
   it("a failed push opens the PR when the remote head is the local commit", async () => {
-    route({ ref: refAt(LOCAL) });
+    route({ ref: refAt(LOCAL), pr: { number: 7, html_url: "https://github.com/o/r/pull/7", head: { sha: LOCAL } } });
     const pushBranch = failedPush();
     const result: any = await createPr.handler(
       { repo: "o/r", title: "t", head: "x-1-fix" },
@@ -289,9 +289,13 @@ describe("github_create_pr after the sweny-side push", () => {
     );
     expect(posted()).toBe(false);
     expect(result).toMatchObject({ refused: true, head: "x-1-fix", local_sha: LOCAL, remote_sha: OTHER });
-    expect(result.reason).toContain(LOCAL);
-    expect(result.reason).toContain(OTHER);
-    expect(result.reason).toContain("git push failed");
+    expect(isToolRefusal(result)).toBe(true);
+    // The reason is fixed wording (receipts carry it); the specifics are in detail.
+    expect(result.reason).toBe("the head push failed and the remote head is not the commit this run produced");
+    expect(result.reason).not.toContain("x-1-fix");
+    expect(result.detail).toContain(LOCAL);
+    expect(result.detail).toContain(OTHER);
+    expect(result.detail).toContain("git push failed");
     expect(result.number).toBeUndefined();
     expect(result.html_url).toBeUndefined();
     expect(logger.warnings.some((w) => w.includes("refusing"))).toBe(true);
@@ -315,7 +319,8 @@ describe("github_create_pr after the sweny-side push", () => {
     );
     expect(posted()).toBe(false);
     expect(result).toMatchObject({ refused: true, local_sha: LOCAL, remote_sha: null });
-    expect(result.reason).toMatch(/cannot read/);
+    expect(result.reason).toBe("the head push failed and the remote head could not be read");
+    expect(result.detail).toMatch(/cannot read the remote head/);
   });
 
   it("a failed push fails closed on a ref answer that names another ref", async () => {
@@ -364,6 +369,56 @@ describe("github_create_pr after the sweny-side push", () => {
     expect(posted()).toBe(true);
     expect(result).toMatchObject({ number: 7 });
     expect(result.refused).toBeUndefined();
+  });
+
+  it("a failed push whose PR comes back with another head returns a refusal naming the PR, and adds no labels", async () => {
+    route({ ref: refAt(LOCAL), pr: { number: 7, html_url: "https://github.com/o/r/pull/7", head: { sha: OTHER } } });
+    const logger = makeLogger();
+    const result: any = await createPr.handler(
+      { repo: "o/r", title: "t", head: "x-1-fix" },
+      ctx({ logger, pushBranch: failedPush() }),
+    );
+    expect(posted()).toBe(true);
+    expect(isToolRefusal(result)).toBe(true);
+    expect(result).toMatchObject({
+      refused: true,
+      reason: "the PR was opened but its head is not the commit this run produced",
+      number: 7,
+      html_url: "https://github.com/o/r/pull/7",
+      local_sha: LOCAL,
+      remote_sha: OTHER,
+    });
+    // Never closed (no PATCH) and never labeled.
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    expect(calls.some((c) => c.url.includes("/labels"))).toBe(false);
+    expect(logger.warnings.some((w) => w.includes("not verified"))).toBe(true);
+  });
+
+  it("a failed push whose PR comes back with no head sha is refused as unverified", async () => {
+    route({ ref: refAt(LOCAL), pr: { number: 7, html_url: "https://github.com/o/r/pull/7" } });
+    const result: any = await createPr.handler(
+      { repo: "o/r", title: "t", head: "x-1-fix" },
+      ctx({ logger: makeLogger(), pushBranch: failedPush() }),
+    );
+    expect(result).toMatchObject({
+      refused: true,
+      reason: "the PR was opened but its head commit could not be verified",
+      number: 7,
+      remote_sha: null,
+    });
+  });
+
+  it("the post-create check runs only after a failed push: a lease skip's PR is returned as is", async () => {
+    route({
+      branch: () => jsonResponse(200, { protected: true, commit: { sha: OTHER } }),
+      pr: { number: 7, head: { sha: LOCAL } },
+    });
+    const result: any = await createPr.handler(
+      { repo: "o/r", title: "t", head: "x-1-fix" },
+      ctx({ logger: makeLogger(), pushBranch: failedPush() }),
+    );
+    expect(result.refused).toBeUndefined();
+    expect(result).toMatchObject({ number: 7, head_sha: LOCAL });
   });
 
   it("the result's head_sha is the head GitHub reports for the PR", async () => {

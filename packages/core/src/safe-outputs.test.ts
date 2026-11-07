@@ -176,6 +176,75 @@ describe("write stage: apply", () => {
     expect(r.error).toMatch(/issue via github failed: GitHub API 403/);
     expect(r.receipts.map((x) => x.status)).toEqual(["failed", "skipped"]);
   });
+
+  it("a handler's returned refusal is recorded as refused with its reason, never applied, and fails the stage (#544)", async () => {
+    const { o, logger } = opts({
+      declarations: [{ type: "pr" }, { type: "comment" }],
+      intents: [
+        intent({ type: "pr", title: "Fix", body: "b", head: "fix/x" }),
+        intent({ type: "comment", number: "12", body: "Opened a fix", title: undefined }),
+      ],
+    });
+    const tool = o.skills.get("github")!.tools.find((t) => t.name === "github_create_pr")!;
+    tool.handler = async () => ({
+      refused: true,
+      reason: "the head push failed and the remote head is not the commit this run produced",
+      detail: "sha detail that never reaches a receipt",
+    });
+    const r = await applySafeOutputs(o);
+    expect(r.receipts).toEqual([
+      {
+        type: "pr",
+        status: "refused",
+        via: "github",
+        target: "acme/api",
+        reason: "the head push failed and the remote head is not the commit this run produced",
+      },
+      { type: "comment", status: "skipped", via: "github", target: "acme/api", reason: "an earlier write was refused" },
+    ]);
+    expect(r.error).toMatch(/pr via github was refused: the head push failed/);
+    expect(JSON.stringify(r.receipts)).not.toContain("sha detail");
+    expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining("applied"), expect.anything());
+  });
+
+  it("a refusal for a write that did happen keeps its ref and URL on the refused receipt", async () => {
+    const { o } = opts({
+      declarations: [{ type: "pr" }],
+      intents: [intent({ type: "pr", title: "Fix", body: "b", head: "fix/x" })],
+    });
+    const tool = o.skills.get("github")!.tools.find((t) => t.name === "github_create_pr")!;
+    tool.handler = async () => ({
+      refused: true,
+      reason: "the PR was opened but its head is not the commit this run produced",
+      number: 8,
+      html_url: "https://github.com/acme/api/pull/8",
+    });
+    const r = await applySafeOutputs(o);
+    expect(r.receipts).toEqual([
+      {
+        type: "pr",
+        status: "refused",
+        via: "github",
+        target: "acme/api",
+        ref: 8,
+        url: "https://github.com/acme/api/pull/8",
+        reason: "the PR was opened but its head is not the commit this run produced",
+      },
+    ]);
+    expect(r.error).toBeDefined();
+  });
+
+  it("a refused flag without a usable reason still records a refusal (fail closed), with fixed wording", async () => {
+    const { o } = opts({
+      declarations: [{ type: "pr" }],
+      intents: [intent({ type: "pr", title: "F", head: "fix/x" })],
+    });
+    const tool = o.skills.get("github")!.tools.find((t) => t.name === "github_create_pr")!;
+    tool.handler = async () => ({ number: 8, refused: true, reason: 42 });
+    const r = await applySafeOutputs(o);
+    expect(r.receipts[0]).toMatchObject({ status: "refused", ref: 8, reason: "the tool refused the write" });
+    expect(r.error).toBeDefined();
+  });
 });
 
 describe("write stage: deterministic refusals", () => {
