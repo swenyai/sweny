@@ -224,6 +224,7 @@ describe("github_create_pr", () => {
       number: 572,
       html_url: "https://github.com/o/r/pull/572",
       head: { ref: "x-1-fix" },
+      base: { ref: "main" },
       state: "open",
     };
     fetchMock
@@ -238,18 +239,79 @@ describe("github_create_pr", () => {
     expect(listCall).toContain("/repos/o/r/pulls");
     expect(listCall).toContain("head=o%3Ax-1-fix");
     expect(listCall).toContain("state=open");
+    // #558: only a PR into the requested base is reused.
+    expect(listCall).toContain("base=main");
   });
 
-  it("falls back to a closed-state lookup if no open PR matches", async () => {
-    const closedPr = { number: 9, html_url: "https://github.com/o/r/pull/9", state: "closed" };
+  it.each([
+    ["closed", { state: "closed", merged_at: null, base: { ref: "main" } }],
+    ["merged", { state: "closed", merged_at: "2026-11-01T00:00:00Z", base: { ref: "main" } }],
+  ])("a %s PR for the head is refused, named, never reused (#558)", async (label, fields) => {
+    const prior = { number: 9, html_url: "https://github.com/o/r/pull/9", head: { sha: "c".repeat(40) }, ...fields };
     fetchMock
       .mockResolvedValueOnce(jsonResponse(422, ALREADY_EXISTS_422))
       .mockResolvedValueOnce(jsonResponse(200, []))
-      .mockResolvedValueOnce(jsonResponse(200, [closedPr]));
+      .mockResolvedValueOnce(jsonResponse(200, [prior]));
 
     const result: any = await createPr.handler({ repo: "o/r", title: "[X-1] fix: y", head: "x-1-fix" }, ctx());
 
-    expect(result).toMatchObject({ number: 9, reused: true });
+    expect(isToolRefusal(result)).toBe(true);
+    expect(result).toMatchObject({
+      refused: true,
+      reason: "a PR for this head already exists and is not open",
+      number: 9,
+      html_url: "https://github.com/o/r/pull/9",
+      pr_state: "closed",
+      pr_base: "main",
+    });
+    expect(result.reused).toBeUndefined();
+    expect(result.detail).toContain(label);
+    // No labels, no reopen: nothing else is written.
+    expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method && init.method !== "GET" && init.method !== "POST"),
+    ).toBe(false);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it("an open PR for the head into another base is refused, named, never reused (#558)", async () => {
+    const other = { number: 11, html_url: "https://github.com/o/r/pull/11", state: "open", base: { ref: "develop" } };
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(422, ALREADY_EXISTS_422))
+      .mockResolvedValueOnce(jsonResponse(200, []))
+      .mockResolvedValueOnce(jsonResponse(200, [other]));
+
+    const result: any = await createPr.handler(
+      { repo: "o/r", title: "[X-1] fix: y", head: "x-1-fix", base: "main" },
+      ctx(),
+    );
+
+    expect(isToolRefusal(result)).toBe(true);
+    expect(result).toMatchObject({
+      refused: true,
+      reason: "a PR for this head already exists into another base branch",
+      number: 11,
+      pr_state: "open",
+      pr_base: "develop",
+    });
+    expect(result.reused).toBeUndefined();
+    expect(result.detail).toContain("develop");
+  });
+
+  it("the open-PR lookup's answer is checked too: a PR it returns into another base or not open is refused (#558)", async () => {
+    for (const odd of [
+      { state: "open", base: { ref: "develop" } },
+      { state: "closed", base: { ref: "main" } },
+      { state: "open" },
+    ]) {
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce(jsonResponse(422, ALREADY_EXISTS_422))
+        .mockResolvedValueOnce(jsonResponse(200, [{ number: 12, html_url: "https://github.com/o/r/pull/12", ...odd }]));
+      const result: any = await createPr.handler({ repo: "o/r", title: "t", head: "x-1-fix" }, ctx());
+      expect(result.refused, JSON.stringify(odd)).toBe(true);
+      expect(result.number).toBe(12);
+      expect(result.reused).toBeUndefined();
+    }
   });
 
   it("still throws on a 422 that is not the 'already exists' shape", async () => {
@@ -299,7 +361,7 @@ describe("github_create_pr", () => {
   });
 
   it("does not relabel a reused PR (idempotent path skips labeling)", async () => {
-    const existingPr = { number: 99, html_url: "https://github.com/o/r/pull/99", state: "open" };
+    const existingPr = { number: 99, html_url: "https://github.com/o/r/pull/99", state: "open", base: { ref: "main" } };
     fetchMock
       .mockResolvedValueOnce(jsonResponse(422, ALREADY_EXISTS_422))
       .mockResolvedValueOnce(jsonResponse(200, [existingPr]));
@@ -372,7 +434,7 @@ describe("github_create_pr after the sweny-side push", () => {
    * Routes the handler's API calls. `branch` answers the lease's branch read,
    * `leasePrs` its open-PR lookup (the one with `&base=`), `ref` GET
    * /git/ref/heads/x-1-fix, `post` POST /pulls, and `existing` the 422
-   * recovery's lookup (no `&base=`).
+   * recovery's lookups (after the POST), filtered by state and base like the API.
    */
   function route(o: {
     branch?: () => Response;
@@ -392,8 +454,14 @@ describe("github_create_pr after the sweny-side push", () => {
         return o.branch ? o.branch() : jsonResponse(404, { message: "Branch not found" });
       }
       if (url.startsWith("https://api.github.com/repos/o/r/pulls?") && method === "GET") {
-        if (url.includes("&base=")) return o.leasePrs ? o.leasePrs() : jsonResponse(200, [{ number: 3 }]);
-        return jsonResponse(200, o.existing ?? []);
+        if (!posted()) return o.leasePrs ? o.leasePrs() : jsonResponse(200, [{ number: 3 }]);
+        const q = new URL(url).searchParams;
+        const found = ((o.existing ?? []) as Array<{ state?: string; base?: { ref?: string } }>).filter(
+          (p) =>
+            (q.get("state") === "all" || p.state === q.get("state")) &&
+            (!q.get("base") || p.base?.ref === q.get("base")),
+        );
+        return jsonResponse(200, found);
       }
       if (url === "https://api.github.com/repos/o/r/git/ref/heads/x-1-fix") {
         return o.ref ? o.ref() : jsonResponse(404, { message: "Not Found" });
@@ -705,7 +773,15 @@ describe("github_create_pr after the sweny-side push", () => {
     route({
       ref: refAt(LOCAL),
       post: () => jsonResponse(422, ALREADY_EXISTS_422),
-      existing: [{ number: 3, html_url: "https://github.com/o/r/pull/3", head: { sha: OTHER } }],
+      existing: [
+        {
+          number: 3,
+          html_url: "https://github.com/o/r/pull/3",
+          state: "open",
+          base: { ref: "main" },
+          head: { sha: OTHER },
+        },
+      ],
     });
     const result: any = await createPr.handler(
       { repo: "o/r", title: "t", head: "x-1-fix" },
@@ -727,7 +803,15 @@ describe("github_create_pr after the sweny-side push", () => {
     route({
       ref: refAt(LOCAL),
       post: () => jsonResponse(422, ALREADY_EXISTS_422),
-      existing: [{ number: 3, html_url: "https://github.com/o/r/pull/3", head: { sha: LOCAL } }],
+      existing: [
+        {
+          number: 3,
+          html_url: "https://github.com/o/r/pull/3",
+          state: "open",
+          base: { ref: "main" },
+          head: { sha: LOCAL },
+        },
+      ],
     });
     const result: any = await createPr.handler(
       { repo: "o/r", title: "t", head: "x-1-fix" },
@@ -735,6 +819,36 @@ describe("github_create_pr after the sweny-side push", () => {
     );
     expect(result.refused).toBeUndefined();
     expect(result).toMatchObject({ number: 3, reused: true, head_sha: LOCAL });
+  });
+
+  it("the 422 recovery after a bound push refuses a merged PR even when its head is the local commit", async () => {
+    route({
+      post: () => jsonResponse(422, ALREADY_EXISTS_422),
+      existing: [
+        {
+          number: 4,
+          html_url: "https://github.com/o/r/pull/4",
+          state: "closed",
+          merged_at: "2026-11-01T00:00:00Z",
+          base: { ref: "main" },
+          head: { sha: LOCAL },
+        },
+      ],
+    });
+    const result: any = await createPr.handler(
+      { repo: "o/r", title: "t", head: "x-1-fix" },
+      ctx({ logger: makeLogger(), pushBranch: okPush() }),
+    );
+    expect(isToolRefusal(result)).toBe(true);
+    expect(result).toMatchObject({
+      refused: true,
+      reason: "a PR for this head already exists and is not open",
+      number: 4,
+      local_sha: LOCAL,
+      remote_sha: LOCAL,
+    });
+    expect(result.reused).toBeUndefined();
+    expect(labeled()).toBe(false);
   });
 
   it("a successful push followed by a remote move before POST /pulls refuses, naming the PR", async () => {
