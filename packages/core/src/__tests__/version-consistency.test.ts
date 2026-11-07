@@ -316,11 +316,13 @@ describe("three-action architecture", () => {
     expect(content).toContain(`swenyai/sweny@${CURRENT_ACTION_VERSION}`);
   });
 
-  it("action/inputs.md has sections for all three actions", () => {
+  it("action/inputs.md documents only this action and links the other two", () => {
     const content = readFileSync(resolve(ROOT, "packages/web/src/content/docs/action/inputs.md"), "utf-8");
-    expect(content).toMatch(/## Generic runner inputs/);
-    expect(content).toMatch(/## Triage action inputs/);
-    expect(content).toMatch(/## E2E action inputs/);
+    expect(content).toMatch(/## Inputs/);
+    expect(content).not.toMatch(/## Triage action inputs/);
+    expect(content).not.toMatch(/## E2E action inputs/);
+    expect(content).toContain("https://github.com/swenyai/triage");
+    expect(content).toContain("https://github.com/swenyai/e2e");
   });
 
   it("README Actions table lists all three actions", () => {
