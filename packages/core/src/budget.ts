@@ -115,7 +115,7 @@ export function describeOverrun(o: BudgetOverrun, nodeId?: string): string {
 
 /**
  * Tracks spend for one run. `node()` opens a visit to a node; `attempt()` opens
- * one agent run inside it. Spend is committed when an attempt finishes.
+ * one agent run inside it. Spend is committed once, when an attempt settles.
  */
 export class BudgetGuard {
   private spent: Spend = { tokens: 0, costUsd: 0 };
@@ -191,6 +191,7 @@ export class BudgetAttempt {
   private live: Spend = { tokens: 0, costUsd: 0 };
   private liveUsage: NodeUsage | undefined;
   private stopped: BudgetOverrun | undefined;
+  private settled: { breach: BudgetOverrun | undefined } | undefined;
   private readonly onOuterAbort = () => this.controller.abort();
 
   constructor(
@@ -253,24 +254,38 @@ export class BudgetAttempt {
   }
 
   /**
-   * The attempt is over. Commit its spend (the larger of what the result
-   * reports and what was seen live) and return the breach, if any: the live
-   * stop, else a crossing visible only in the final usage.
+   * The attempt is over: commit its spend exactly once (#549). The spend is the
+   * larger of `finalUsage` and what was seen live, per unit. The breach (the
+   * live stop, else a crossing visible only in the final usage) is judged
+   * against the totals before this commit. Later calls change nothing and
+   * return the first call's breach, so the executor settles as soon as the
+   * harness returns, before any fallible work, and every exit path may settle
+   * again without double counting.
    */
-  finish(finalUsage: NodeUsage | undefined): BudgetOverrun | undefined {
+  settle(finalUsage?: NodeUsage): BudgetOverrun | undefined {
+    if (this.settled) return this.settled.breach;
     this.outer?.removeEventListener("abort", this.onOuterAbort);
     const f = spendOf(finalUsage);
     const spent: Spend = {
       tokens: Math.max(this.live.tokens, f.tokens ?? 0),
       costUsd: Math.max(this.live.costUsd, f.costUsd ?? 0),
     };
-    const b = this.stopped ?? this.check(spent);
+    const breach = this.stopped ?? this.check(spent);
+    this.settled = { breach };
     this.node.commit(spent);
-    return b;
+    return breach;
   }
 
-  /** Release the outer-signal listener when the run threw before `finish`. */
+  /** Settle with the attempt's final usage and return the breach, if any. */
+  finish(finalUsage: NodeUsage | undefined): BudgetOverrun | undefined {
+    return this.settle(finalUsage);
+  }
+
+  /**
+   * Every exit path ends here: an attempt that threw still commits what it
+   * reported live. A no-op once settled.
+   */
   dispose(): void {
-    this.outer?.removeEventListener("abort", this.onOuterAbort);
+    this.settle();
   }
 }
