@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { registerImplementCommand, registerTriageCommand } from "../cli/config.js";
 import { SUPPORTED_AGENTS, unsupportedAgentError } from "../harness/agents.js";
+import { registerTryCommand } from "../cli/try.js";
 
 /**
  * The hosted cloud service is an experiment that is not running and not open
@@ -316,4 +317,158 @@ describe("supported agents are listed the same way everywhere", () => {
       expect(text).toContain("acp:");
     });
   }
+});
+
+// ── Entry pages: one clean path (#534) ──────────────────────────
+
+const DOCS = "packages/web/src/content/docs";
+const ENTRY_PAGES = [
+  `${DOCS}/index.mdx`,
+  `${DOCS}/getting-started/index.md`,
+  `${DOCS}/getting-started/quick-start.md`,
+  `${DOCS}/cli/index.md`,
+  "packages/core/README.md",
+];
+const CREDENTIAL_NEEDLES = [
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "CODEX_API_KEY",
+  "OPENAI_API_KEY",
+  "codex login",
+  "SWENY_ENV_PASSTHROUGH",
+];
+
+/** Every `.command("<name>` registered anywhere under src/cli (tests excluded). */
+function registeredCommandNames(): Set<string> {
+  const names = new Set<string>();
+  const dir = join(repoRoot, "packages/core/src/cli");
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".ts") || f.endsWith(".test.ts")) continue;
+    for (const m of readFileSync(join(dir, f), "utf8").matchAll(/\.command\("([a-z][\w-]*)/g)) names.add(m[1]);
+  }
+  return names;
+}
+
+/** `sweny ...` and `npx @sweny-ai/core ...` command lines inside fenced code blocks. */
+function commandLines(md: string): string[][] {
+  const lines: string[][] = [];
+  for (const block of md.matchAll(/```([\w-]*)\n([\s\S]*?)```/g)) {
+    if (!["bash", "sh", "shell", "console"].includes(block[1])) continue;
+    for (const raw of block[2].split("\n")) {
+      const m = raw.trim().match(/^(?:\$ )?(?:sweny|npx @sweny-ai\/core)\s+(.*)$/);
+      if (m)
+        lines.push(
+          m[1]
+            .replace(/\s+#.*$/, "")
+            .split(/\s+/)
+            .filter(Boolean),
+        );
+    }
+  }
+  return lines;
+}
+
+describe("entry pages: one clean path to a first useful run", () => {
+  const main = read("packages/core/src/cli/main.ts");
+  const deprecated = [...main.matchAll(/(\w+)Cmd\s*\.command\("(\w+)[^"]*"\)\s*\.description\("\[DEPRECATED\]/g)].map(
+    (m) => `sweny ${m[1]} ${m[2]}`,
+  );
+  const commands = registeredCommandNames();
+
+  for (const page of ENTRY_PAGES) {
+    describe(page, () => {
+      const text = read(page);
+      const cmds = commandLines(text);
+
+      it("has command examples", () => {
+        expect(cmds.length).toBeGreaterThan(0);
+      });
+
+      it("promotes no deprecated command", () => {
+        expect(deprecated).toContain("sweny workflow create");
+        for (const cmd of deprecated) expect(text, `mentions deprecated "${cmd}"`).not.toContain(cmd);
+      });
+
+      it("every command it shows is registered in the CLI", () => {
+        const unknown: string[] = [];
+        for (const [first, second] of cmds) {
+          if (first.startsWith("-")) continue; // sweny --help, --version
+          if (!commands.has(first)) unknown.push(first);
+          else if (first === "workflow" && second && !commands.has(second)) unknown.push(`workflow ${second}`);
+          else if (first === "runs" && second === "diff" && !commands.has("diff")) unknown.push("runs diff");
+        }
+        expect(unknown).toEqual([]);
+      });
+
+      it("labels `sweny try` a replay of sample data wherever it mentions it", () => {
+        if (!text.includes("sweny try")) return;
+        expect(text).toMatch(/replay/i);
+        expect(text).toMatch(/sample data|illustrative/i);
+      });
+    });
+  }
+
+  it("the landing page, quick start and CLI quick start state credentials before the first command", () => {
+    for (const page of [`${DOCS}/index.mdx`, `${DOCS}/getting-started/quick-start.md`, `${DOCS}/cli/index.md`]) {
+      const text = read(page);
+      const firstCommand = text.indexOf("npx @sweny-ai/core new");
+      expect(firstCommand, `${page} leads with npx @sweny-ai/core new`).toBeGreaterThan(-1);
+      for (const needle of CREDENTIAL_NEEDLES) {
+        const at = text.indexOf(needle);
+        expect(at, `${page}: ${needle}`).toBeGreaterThan(-1);
+        expect(at, `${page}: ${needle} comes before the first command`).toBeLessThan(firstCommand);
+      }
+    }
+  });
+
+  it("every entry page runs `sweny check` before `workflow run`, or sends the reader to the page that does", () => {
+    for (const page of [`${DOCS}/index.mdx`, `${DOCS}/getting-started/quick-start.md`, `${DOCS}/cli/index.md`]) {
+      const text = read(page);
+      const check = text.search(/(?:sweny|@sweny-ai\/core) check/);
+      const run = text.search(/workflow run \.sweny\/workflows\/explain-repo\.yml/);
+      expect(check, page).toBeGreaterThan(-1);
+      expect(run, page).toBeGreaterThan(check);
+    }
+    expect(read(`${DOCS}/getting-started/index.md`)).toContain("/getting-started/quick-start/");
+  });
+
+  it("the path ends in the receipt and the next steps (runs, runs diff, a pack)", () => {
+    for (const page of [`${DOCS}/getting-started/quick-start.md`, `${DOCS}/cli/index.md`]) {
+      const text = read(page);
+      for (const needle of ["receipt", "sweny runs", "sweny runs diff", "/action/scheduling/"]) {
+        expect(text, `${page}: ${needle}`).toContain(needle);
+      }
+    }
+  });
+
+  it("the starter it leads with exists, and so does the pack it points to", () => {
+    expect(read("packages/core/src/cli/templates.ts")).toContain('id: "explain-repo"');
+    expect(read("packages/core/src/cli/packs.ts")).toContain('id: "weekly-digest"');
+  });
+
+  it("internal links resolve to a docs page", () => {
+    const missing: string[] = [];
+    for (const page of ENTRY_PAGES) {
+      for (const m of read(page).matchAll(/\]\((?:https:\/\/docs\.sweny\.ai)?(\/[^)\s#]*)(?:#[^)]*)?\)/g)) {
+        const rel = m[1].replace(/^\/|\/$/g, "");
+        const candidates = rel
+          ? [`${rel}.md`, `${rel}.mdx`, `${rel}/index.md`, `${rel}/index.mdx`]
+          : ["index.mdx", "index.md"];
+        if (!candidates.some((c) => existsSync(join(repoRoot, DOCS, c)))) missing.push(`${page}: ${m[1]}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it("sweny try is documented in the commands reference, with only flags the command registers", () => {
+    const commandsMd = read(`${DOCS}/cli/commands.md`);
+    const tryDoc = section(commandsMd, "sweny try");
+    expect(tryDoc).toMatch(/sample data|illustrative/i);
+    const documented = documentedFlags(tryDoc);
+    expect(documented.length).toBeGreaterThan(2);
+    const help = helpFlags(registerTryCommand(new Command()));
+    const missing = documented.filter((f) => !help.has(f));
+    expect(missing).toEqual([]);
+    expect(section(commandsMd, "sweny runs")).toContain("sweny runs diff");
+  });
 });
