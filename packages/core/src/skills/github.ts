@@ -399,6 +399,8 @@ export const github: Skill = {
                 refused: true,
                 reason,
                 detail,
+                // A ref read that failed may succeed later; nothing was written.
+                ...(reason === REFUSE_UNREADABLE ? { transient: true } : {}),
                 head: input.head,
                 local_sha: local,
                 remote_sha: remoteSha,

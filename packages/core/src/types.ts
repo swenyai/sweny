@@ -112,6 +112,12 @@ export interface ToolRefusal {
   refused: true;
   reason: string;
   detail?: string;
+  /**
+   * The refusal may not hold on a later try (an upstream read failed) and
+   * nothing was written. Only such a refusal is tried again when a run is
+   * resumed; any other refusal is final for the run.
+   */
+  transient?: boolean;
 }
 
 /** Whether a tool handler's output is a {@link ToolRefusal}. */

@@ -293,6 +293,7 @@ describe("github_create_pr after the sweny-side push", () => {
     // The reason is fixed wording (receipts carry it); the specifics are in detail.
     expect(result.reason).toBe("the head push failed and the remote head is not the commit this run produced");
     expect(result.reason).not.toContain("x-1-fix");
+    expect(result.transient).toBeUndefined();
     expect(result.detail).toContain(LOCAL);
     expect(result.detail).toContain(OTHER);
     expect(result.detail).toContain("git push failed");
@@ -320,6 +321,8 @@ describe("github_create_pr after the sweny-side push", () => {
     expect(posted()).toBe(false);
     expect(result).toMatchObject({ refused: true, local_sha: LOCAL, remote_sha: null });
     expect(result.reason).toBe("the head push failed and the remote head could not be read");
+    // A failed read may succeed on a later try, and nothing was written.
+    expect(result.transient).toBe(true);
     expect(result.detail).toMatch(/cannot read the remote head/);
   });
 
