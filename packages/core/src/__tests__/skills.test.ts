@@ -212,6 +212,26 @@ describe("slack skill", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("refuses a requested channel when only a webhook is configured, sending nothing", async () => {
+    const tool = findTool(slack.tools, "slack_send_message");
+    const ctx = mockCtx({ SLACK_WEBHOOK_URL: "https://hooks.slack.com/test" });
+
+    await expect(tool.handler({ text: "Hello", channel: "#incidents" }, ctx)).rejects.toThrow(
+      /#incidents.*SLACK_BOT_TOKEN/s,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uses the bot token API for a requested channel even when a webhook is also configured", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ ok: true, ts: "123" }));
+    const tool = findTool(slack.tools, "slack_send_message");
+    const ctx = mockCtx({ SLACK_BOT_TOKEN: "xoxb-test", SLACK_WEBHOOK_URL: "https://hooks.slack.com/test" });
+
+    await tool.handler({ text: "Hello", channel: "#incidents" }, ctx);
+
+    expect(fetchMock.mock.calls[0][0]).toBe("https://slack.com/api/chat.postMessage");
+  });
+
   it("throws when Slack API returns ok:false", async () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ ok: false, error: "channel_not_found" }));
     const tool = findTool(slack.tools, "slack_send_message");

@@ -117,6 +117,24 @@ describe("formatRunComment", () => {
   });
 });
 
+describe("formatRunComment: since last run", () => {
+  const results = new Map<string, NodeResult>([["gather", { status: "success", data: {}, toolCalls: [] }]]);
+  const summary = summarizeRun(results, 1000);
+  const line = "Since last run: 1 added, 2 resolved. Compare: `sweny runs diff --workflow pr-review`";
+
+  it("puts the line after the receipt ticket and before the DAG", () => {
+    const md = formatRunComment(workflow, results, summary, { sinceLast: line });
+    expect(md).toContain(line);
+    expect(md.indexOf("```text")).toBeLessThan(md.indexOf(line));
+    expect(md.indexOf(line)).toBeLessThan(md.indexOf("```mermaid"));
+  });
+
+  it("is absent on a first run", () => {
+    expect(formatRunComment(workflow, results, summary)).not.toContain("Since last run");
+    expect(formatRunComment(workflow, results, summary, { sinceLast: null })).not.toContain("Since last run");
+  });
+});
+
 describe("writeRunComment", () => {
   it("writes the file, creating parent dirs", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-comment-"));

@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/core",
-  "version": "0.1.184",
+  "version": "0.1.188",
   "type": "module",
   "bin": {
     "sweny": "./dist/cli/main.js"
@@ -8,7 +8,7 @@
   "description": "Skill library, DAG workflow orchestration, and E2E browser testing powered by Claude",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "exports": {
     ".": "./dist/index.js",
@@ -62,23 +62,23 @@
     "mutation": "stryker run"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.220",
-    "@clack/prompts": "^1.7.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.314",
+    "@clack/prompts": "^1.8.1",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "chalk": "^5",
     "commander": "^13",
-    "yaml": "^2.9.0",
+    "yaml": "^2.9.1",
     "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "^2.1.220",
-    "@stryker-mutator/core": "^10.0.0",
-    "@stryker-mutator/vitest-runner": "^10.0.0",
+    "@anthropic-ai/claude-code": "^2.1.314",
+    "@stryker-mutator/core": "^10.1.1",
+    "@stryker-mutator/vitest-runner": "^10.1.1",
     "ajv": "^8.20.0",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "fast-check": "^3.23.2",
-    "prettier": "^3.9.6",
-    "vitest": "^4.1.11"
+    "prettier": "^3.9.10",
+    "vitest": "^4.1.12"
   },
   "publishConfig": {
     "access": "public"

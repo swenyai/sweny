@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/mcp",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "type": "module",
   "description": "MCP server exposing SWEny workflows to Claude Code and Claude Desktop",
   "license": "MIT",
@@ -19,15 +19,15 @@
     "test": "vitest run --exclude 'dist/**'"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@sweny-ai/core": "^0.1.0",
-    "yaml": "^2.9.0",
-    "zod": "^3.25.76"
+    "yaml": "^2.9.1",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@types/node": "^25.9.1",
+    "@types/node": "^25.9.9",
     "typescript": "^5",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   },
   "homepage": "https://sweny.ai",
   "bugs": {
@@ -46,7 +46,7 @@
     "sweny"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "publishConfig": {
     "access": "public"
