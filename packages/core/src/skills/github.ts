@@ -189,6 +189,9 @@ const REFUSE_SKIP_UNREADABLE = "the head branch was not pushed and the remote he
 const REFUSE_SKIP_MISMATCH = "the head branch was not pushed and the remote head is not the commit this run produced";
 const REFUSE_NO_COMMIT = "the run has no local commit for the head branch";
 const REFUSE_PUSHED_NO_LOCAL = "the head was pushed but the pusher did not report the local commit";
+// #558: the 422 recovery reuses only an open PR into the requested base.
+const REFUSE_REUSE_NOT_OPEN = "a PR for this head already exists and is not open";
+const REFUSE_REUSE_OTHER_BASE = "a PR for this head already exists into another base branch";
 const REFUSE_PR_UNVERIFIED = "the PR was opened but its head commit could not be verified";
 
 /**
@@ -555,19 +558,52 @@ export const github: Skill = {
           // satisfy the eval — observed in production as a self-close-
           // and-recreate loop on the same branch.
           if (!isAlreadyExistsError(err)) throw err;
+          // #558: reuse only an open PR from this head into the requested base.
+          // Anything else that exists for the head (closed, merged, or into
+          // another base) is named in a refusal, never returned as reused.
           const owner = input.repo.split("/")[0];
           const headQ = encodeURIComponent(`${owner}:${input.head}`);
-          const open = (await gh(`/repos/${input.repo}/pulls?head=${headQ}&state=open&per_page=1`, ctx)) as Array<{
+          const target = (input.base ?? "main").replace(/^refs\/heads\//, "");
+          type Listed = {
             number?: number;
-          }>;
+            html_url?: string;
+            state?: unknown;
+            merged_at?: unknown;
+            base?: { ref?: unknown };
+          };
+          const open = (await gh(
+            `/repos/${input.repo}/pulls?head=${headQ}&base=${encodeURIComponent(target)}&state=open&per_page=1`,
+            ctx,
+          )) as Listed[];
           const existing =
-            open[0] ??
-            (
-              (await gh(`/repos/${input.repo}/pulls?head=${headQ}&state=all&per_page=1`, ctx)) as Array<{
-                number?: number;
-              }>
-            )[0];
+            (Array.isArray(open) ? open[0] : undefined) ??
+            ((await gh(`/repos/${input.repo}/pulls?head=${headQ}&state=all&per_page=1`, ctx)) as Listed[])[0];
           if (!existing) throw err;
+          const prState = typeof existing.state === "string" ? existing.state : null;
+          const prBase = typeof existing.base?.ref === "string" ? existing.base.ref : null;
+          if (prState !== "open" || prBase !== target) {
+            const merged = typeof existing.merged_at === "string" && existing.merged_at.length > 0;
+            const priorHead = (existing as { head?: { sha?: unknown } }).head?.sha;
+            const name = existing.html_url ?? `#${existing.number}`;
+            const detail =
+              `GitHub has a PR for ${input.head} already (${name}), ${merged ? "merged" : (prState ?? "in an unknown state")} ` +
+              `into ${prBase ?? "an unknown base"}; sweny reuses only an open PR into ${target}`;
+            ctx.logger?.warn?.(`  github_create_pr: not reusing ${name}: ${detail}`);
+            const refusal: ToolRefusal & Record<string, unknown> = {
+              refused: true,
+              reason: prState !== "open" ? REFUSE_REUSE_NOT_OPEN : REFUSE_REUSE_OTHER_BASE,
+              detail,
+              ...(existing.number !== undefined ? { number: existing.number } : {}),
+              ...(existing.html_url ? { html_url: existing.html_url } : {}),
+              pr_state: prState,
+              ...(merged ? { merged: true } : {}),
+              pr_base: prBase,
+              head: input.head,
+              local_sha: mustHead ?? null,
+              remote_sha: typeof priorHead === "string" && SHA.test(priorHead) ? priorHead : null,
+            };
+            return refusal;
+          }
           pr = existing as { number?: number };
           reused = true;
         }
