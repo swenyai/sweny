@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { SourceResolutionContext } from "./sources.js";
+import type { DnsLookup, SourceResolutionContext } from "./sources.js";
 import { resolveSource } from "./source-resolver.js";
 
 const fileTmp = path.join(tmpdir(), `sweny-sources-security-test-${randomBytes(4).toString("hex")}`);
@@ -26,6 +26,8 @@ const baseCtx = (): SourceResolutionContext => ({
   env: {} as NodeJS.ProcessEnv,
   authConfig: {},
   offline: false,
+  // Safe default so no test falls through to real DNS; guard tests override and assert.
+  dnsLookup: async () => ["93.184.216.34"],
   logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
 });
 
@@ -149,32 +151,29 @@ describe("SSRF host validation (DNS resolution)", () => {
 
   it("blocks a hostname that resolves to a private IP", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
-    await expect(
-      resolveSource("https://evil.example/x", "f", {
-        ...baseCtx(),
-        dnsLookup: async () => ["10.1.2.3"],
-      }),
-    ).rejects.toThrow(/SOURCE_URL_BLOCKED.*10\.1\.2\.3/);
+    const dnsLookup = vi.fn<DnsLookup>(async () => ["10.1.2.3"]);
+    await expect(resolveSource("https://evil.example/x", "f", { ...baseCtx(), dnsLookup })).rejects.toThrow(
+      /SOURCE_URL_BLOCKED.*10\.1\.2\.3/,
+    );
+    expect(dnsLookup).toHaveBeenCalledWith("evil.example");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("allows a hostname that resolves to a public IP", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("ok", { status: 200 }));
-    const resolved = await resolveSource("https://good.example/x", "f", {
-      ...baseCtx(),
-      dnsLookup: async () => ["93.184.216.34"],
-    });
+    const dnsLookup = vi.fn<DnsLookup>(async () => ["93.184.216.34"]);
+    const resolved = await resolveSource("https://good.example/x", "f", { ...baseCtx(), dnsLookup });
+    expect(dnsLookup).toHaveBeenCalledWith("good.example");
     expect(resolved.content).toBe("ok");
   });
 
   it("allows a hostname that fails to resolve (fetch handles the error)", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("ok", { status: 200 }));
-    const resolved = await resolveSource("https://unresolvable.test/x", "f", {
-      ...baseCtx(),
-      dnsLookup: async () => {
-        throw new Error("ENOTFOUND");
-      },
+    const dnsLookup = vi.fn<DnsLookup>(async () => {
+      throw new Error("ENOTFOUND");
     });
+    const resolved = await resolveSource("https://unresolvable.test/x", "f", { ...baseCtx(), dnsLookup });
+    expect(dnsLookup).toHaveBeenCalledWith("unresolvable.test");
     expect(resolved.content).toBe("ok");
   });
 });
@@ -191,12 +190,11 @@ describe("redirect re-validation", () => {
         headers: { location: "http://169.254.169.254/latest/meta-data/" },
       });
     });
-    await expect(
-      resolveSource("https://good.example/redirect", "f", {
-        ...baseCtx(),
-        dnsLookup: async () => ["93.184.216.34"],
-      }),
-    ).rejects.toThrow(/SOURCE_URL_BLOCKED.*169\.254\.169\.254/);
+    const dnsLookup = vi.fn<DnsLookup>(async () => ["93.184.216.34"]);
+    await expect(resolveSource("https://good.example/redirect", "f", { ...baseCtx(), dnsLookup })).rejects.toThrow(
+      /SOURCE_URL_BLOCKED.*169\.254\.169\.254/,
+    );
+    expect(dnsLookup).toHaveBeenCalledWith("good.example");
   });
 
   it("follows a redirect to an allowed public host", async () => {
@@ -208,10 +206,10 @@ describe("redirect re-validation", () => {
       }
       return new Response("final body", { status: 200 });
     });
-    const resolved = await resolveSource("https://start.example/x", "f", {
-      ...baseCtx(),
-      dnsLookup: async () => ["93.184.216.34"],
-    });
+    const dnsLookup = vi.fn<DnsLookup>(async () => ["93.184.216.34"]);
+    const resolved = await resolveSource("https://start.example/x", "f", { ...baseCtx(), dnsLookup });
+    expect(dnsLookup).toHaveBeenCalledWith("start.example");
+    expect(dnsLookup).toHaveBeenCalledWith("final.example");
     expect(resolved.content).toBe("final body");
   });
 
