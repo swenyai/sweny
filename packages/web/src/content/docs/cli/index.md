@@ -42,7 +42,7 @@ sweny workflow run .sweny/workflows/explain-repo.yml
 
 The run prints the answer, then a receipt: nodes, tool calls, duration, tokens, cost and the policy the agent ran under. The answer is saved to `.sweny/runs/<id>/output.md`.
 
-**4. What next.** After your first successful run in a workspace the CLI prints three next steps, once (never in CI): `sweny runs` lists your history, `sweny runs diff` compares the run with the one before it after you run it again, and `sweny new --template weekly-digest` puts a workflow on a schedule. See the [Quick Start](/getting-started/quick-start/) for the full path.
+**4. What next.** After your first successful run in a workspace the CLI prints three next steps, once (never in CI): `sweny runs` lists your history, `sweny runs diff` compares the run with the one before it after you run it again, and a link explains how to [run it on a schedule](/action/scheduling/). See the [Quick Start](/getting-started/quick-start/) for the full path.
 
 :::tip[Replay demo]
 `sweny try` replays a recorded demo with no login, no credentials and no network. It is sample data, not a real run, and it writes no files.

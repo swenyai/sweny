@@ -21,6 +21,7 @@ import { configuredSkills } from "../skills/custom-loader.js";
 import { builtinSkills } from "../skills/index.js";
 import { DagRenderer } from "./renderer.js";
 import { runE2eInit } from "./e2e.js";
+import { SCHEDULING_DOCS_URL } from "./first-success.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -979,8 +980,7 @@ export async function runNew(options?: {
   p.outro(outroMessage(hasExistingConfig, Boolean(template) && !template?.pack));
 }
 
-/** Where a workflow you wrote yourself (a starter or a described one) gets its cron and dispatch triggers. */
-export const SCHEDULING_DOCS_URL = "https://docs.sweny.ai/action/scheduling/";
+export { SCHEDULING_DOCS_URL };
 
 /**
  * The closing line (#534). A pack already shows its own trigger step, so it

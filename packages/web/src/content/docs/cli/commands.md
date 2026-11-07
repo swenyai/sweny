@@ -422,7 +422,7 @@ sweny runs diff --workflow triage
 | `--limit <n>` | `runs` | Max runs to show | `20` |
 | `--json` | `runs`, `runs diff` | Machine-readable output, no color | `false` |
 
-After your first successful run in a workspace, `sweny workflow run` prints a short "Next" note once: `sweny runs`, `sweny runs diff`, and `sweny new --template weekly-digest`. It is never printed in CI, with `--json`, `--stream` or `--dry-run`, or after a failed run, and it respects `NO_COLOR`. The marker that records it was shown lives in the sweny state dir (`$SWENY_STATE_DIR`, else `$XDG_STATE_HOME/sweny`, else `~/.local/state/sweny`), not in your repo.
+After your first successful run in a workspace, `sweny workflow run` prints a short "Next" note once: `sweny runs`, `sweny runs diff`, and a link to [scheduling](/action/scheduling/). It is never printed in CI, with `--json`, `--stream` or `--dry-run`, or after a failed run, and it respects `NO_COLOR`. The marker that records it was shown lives in the sweny state dir (`$SWENY_STATE_DIR`, else `$XDG_STATE_HOME/sweny`, else `~/.local/state/sweny`), not in your repo.
 
 ### sweny runs diff
 

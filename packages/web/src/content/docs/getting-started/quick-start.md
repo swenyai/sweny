@@ -74,15 +74,14 @@ After your first successful run in a workspace, the CLI prints this once (never 
 
 ```text
   ▲ Next
-    sweny runs                          see this run and the ones before it
-    sweny runs diff                     run it again, then see what changed in the answers
-    sweny new --template weekly-digest  put it on a schedule in CI
-  Packs and the Action: https://docs.sweny.ai/workflows/packs/
+    sweny runs       see this run and the ones before it
+    sweny runs diff  run it again, then see what changed in the answers
+  Run it on a schedule: https://docs.sweny.ai/action/scheduling/
 ```
 
 - `sweny runs` lists your local history.
 - Run the workflow again, then `sweny runs diff` compares the two runs: what changed in the answers first, then duration, tokens and cost. See [`sweny runs`](/cli/commands/#sweny-runs).
-- A [recurring pack](/workflows/packs/) puts a workflow on a schedule with the [GitHub Action](/action/).
+- [Scheduling](/action/scheduling/) puts a workflow on a cron with the [GitHub Action](/action/). The [recurring packs](/workflows/packs/) come with their trigger already written.
 
 :::note[Want to watch first?]
 `sweny try` replays a recorded demo: no login, no credentials, no network, no model calls. The data is illustrative sample data, not a real run, and it writes no files. Run `sweny try` to see the receipt before you spend anything.

@@ -26,18 +26,17 @@ import { colorEnabled, glyphsFor, supportsUnicode } from "./terminal.js";
 
 type Env = Record<string, string | undefined>;
 
-/** Where recurring packs and the Action are explained (the schedule step). */
-export const WHAT_NEXT_DOCS_URL = "https://docs.sweny.ai/workflows/packs/";
+/** How to schedule a workflow you wrote: the Action's cron and dispatch triggers. */
+export const SCHEDULING_DOCS_URL = "https://docs.sweny.ai/action/scheduling/";
 
-/** The pack the schedule line names: the one that earns its place on a cron. */
-export const WHAT_NEXT_PACK_COMMAND = "sweny new --template weekly-digest";
-
-/** The three steps, in order. Commands are real subcommands (a spec asserts it). */
+/** The two command steps, in order. Commands are real subcommands (a spec asserts it). */
 export const WHAT_NEXT_STEPS: ReadonlyArray<{ command: string; what: string }> = [
   { command: "sweny runs", what: "see this run and the ones before it" },
   { command: "sweny runs diff", what: "run it again, then see what changed in the answers" },
-  { command: WHAT_NEXT_PACK_COMMAND, what: "put it on a schedule in CI" },
 ];
+
+/** The third step, and the plain closing line. */
+export const WHAT_NEXT_SCHEDULE = `Run it on a schedule: ${SCHEDULING_DOCS_URL}`;
 
 function truthy(v: string | undefined): boolean {
   return v !== undefined && v !== "" && v !== "0" && v.toLowerCase() !== "false";
@@ -50,17 +49,13 @@ export function inCi(env: Env = process.env): boolean {
 
 /**
  * The note: a heading, one aligned row per step, then a plain closing line
- * with the docs URL. Same words with or without color or Unicode.
+ * that says how to schedule it. Same words with or without color or Unicode.
  */
 export function formatWhatNext(paint: Paint = createPaint(false), unicode = true): string {
   const g = glyphsFor(unicode);
   const width = Math.max(...WHAT_NEXT_STEPS.map((s) => s.command.length));
   const rows = WHAT_NEXT_STEPS.map((s) => `    ${paint.strong(s.command.padEnd(width))}  ${paint.muted(s.what)}`);
-  return [
-    `  ${paint.brand(g.brand)} ${paint.strong("Next")}`,
-    ...rows,
-    `  Packs and the Action: ${WHAT_NEXT_DOCS_URL}`,
-  ].join("\n");
+  return [`  ${paint.brand(g.brand)} ${paint.strong("Next")}`, ...rows, `  ${WHAT_NEXT_SCHEDULE}`].join("\n");
 }
 
 /** `<state>/first-success/<workspace hash>`: one empty file per workspace. */

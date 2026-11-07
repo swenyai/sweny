@@ -435,7 +435,7 @@ describe("entry pages: one clean path to a first useful run", () => {
   it("the path ends in the receipt and the next steps (runs, runs diff, a pack)", () => {
     for (const page of [`${DOCS}/getting-started/quick-start.md`, `${DOCS}/cli/index.md`]) {
       const text = read(page);
-      for (const needle of ["receipt", "sweny runs", "sweny runs diff", "weekly-digest"]) {
+      for (const needle of ["receipt", "sweny runs", "sweny runs diff", "/action/scheduling/"]) {
         expect(text, `${page}: ${needle}`).toContain(needle);
       }
     }

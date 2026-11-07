@@ -4,7 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  WHAT_NEXT_DOCS_URL,
+  SCHEDULING_DOCS_URL,
+  WHAT_NEXT_SCHEDULE,
   WHAT_NEXT_STEPS,
   claimFirstSuccess,
   firstSuccessMarker,
@@ -43,8 +44,9 @@ describe("formatWhatNext", () => {
     expect(lines[0]).toBe("  ▲ Next");
     expect(text).toContain("sweny runs  ");
     expect(text).toContain("sweny runs diff");
-    expect(text).toContain("sweny new --template weekly-digest");
-    expect(lines[lines.length - 1]).toBe(`  Packs and the Action: ${WHAT_NEXT_DOCS_URL}`);
+    expect(text).not.toContain("weekly-digest");
+    expect(lines[lines.length - 1]).toBe(`  Run it on a schedule: ${SCHEDULING_DOCS_URL}`);
+    expect(lines[lines.length - 1]).toBe(`  ${WHAT_NEXT_SCHEDULE}`);
   });
 
   it("aligns the descriptions in one column", () => {
@@ -78,7 +80,7 @@ describe("writeWhatNext", () => {
     const env = envFor();
     expect(writeWhatNext({ stream: stream(), ok: true, env, cwd: work, color: false })).toBe(true);
     expect(out).toContain("sweny runs diff");
-    expect(out.endsWith(`${WHAT_NEXT_DOCS_URL}\n\n`)).toBe(true);
+    expect(out.endsWith(`${SCHEDULING_DOCS_URL}\n\n`)).toBe(true);
     const first = out;
     expect(writeWhatNext({ stream: stream(), ok: true, env, cwd: work, color: false })).toBe(false);
     expect(out).toBe(first);
@@ -138,7 +140,7 @@ describe("writeWhatNext", () => {
     const env = envFor({ NO_COLOR: "1" });
     expect(writeWhatNext({ stream: tty(), ok: true, env, cwd: work })).toBe(true);
     expect(out).not.toMatch(ANSI);
-    expect(out.trimEnd().split("\n").pop()).toBe(`  Packs and the Action: ${WHAT_NEXT_DOCS_URL}`);
+    expect(out.trimEnd().split("\n").pop()).toBe(`  Run it on a schedule: ${SCHEDULING_DOCS_URL}`);
   });
 
   it("a TTY with color gets painted output; a pipe does not", () => {
@@ -191,12 +193,11 @@ describe("wiring", () => {
     expect(next).toBeGreaterThan(receipt);
   });
 
-  it("every command in the note is a registered subcommand", () => {
+  it("every command in the note is a registered subcommand, and the schedule page exists", () => {
     const runs = fs.readFileSync(path.join(here, "runs.ts"), "utf-8");
     expect(runs).toMatch(/\.command\("runs"\)/);
     expect(runs).toMatch(/\.command\("diff \[a\] \[b\]"\)/);
-    expect(main).toMatch(/\.command\("new \[id\]"\)/);
-    const packs = fs.readFileSync(path.join(here, "packs.ts"), "utf-8");
-    expect(packs).toContain('id: "weekly-digest"');
+    const rel = new URL(SCHEDULING_DOCS_URL).pathname.replace(/^\/|\/$/g, "");
+    expect(fs.existsSync(path.resolve(here, "../../../web/src/content/docs", `${rel}.md`))).toBe(true);
   });
 });
