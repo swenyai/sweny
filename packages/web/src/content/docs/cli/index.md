@@ -1,38 +1,56 @@
 ---
 title: CLI Quick Start
-description: Install the SWEny CLI and build your first workflow in under a minute.
+description: Install the SWEny CLI, run a named workflow, and read its receipt.
 ---
 
-The SWEny CLI is how you build, run, and iterate on AI workflows from your terminal. Describe what you want done in plain English, and SWEny generates a full DAG with the right tools wired up at each step.
+The SWEny CLI is how you create, run, and compare workflows from your terminal. This page is the shortest path from nothing to a first useful run.
 
-## Install
+## Credentials
+
+You need Node 20+ and a login or API key for the agent that runs your nodes. Claude Code is the default; pick another with `--agent`.
+
+| Agent | Credentials it needs |
+|-------|----------------------|
+| Claude Code (default) | `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), or `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`, or a Claude Code login (`claude`, then `/login`), or Bedrock / Vertex routing. |
+| Codex (`--agent codex`) | `CODEX_API_KEY`, `OPENAI_API_KEY` or `CODEX_ACCESS_TOKEN`, or a `codex login`. |
+| pi (`--agent pi`) | The API key of the model provider pi calls (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, ...). |
+| ACP agent (`--agent "acp:<command>"`) | Whatever that agent needs. Pass its API key env var through `SWENY_ENV_PASSTHROUGH`. |
+
+Skill credentials (`GITHUB_TOKEN` and so on) are separate and only needed by workflows that use those skills. The CLI auto-loads `.env` at startup. See [Agents and policies](/getting-started/agents-and-policies/).
+
+## Your first run
 
 ```bash
-npm install -g @sweny-ai/core
+npx @sweny-ai/core new      # pick a named workflow, for example explain-repo
 ```
 
-The binary is called `sweny`. You can also run it directly with `npx`:
+Install once with `npm install -g @sweny-ai/core` and the binary is `sweny`; the rest of this page uses it.
+
+**1. Pick a named workflow.** `sweny new` opens the picker; `sweny new --template explain-repo --yes` skips the prompts. `explain-repo` reads your checkout and needs no skill credentials. It writes `.sweny.yml`, `.env` and `.sweny/workflows/explain-repo.yml`.
+
+**2. Check before you run.** `sweny check` verifies your agent login and only the credentials your workflows need, and stops with the fix when one is missing.
 
 ```bash
-npx @sweny-ai/core --help
+sweny check
 ```
 
-:::note[Prerequisites]
-SWEny runs nodes on Claude Code by default (see [Agents and policies](/getting-started/agents-and-policies/) for Codex, pi and ACP). For Claude Code you'll need an Anthropic API key (`ANTHROPIC_API_KEY`), OAuth token (`CLAUDE_CODE_OAUTH_TOKEN`), or authenticated Claude Code instance. If both keys are set, the OAuth token takes precedence. The runtime is installed automatically.
+**3. Run it and read the receipt.**
+
+```bash
+sweny workflow run .sweny/workflows/explain-repo.yml
+```
+
+The run prints the answer, then a receipt: nodes, tool calls, duration, tokens, cost and the policy the agent ran under. The answer is saved to `.sweny/runs/<id>/output.md`.
+
+**4. What next.** After your first successful run in a workspace the CLI prints three next steps, once (never in CI): `sweny runs` lists your history, `sweny runs diff` compares the run with the one before it after you run it again, and `sweny new --template weekly-digest` puts a workflow on a schedule. See the [Quick Start](/getting-started/quick-start/) for the full path.
+
+:::tip[Replay demo]
+`sweny try` replays a recorded demo with no login, no credentials and no network. It is sample data, not a real run, and it writes no files.
 :::
 
-## Build your first workflow
+## Build your own
 
-**1. Add your API key to `.env`:**
-
-```bash
-# .env (gitignored)
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-The CLI auto-loads `.env` at startup -- no external dotenv tooling required.
-
-**2. Create a workflow from a description:**
+**1. Create a workflow from a description:**
 
 ```bash
 sweny new
@@ -46,20 +64,18 @@ Pick "Describe your own" and describe the task (for example: "analyze our codeba
 
 Type a refinement instruction to iterate on the design, or press `Y` to save.
 
-**3. Run it:**
+**2. Run it:**
 
 ```bash
 sweny workflow run .sweny/workflows/security_audit.yml
 ```
 
-**4. Refine it later:**
+**3. Refine it later:**
 
 ```bash
 sweny workflow edit .sweny/workflows/security_audit.yml \
   "add a quality gate that rejects vague findings"
 ```
-
-That's it. No YAML to write by hand, no boilerplate to configure.
 
 ## Try the built-in triage workflow
 

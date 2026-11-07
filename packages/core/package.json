@@ -51,7 +51,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json && cp src/workflows/*.yml dist/workflows/ && cp src/cli/try-fixture.json dist/cli/ && node scripts/build-workflow-browser.mjs && node scripts/write-public-schema.mjs",

@@ -1,35 +1,94 @@
 ---
 title: Quick Start
-description: "Install SWEny and choose how to run it: Claude Code plugin, CLI, GitHub Action, or Studio."
+description: "From npx to a first useful run in six steps: credentials, a named workflow, a preflight check, a run, the receipt, and what next."
 ---
 
-SWEny is one tool with multiple surfaces. Install it once, then pick the way that fits your workflow.
+Six steps from nothing to a first useful result. The receipt at the end tells you what the run cost.
 
-## Install
+## 1. Know what you need
+
+Node 20+, and a login or API key for the agent that runs your nodes. Claude Code is the default; pick another with `--agent` (Action input `agent`).
+
+| Agent | Credentials it needs |
+|-------|----------------------|
+| Claude Code (default) | `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), or `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`, or a Claude Code login (`claude`, then `/login`), or Bedrock / Vertex routing (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`). |
+| Codex (`--agent codex`) | `CODEX_API_KEY`, `OPENAI_API_KEY` or `CODEX_ACCESS_TOKEN`, or a `codex login`. |
+| pi (`--agent pi`) | The API key of the model provider pi calls (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, ...). |
+| ACP agent (`--agent "acp:<command>"`) | Whatever that agent needs. Pass its API key env var through `SWENY_ENV_PASSTHROUGH`. |
+
+Skill credentials (`GITHUB_TOKEN` and so on) are separate and only needed by workflows that use those skills. The `explain-repo` starter needs none. See [Agents and policies](/getting-started/agents-and-policies/) for what each agent can enforce.
+
+## 2. Pick a named workflow
 
 ```bash
-npm install -g @sweny-ai/core
+npx @sweny-ai/core new
 ```
 
-Every command below uses the installed `sweny` binary. Try it with no credentials beyond your Claude login:
+The picker lists named workflows (`explain-repo`, `pr-review`, `security-scan`, `release-notes`, and more) and the recurring packs (`weekly-digest`, `dependency-drift`, `pr-risk-review`). Start with `explain-repo`: it reads your checkout and needs no skill credentials. To skip the prompts:
 
 ```bash
-sweny new --template explain-repo --yes
+npx @sweny-ai/core new --template explain-repo --yes
+```
+
+It writes `.sweny.yml`, `.env` (added to `.gitignore`) and `.sweny/workflows/explain-repo.yml`. Install once with `npm install -g @sweny-ai/core` if you want the shorter `sweny` binary; the rest of this page uses it.
+
+## 3. Check before you run
+
+```bash
+sweny check
+```
+
+Verifies your agent login and only the credentials your workflows need, and stops with the fix when one is missing. Nothing has run yet.
+
+## 4. Run it
+
+```bash
 sweny workflow run .sweny/workflows/explain-repo.yml
 ```
 
-## Add your API key
+## 5. Read the receipt
 
-SWEny runs nodes on Claude Code by default (Codex, pi and ACP agents are covered in [Agents and policies](/getting-started/agents-and-policies/)). For Claude Code you need an Anthropic API key, OAuth token, or an authenticated Claude Code instance.
+The run ends with the answer, then a receipt. Your numbers will differ:
 
-```bash
-# .env (gitignored)
-ANTHROPIC_API_KEY=sk-ant-...
+```text
+╭┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╮
+┆ ✓ passed                          run 3f9a2c ┆
+┆ explain-repo                                 ┆
+┆                                              ┆
+┆ nodes       2/2                              ┆
+┆ tool calls  12                               ┆
+┆ duration    28s                              ┆
+┆ tokens      30k                              ┆
+┆ cost        $0.13                            ┆
+┆ policy      env scoped, sandbox on           ┆
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+┆          [ ENV SCOPED · SANDBOXED ]          ┆
+╰┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╯
 ```
 
-Or use a Claude subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) for flat-rate billing. The CLI auto-loads `.env` at startup.
+The answer is also saved to `.sweny/runs/<id>/output.md`. In CI the receipt is one plain line.
 
-## Choose your surface
+## 6. What next
+
+After your first successful run in a workspace, the CLI prints this once (never in CI):
+
+```text
+  ▲ Next
+    sweny runs                          see this run and the ones before it
+    sweny runs diff                     run it again, then see what changed in the answers
+    sweny new --template weekly-digest  put it on a schedule in CI
+  Packs and the Action: https://docs.sweny.ai/workflows/packs/
+```
+
+- `sweny runs` lists your local history.
+- Run the workflow again, then `sweny runs diff` compares the two runs: what changed in the answers first, then duration, tokens and cost. See [`sweny runs`](/cli/commands/#sweny-runs).
+- A [recurring pack](/workflows/packs/) puts a workflow on a schedule with the [GitHub Action](/action/).
+
+:::note[Want to watch first?]
+`sweny try` replays a recorded demo: no login, no credentials, no network, no model calls. The data is illustrative sample data, not a real run, and it writes no files. Run `sweny try` to see the receipt before you spend anything.
+:::
+
+## Other ways to run it
 
 ### Claude Code Plugin — use SWEny inside Claude Code
 
@@ -46,7 +105,7 @@ Then use `/sweny:triage` to investigate production alerts, `/sweny:implement ENG
 
 ### CLI — build and run workflows from your terminal
 
-The fastest way to get things done. Describe a task, get a workflow, run it.
+Beyond the starters: describe a task, get a workflow, run it.
 
 ```bash
 # Create a workflow from a description: pick "Describe your own", then describe the task:
@@ -79,20 +138,17 @@ sweny workflow run              # AI agent drives a real browser
 
 ### GitHub Action — deploy workflows to CI
 
-Put workflows on a schedule. SWEny monitors your observability platform, triages errors, and opens fix PRs — automatically.
+Put workflows on a schedule. Every run writes its receipt to the job summary.
 
 ```yaml
-# .github/workflows/sweny-triage.yml
-- uses: swenyai/triage@v1
+# .github/workflows/sweny-weekly-digest.yml (written by `sweny new --template weekly-digest`)
+- uses: swenyai/sweny@v5
   with:
+    workflow: .sweny/workflows/weekly-digest.yml
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-    observability-provider: sentry
-    sentry-auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
-    sentry-org: my-org
-    sentry-project: my-project
 ```
 
-Three secrets. Push the file, trigger it from the Actions tab, and check the summary. Use [`swenyai/sweny@v5`](https://github.com/swenyai/sweny) to run custom workflow YAMLs, or [`swenyai/e2e@v1`](https://github.com/swenyai/e2e) for browser tests.
+One secret. Run the workflow locally once first, commit the two files `sweny new` wrote, then trigger it from the Actions tab and check the summary. See [Packs](/workflows/packs/) for the trigger, permissions and what each pack writes.
 
 **[Full Action guide](/action/)** — setup, inputs, scheduling, and service maps.
 
