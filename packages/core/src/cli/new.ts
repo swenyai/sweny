@@ -976,18 +976,21 @@ export async function runNew(options?: {
 
   p.note(steps.join("\n"), "Next steps");
 
-  p.outro(outroMessage(hasExistingConfig, cli, Boolean(template) && !template?.pack));
+  p.outro(outroMessage(hasExistingConfig, Boolean(template) && !template?.pack));
 }
 
+/** Where a workflow you wrote yourself (a starter or a described one) gets its cron and dispatch triggers. */
+export const SCHEDULING_DOCS_URL = "https://docs.sweny.ai/action/scheduling/";
+
 /**
- * The closing line. After a non-pack template (the zero-credential starter
- * included) it points at the schedule step, in the same words as the "Next"
- * note a first successful run prints (#534). Packs already show their own
- * trigger step; a start with no workflow written has nothing to schedule yet.
+ * The closing line (#534). A pack already shows its own trigger step, so it
+ * closes as before. Any other workflow that was written (a starter or a
+ * described one) says how to schedule THIS workflow; it never names another
+ * pack, because no template metadata says which pack would suit it.
  */
-export function outroMessage(hasExistingConfig: boolean, cli: string, offerSchedule: boolean): string {
+export function outroMessage(hasExistingConfig: boolean, offerSchedule: boolean): string {
   const done = hasExistingConfig ? "Workflow added!" : "You're all set!";
-  return offerSchedule ? `${done} Put it on a schedule in CI: ${cli} new --template weekly-digest` : done;
+  return offerSchedule ? `${done} Run it on a schedule: ${SCHEDULING_DOCS_URL}` : done;
 }
 
 // ── Custom workflow branch ────────────────────────────────────────────
