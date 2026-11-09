@@ -47,6 +47,26 @@ sweny check
 
 Reads providers from `.sweny.yml` and `.env`, then tests connectivity for each one. Prints a pass/fail status per provider with actionable error messages. Exits `0` if all providers pass, `1` if any fail.
 
+The coding agent you picked (`--agent` or `coding-agent-provider`) gets its own lines, checked by its harness. None of them makes a model call or spends tokens, and no credential value is printed.
+
+| Agent | What `sweny check` verifies |
+|-------|-----------------------------|
+| `claude` | The Claude Agent SDK version sweny ships with; then a stored Claude Code login, or `ANTHROPIC_API_KEY` against `GET /v1/models` (or your gateway when `ANTHROPIC_BASE_URL` is set). An OAuth or bearer token with no gateway is reported by mode, without a network call. |
+| `codex` | `codex --version` (the same binary and version floor a run uses); a credential (`CODEX_API_KEY`, `OPENAI_API_KEY`, `CODEX_ACCESS_TOKEN`, or `codex login`); `codex login status`; and, with an API key, `GET /models` on `OPENAI_BASE_URL` (default `https://api.openai.com/v1`). |
+| `pi` | `pi --version`; and the one provider credential a run would hand pi, or the `SWENY_PI_MODELS_JSON` file. No upstream probe: pi talks to many providers. |
+| `acp:<command>` | The command resolves on `PATH`. The agent is not started, so its version and login are reported when a run starts. |
+
+```text
+✓  Agent CLI (codex)
+     0.166.0 (/usr/local/bin/codex) (newer than 0.159.2, the version sweny is tested against)
+✓  Agent auth (codex)
+     via codex login
+✓  Agent login (codex)
+     logged in with ChatGPT (codex login status)
+−  OpenAI API (codex agent)
+     auth via codex login, skipping upstream API check
+```
+
 Run this after initial setup or when rotating credentials.
 
 ## sweny setup

@@ -575,7 +575,11 @@ export class CodexHarness implements AgentHarness {
     checks.push(
       keyVar
         ? await checkOpenAI(env[keyVar].trim(), keyVar, hostEnv.OPENAI_BASE_URL || undefined, timeoutMs)
-        : { name: "OpenAI API (codex agent)", status: "skip", detail: `auth via ${auth.via}, skipping upstream API check` },
+        : {
+            name: "OpenAI API (codex agent)",
+            status: "skip",
+            detail: `auth via ${auth.via}, skipping upstream API check`,
+          },
     );
     return checks;
   }

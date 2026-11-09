@@ -148,10 +148,7 @@ export async function checkAgent(
 }
 
 /** Env for the agent checks: the process env, with the agent settings `.sweny.yml` can also carry. */
-function agentCheckEnv(
-  config: CliConfig,
-  env: Record<string, string | undefined>,
-): Record<string, string | undefined> {
+function agentCheckEnv(config: CliConfig, env: Record<string, string | undefined>): Record<string, string | undefined> {
   return {
     ...env,
     ANTHROPIC_API_KEY: config.anthropicApiKey,

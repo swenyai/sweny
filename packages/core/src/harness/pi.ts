@@ -598,7 +598,11 @@ export class PiHarness implements AgentHarness {
       return { name, status: "fail", detail: `Missing: ${res.vars.join(" or ")} for pi ${provider}` };
     }
     if (res.provider) {
-      return { name, status: "skip", detail: `${provider}: sweny does not know its credential; pi reports a missing one` };
+      return {
+        name,
+        status: "skip",
+        detail: `${provider}: sweny does not know its credential; pi reports a missing one`,
+      };
     }
     return {
       name,

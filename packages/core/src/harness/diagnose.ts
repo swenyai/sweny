@@ -102,7 +102,11 @@ export function runCli(
       if (!err) return resolve({ code: 0, ...out });
       const e = err as NodeJS.ErrnoException & { code?: unknown; killed?: boolean };
       if (typeof e.code === "number") return resolve({ code: e.code, ...out });
-      resolve({ code: null, ...out, error: e.killed ? `timed out after ${opts.timeoutMs ?? CHECK_TIMEOUT_MS}ms` : e.message });
+      resolve({
+        code: null,
+        ...out,
+        error: e.killed ? `timed out after ${opts.timeoutMs ?? CHECK_TIMEOUT_MS}ms` : e.message,
+      });
     });
   });
 }
