@@ -30,9 +30,11 @@ import { createSkillMap } from "../skills/index.js";
 import {
   JOURNAL_FILE,
   JournalMismatchError,
+  NODE_RESULT_JOURNAL,
   RunJournal,
   checkRecordSequence,
   journalDir,
+  journalResult,
   markerToken,
   readJournal,
   type JournalFaults,
@@ -1515,5 +1517,145 @@ describe("a write handler's refusal in the journal (#544)", () => {
       if (transient) expect(text).toMatch(/report\s+write stage only: .*1 transient refusal\(s\) to try again/);
       else expect(text).toMatch(/report\s+write stage only: .*1 refused write\(s\), not re-sent/);
     }
+  });
+});
+
+describe("replay keeps every NodeResult field (#581)", () => {
+  /** Every field of NodeResult, set. `Required<NodeResult>` makes a new field a type error here. */
+  const FULL: Required<NodeResult> = {
+    status: "success",
+    data: { value: "a-out", nested: { n: 1 } },
+    toolCalls: [
+      { tool: "github_search_issues", input: { query: "abc" }, output: { items: [] }, status: "success" },
+      { tool: "github_create_issue", input: { title: "t" }, status: "error" },
+      { tool: "legacy_tool", input: "x" },
+    ],
+    evals: [
+      { name: "has_value", kind: "value", pass: true },
+      { name: "judge_it", kind: "judge", pass: false, reasoning: "too vague", score: 0.25 },
+    ],
+    usage: {
+      costUsd: 0.5,
+      inputTokens: 100,
+      outputTokens: 40,
+      cacheReadTokens: 7,
+      cacheCreationTokens: 3,
+      numTurns: 4,
+    },
+    skippedWrites: ["github_create_issue"],
+    harness: { id: "claude-code", version: "2.1.0" },
+    degraded: ["sandbox_off"],
+    policy: { envScope: true, sandbox: "strict", sandboxStarted: true },
+    contained: true,
+    outputs: [
+      {
+        type: "issue",
+        via: "github",
+        status: "applied",
+        reason: "created",
+        target: "acme/api",
+        ref: 42,
+        url: "https://github.test/acme/api/issues/42",
+      },
+    ],
+    budget: { scope: "node", unit: "tokens", limit: 100, spent: 140, kind: "judge" },
+  };
+
+  /** What the journal keeps of FULL: tool inputs and outputs are dropped, `contained` is excluded. */
+  const KEPT: NodeResult = {
+    ...FULL,
+    toolCalls: [
+      { tool: "github_search_issues", input: null, status: "success" },
+      { tool: "github_create_issue", input: null, status: "error" },
+      { tool: "legacy_tool", input: null },
+    ],
+  };
+  delete (KEPT as { contained?: boolean }).contained;
+
+  it("every NodeResult field is journaled or excluded with a reason", () => {
+    expect(Object.keys(NODE_RESULT_JOURNAL).sort()).toEqual(Object.keys(FULL).sort());
+    for (const [field, rule] of Object.entries(NODE_RESULT_JOURNAL)) {
+      expect(["verbatim", "reduced", "excluded"], field).toContain(rule.journal);
+      if (rule.journal === "excluded") {
+        expect((rule as { reason: string }).reason.length, field).toBeGreaterThan(20);
+      }
+    }
+    expect(Object.entries(NODE_RESULT_JOURNAL).filter(([, r]) => r.journal === "excluded")).toHaveLength(1);
+    expect(NODE_RESULT_JOURNAL.contained.journal).toBe("excluded");
+    expect(NODE_RESULT_JOURNAL.toolCalls.journal).toBe("reduced");
+  });
+
+  it("journalResult keeps every journaled field with exact values", () => {
+    expect(journalResult(FULL)).toEqual(KEPT);
+  });
+
+  it("journalResult adds no key for a field the result does not carry", () => {
+    const bare = journalResult({ status: "failed", data: undefined as never, toolCalls: undefined as never });
+    expect(bare).toEqual({ status: "failed", data: {}, toolCalls: [] });
+    expect(Object.keys(bare).sort()).toEqual(["data", "status", "toolCalls"]);
+    // Empty values are still values: an empty degraded list round-trips.
+    expect(journalResult({ status: "success", data: {}, toolCalls: [], degraded: [], skippedWrites: [] })).toEqual({
+      status: "success",
+      data: {},
+      toolCalls: [],
+      degraded: [],
+      skippedWrites: [],
+    });
+  });
+
+  it("a node:end record and a resume replay carry every journaled field", async () => {
+    const cwd = tmp();
+    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "wf.yml" });
+    journal.begin({
+      workflow: chain(),
+      input: {},
+      sources: {},
+      skills: new Map(),
+      config: {},
+      writeState: createWriteStageState(),
+    });
+    journal.nodeStart("a", 1);
+    journal.nodeEnd("a", 1, FULL, createWriteStageState());
+    journal.route("a", "b");
+    journal.end("crashed");
+
+    const end = readJournal(journalFile(cwd)).records.find((r) => r.type === "node:end")!;
+    expect(end.result).toEqual(KEPT);
+
+    const agent = fakeAgent();
+    const { results } = await resumeRun(cwd, chain(), agent);
+    expect(results!.get("a")).toEqual(KEPT);
+    expect(agent.calls).toEqual(["b", "c", "d"]);
+  });
+
+  it("a journal written before these fields were kept still replays", async () => {
+    const cwd = tmp();
+    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "wf.yml" });
+    journal.begin({
+      workflow: chain(),
+      input: {},
+      sources: {},
+      skills: new Map(),
+      config: {},
+      writeState: createWriteStageState(),
+    });
+    journal.nodeStart("a", 1);
+    // The shape the journal wrote before: no policy, no budget.
+    journal.nodeEnd(
+      "a",
+      1,
+      { status: "success", data: { value: "a-out" }, toolCalls: [], usage: { costUsd: 0.1 } },
+      createWriteStageState(),
+    );
+    journal.route("a", "b");
+    journal.end("crashed");
+
+    const { results } = await resumeRun(cwd, chain(), fakeAgent());
+    expect(results!.get("a")).toEqual({
+      status: "success",
+      data: { value: "a-out" },
+      toolCalls: [],
+      usage: { costUsd: 0.1 },
+    });
   });
 });
