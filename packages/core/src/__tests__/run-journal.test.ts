@@ -1603,59 +1603,55 @@ describe("replay keeps every NodeResult field (#581)", () => {
     });
   });
 
+  /** The fake agent, except node `a` returns `a`'s result as given. */
+  function agentReturning(a: NodeResult) {
+    const base = fakeAgent();
+    const claude: Claude = {
+      ...base.claude,
+      async run(req) {
+        const r = await base.claude.run(req);
+        return /NODE:a/.test(req.instruction) ? structuredClone(a) : r;
+      },
+    };
+    return { ...base, claude };
+  }
+
   it("a node:end record and a resume replay carry every journaled field", async () => {
     const cwd = tmp();
-    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "wf.yml" });
-    journal.begin({
-      workflow: chain(),
-      input: {},
-      sources: {},
-      skills: new Map(),
-      config: {},
-      writeState: createWriteStageState(),
-    });
-    journal.nodeStart("a", 1);
-    journal.nodeEnd("a", 1, FULL, createWriteStageState());
-    journal.route("a", "b");
-    journal.end("crashed");
+    expect(await firstRun(cwd, chain(), agentReturning(FULL), [], killAt("node:start", "b"))).toBe(true);
 
-    const end = readJournal(journalFile(cwd)).records.find((r) => r.type === "node:end")!;
-    expect(end.result).toEqual(KEPT);
+    const end = readJournal(journalFile(cwd)).records.find((r) => r.type === "node:end" && r.node === "a")!;
+    expect(end.result).toMatchObject({
+      status: "success",
+      evals: KEPT.evals,
+      usage: KEPT.usage,
+      skippedWrites: KEPT.skippedWrites,
+      harness: KEPT.harness,
+      degraded: KEPT.degraded,
+      policy: KEPT.policy,
+      outputs: KEPT.outputs,
+      budget: KEPT.budget,
+      toolCalls: KEPT.toolCalls,
+    });
+    expect(end.result).not.toHaveProperty("contained");
 
     const agent = fakeAgent();
     const { results } = await resumeRun(cwd, chain(), agent);
-    expect(results!.get("a")).toEqual(KEPT);
+    expect(results!.get("a")).toEqual(end.result);
     expect(agent.calls).toEqual(["b", "c", "d"]);
   });
 
-  it("a journal written before these fields were kept still replays", async () => {
+  it("a journal record without the newer fields still replays", async () => {
     const cwd = tmp();
-    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "wf.yml" });
-    journal.begin({
-      workflow: chain(),
-      input: {},
-      sources: {},
-      skills: new Map(),
-      config: {},
-      writeState: createWriteStageState(),
-    });
-    journal.nodeStart("a", 1);
-    // The shape the journal wrote before: no policy, no budget.
-    journal.nodeEnd(
-      "a",
-      1,
-      { status: "success", data: { value: "a-out" }, toolCalls: [], usage: { costUsd: 0.1 } },
-      createWriteStageState(),
-    );
-    journal.route("a", "b");
-    journal.end("crashed");
+    const old: NodeResult = { status: "success", data: { value: "a-out" }, toolCalls: [], usage: { costUsd: 0.1 } };
+    expect(await firstRun(cwd, chain(), agentReturning(old), [], killAt("node:start", "b"))).toBe(true);
+
+    const end = readJournal(journalFile(cwd)).records.find((r) => r.type === "node:end" && r.node === "a")!;
+    expect(end.result).not.toHaveProperty("policy");
+    expect(end.result).not.toHaveProperty("budget");
 
     const { results } = await resumeRun(cwd, chain(), fakeAgent());
-    expect(results!.get("a")).toEqual({
-      status: "success",
-      data: { value: "a-out" },
-      toolCalls: [],
-      usage: { costUsd: 0.1 },
-    });
+    expect(results!.get("a")).toEqual(end.result);
+    expect(results!.get("a")).toMatchObject({ status: "success", data: { value: "a-out" }, usage: { costUsd: 0.1 } });
   });
 });
