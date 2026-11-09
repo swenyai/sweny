@@ -298,6 +298,11 @@ export class DagRenderer {
         s.finishedAt = Date.now();
         break;
       }
+      case "node:amended": {
+        const s = this.getOrCreate(event.node);
+        s.state = event.result.status === "failed" ? "failed" : "completed";
+        break;
+      }
       // These events don't affect per-node rendering state
       case "workflow:start":
       case "workflow:end":

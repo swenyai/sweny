@@ -15,10 +15,14 @@
 // authors a load-time warning when the total stretches past expected.
 
 import type { Claude, Evaluator, NodeResult, ToolCall } from "../types.js";
+import { BudgetRefusal } from "../budget.js";
 
 export interface JudgeOptions {
   /** Resolved judge model (evaluator > node > workflow > package default). */
   model: string;
+  /** The run's abort signal and per-call timeout, forwarded to the judge call. */
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 interface ParsedResponse {
@@ -146,9 +150,16 @@ export async function evaluateJudge(
         instruction: prompt,
         context: {},
         model: opts.model,
+        ...(opts.signal ? { signal: opts.signal } : {}),
+        ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
       });
-    } catch {
-      // Treat throws as parse failure for retry purposes; the second attempt
+    } catch (err) {
+      // A budget refusal is no answer at all: it reaches the executor, which
+      // stops the node on the budget instead of recording a parse failure.
+      if (err instanceof BudgetRefusal) throw err;
+      // An aborted run is no answer either: never retried as a parse failure.
+      if (opts.signal?.aborted) throw err;
+      // Treat other throws as parse failure for retry purposes; the second attempt
       // either succeeds or surfaces the same path through the same channel.
       continue;
     }

@@ -5,10 +5,30 @@
  * (#330); prompts.test.ts pins them against the old builders.
  */
 
-import type { Claude, JSONSchema, Logger } from "../types.js";
+import type { Claude, JSONSchema, Logger, NodeUsage } from "../types.js";
 import { consoleLogger } from "../types.js";
 import { fenceUntrustedJson } from "../untrusted.js";
 import type { AgentHarness } from "./types.js";
+
+/**
+ * Hand a completion's usage to the caller's `onUsage`, once, before the
+ * adapter looks at whether the completion succeeded (a failed one was still
+ * billed). A hook that throws is logged and ignored: it never changes the
+ * completion's result, so a good answer is never turned into a failure (and
+ * a judge or route call is never repeated because of it).
+ */
+export function reportCompletionUsage(
+  onUsage: ((usage: NodeUsage) => void) | undefined,
+  usage: NodeUsage | undefined,
+  logger?: Logger,
+): void {
+  if (!onUsage || !usage) return;
+  try {
+    onUsage(usage);
+  } catch (err) {
+    (logger ?? consoleLogger).warn(`usage hook failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
 
 /** Legacy `Claude` objects wrapped by `claudeCompat()`, so their own ask/evaluate still win. */
 const LEGACY = new WeakMap<AgentHarness, Claude>();
@@ -98,17 +118,19 @@ export async function ask(
     model?: string;
     timeoutMs?: number;
     signal?: AbortSignal;
+    onUsage?: (usage: NodeUsage) => void;
   },
 ): Promise<string> {
   const legacy = legacyClaudeOf(harness);
   if (legacy) return legacy.ask(opts);
-  const { instruction, context, model, timeoutMs, signal } = opts;
+  const { instruction, context, model, timeoutMs, signal, onUsage } = opts;
   const response = await harness.complete({
     prompt: buildAskPrompt(instruction, context),
     model,
     timeoutMs,
     signal,
     purpose: "ask",
+    ...(onUsage ? { onUsage } : {}),
   });
   return (response ?? "").trim();
 }
@@ -125,18 +147,20 @@ export async function evaluate(
     choices: { id: string; description: string }[];
     timeoutMs?: number;
     signal?: AbortSignal;
+    onUsage?: (usage: NodeUsage) => void;
   },
   logger?: Logger,
 ): Promise<string | null> {
   const legacy = legacyClaudeOf(harness);
   if (legacy) return legacy.evaluate(opts);
   const log = logger ?? harness.logger ?? consoleLogger;
-  const { question, context, choices, timeoutMs, signal } = opts;
+  const { question, context, choices, timeoutMs, signal, onUsage } = opts;
   const response = await harness.complete({
     prompt: buildEvaluatePrompt(question, context, choices),
     timeoutMs,
     signal,
     purpose: "evaluate",
+    ...(onUsage ? { onUsage } : {}),
   });
 
   // The adapter already logged why; fail closed with no decision.

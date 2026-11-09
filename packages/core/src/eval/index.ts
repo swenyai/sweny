@@ -44,6 +44,16 @@ export interface EvaluateAllOptions {
   node?: Node;
   /** The workflow being executed. Used to resolve workflow-level `judge_model` overrides. */
   workflow?: Workflow;
+  /**
+   * Run the evaluators one at a time instead of together. The executor sets it
+   * when a spend budget is on, so each judge's usage is counted (and a
+   * crossing stops the rest) before the next one starts.
+   */
+  sequential?: boolean;
+  /** The run's abort signal: checked before each judge when sequential, and forwarded to judge calls. */
+  signal?: AbortSignal;
+  /** Per-call timeout forwarded to judge calls. */
+  timeoutMs?: number;
 }
 
 /**
@@ -69,11 +79,25 @@ export async function evaluateAll(
   }
 
   // Evaluators are independent, so they run concurrently (#337): N judges on
-  // a node cost one round-trip of wall time, not N. Results keep declaration
-  // order. Every evaluator settles before an error surfaces, and the first
-  // rejection in declaration order is rethrown, so the outcome never depends
-  // on which call finishes first.
-  const settled = await Promise.allSettled(evaluators.map((e) => evaluateOne(e, result, opts)));
+  // a node cost one round-trip of wall time, not N. With `sequential` (a spend
+  // budget is on) they run one at a time, so each judge's spend is counted
+  // before the next starts, and an abort stops the rest. Results keep
+  // declaration order. Every evaluator settles before an error surfaces, and
+  // the first rejection in declaration order is rethrown, so the outcome never
+  // depends on which call finishes first.
+  const settled: PromiseSettledResult<EvalResult | null>[] = [];
+  if (opts.sequential) {
+    for (const e of evaluators) {
+      if (opts.signal?.aborted) throw new Error("workflow aborted");
+      try {
+        settled.push({ status: "fulfilled", value: await evaluateOne(e, result, opts) });
+      } catch (reason) {
+        settled.push({ status: "rejected", reason });
+      }
+    }
+  } else {
+    settled.push(...(await Promise.allSettled(evaluators.map((e) => evaluateOne(e, result, opts)))));
+  }
   const out: EvalResult[] = [];
   for (const s of settled) {
     if (s.status === "rejected") throw s.reason;
@@ -93,7 +117,11 @@ async function evaluateOne(e: Evaluator, result: NodeResult, opts: EvaluateAllOp
   }
   if (e.kind === "judge" && opts.claude) {
     const model = resolveJudgeModel(e, opts.node, opts.workflow, opts.claude.defaultJudgeModel);
-    const verdict = await evaluateJudge(e, result, opts.claude, { model });
+    const verdict = await evaluateJudge(e, result, opts.claude, {
+      model,
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    });
     return { name: e.name, kind: "judge", pass: verdict.pass, reasoning: capReasoning(verdict.reasoning) };
   }
   return null;

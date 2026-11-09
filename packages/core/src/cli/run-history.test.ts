@@ -315,3 +315,42 @@ describe("gitignore", () => {
     expect(fs.readFileSync(path.join(d, ".gitignore"), "utf-8")).toBe("node_modules\n.sweny/runs/\n");
   });
 });
+
+describe("spend split on the record", () => {
+  it("is recorded when the executor's own calls reported usage, and totals are its sum", () => {
+    const r = record({
+      trace: {
+        ...trace,
+        spend: {
+          node: { tokens: 400, costUsd: 0.1, calls: 3 },
+          judge: { tokens: 50, costUsd: 0.02, calls: 1 },
+        },
+      },
+    });
+    expect(r.spend).toEqual({
+      node: { tokens: 400, cost_usd: 0.1, calls: 3 },
+      judge: { tokens: 50, cost_usd: 0.02, calls: 1 },
+    });
+    expect(r.totals.tokens).toBe(450);
+    expect(r.totals.cost_usd).toBe(0.12);
+  });
+
+  it("is absent without a split", () => {
+    expect(record().spend).toBeUndefined();
+  });
+});
+
+describe("node timer and amended results", () => {
+  it("a repeated exit never counts a visit twice; an amendment only replaces the last result", () => {
+    let t = 0;
+    const timer = createNodeTimer(() => t);
+    timer.observer({ type: "node:enter", node: "a", instruction: "" });
+    t = 1500;
+    timer.observer({ type: "node:exit", node: "a", result: { status: "success", data: {}, toolCalls: [] } });
+    t = 2500;
+    timer.observer({ type: "node:exit", node: "a", result: { status: "success", data: {}, toolCalls: [] } });
+    timer.observer({ type: "node:amended", node: "a", result: { status: "failed", data: {}, toolCalls: [] } });
+    expect(timer.durations.get("a")).toBe(1500);
+    expect(timer.lastResults.get("a")!.status).toBe("failed");
+  });
+});

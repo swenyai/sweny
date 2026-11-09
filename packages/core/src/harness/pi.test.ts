@@ -6,12 +6,14 @@
  */
 import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPiProcessFake } from "./__contract__/fakes.js";
 import { createRecordingWrapper } from "./__contract__/sandbox.js";
 import {
   PiHarness,
+  MIN_PI_VERSION,
   PI_BRIDGE_SERVER,
   bridgeToolNames,
   mapStats,
@@ -551,5 +553,92 @@ describe.skipIf(!haveDist)("PiHarness skill tools over the tool bridge (needs th
       "${SWENY_TOOL_BRIDGE_TOKEN}",
     );
     expect(fakes.leftovers()).toEqual([]);
+  });
+});
+
+describe("PiHarness env overlay", () => {
+  it("lays env over the scoped env, drops envRemove, and keeps the credential rules", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "canary-anthropic");
+    vi.stubEnv("SWENY_OVERLAY_RAW", "raw");
+    const { h } = harness({
+      model: "openai/gpt-5",
+      envPassthrough: ["SWENY_OVERLAY_RAW"],
+      envRemove: ["SWENY_OVERLAY_RAW"],
+      env: { OPENAI_API_KEY: "run-openai", MY_RUN_VAR: "run", GITHUB_TOKEN: "overlay-gh", PI_OFFLINE: "0" },
+    });
+    fakes.script(DONE);
+    expect((await h.run({ instruction: "x", context: {}, tools: [] })).status).toBe("success");
+    const env = fakes.raw().at(-1)!.env;
+    expect(env.OPENAI_API_KEY).toBe("run-openai");
+    expect(env.MY_RUN_VAR).toBe("run");
+    expect(env.SWENY_OVERLAY_RAW).toBeUndefined();
+    expect(env.GITHUB_TOKEN).toBeUndefined();
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.PI_OFFLINE).toBe("1");
+  });
+
+  it("the provider is picked from the overlaid env: an overlaid key replaces the inherited ones", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "canary-anthropic");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "canary-aws");
+    const { h } = harness({ model: "sonnet:high", env: { OPENAI_API_KEY: "run-openai" } });
+    fakes.script(DONE);
+    // Inherited, two providers would be ambiguous; the overlay's key replaces them.
+    expect((await h.run({ instruction: "x", context: {}, tools: [] })).status).toBe("success");
+    const env = fakes.raw().at(-1)!.env;
+    expect(env.OPENAI_API_KEY).toBe("run-openai");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+});
+
+describe.skipIf(process.platform === "win32")("PiHarness executable on an overlaid PATH", () => {
+  it("version-checks and spawns the pi an overlaid PATH selects", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "canary-anthropic");
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-pi-bin-"));
+    try {
+      const exe = path.join(bin, "sweny-overlay-pi");
+      const q = (a: string) => `'${a.replace(/'/g, "'\\''")}'`;
+      fs.writeFileSync(
+        exe,
+        `#!/bin/sh\nexec ${[fakes.command.command, ...fakes.command.args].map(q).join(" ")} "$@"\n`,
+      );
+      fs.chmodSync(exe, 0o755);
+      const piCommand = { command: "sweny-overlay-pi", args: [] };
+      expect(await harness({ piCommand }).h.preflight()).toMatchObject({ ok: false });
+      const wrapper = createRecordingWrapper();
+      const { h } = harness({
+        piCommand,
+        sandbox: "strict",
+        sandboxWrapper: wrapper,
+        env: { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}` },
+      });
+      expect(await h.preflight()).toMatchObject({ ok: true });
+      fakes.script(DONE);
+      expect((await h.run({ instruction: "x", context: {}, tools: [] })).status).toBe("success");
+      // The spawn runs the exact file the version check resolved and ran.
+      expect(wrapper.requests.at(-1)!.command).toBe(exe);
+    } finally {
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  });
+});
+
+describe.skipIf(process.platform === "win32")("PiHarness version check env", () => {
+  it("the version check runs with the overlaid env and the harness cwd", async () => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sweny-pi-vcheck-")));
+    try {
+      const exe = path.join(dir, "pi-vcheck");
+      fs.writeFileSync(
+        exe,
+        `#!/bin/sh\n[ "$VCHECK_MARK" = "set" ] && [ "$(pwd -P)" = "${dir}" ] && echo "${MIN_PI_VERSION}" && exit 0\nexit 1\n`,
+      );
+      fs.chmodSync(exe, 0o755);
+      const piCommand = { command: exe, args: [] };
+      expect(await harness({ piCommand, cwd: dir }).h.preflight()).toMatchObject({ ok: false });
+      expect(await harness({ piCommand, env: { VCHECK_MARK: "set" } }).h.preflight()).toMatchObject({ ok: false });
+      const ok = await harness({ piCommand, cwd: dir, env: { VCHECK_MARK: "set" } }).h.preflight();
+      expect(ok).toEqual({ ok: true, version: MIN_PI_VERSION });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

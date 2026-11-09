@@ -8,8 +8,14 @@
  *
  * Tokens are input + output tokens as the harness reports them (cache reads and
  * writes are not counted, matching the run receipt). Cost is the harness's own
- * reported USD, never estimated. Only agent node runs are counted: judge,
- * routing and retry-reflection completions report no usage and are not metered.
+ * reported USD, never estimated. Every model completion the executor itself
+ * makes is counted too, under its own `kind` (see {@link SpendKind}): judge
+ * scoring, route evaluation, retry reflection and the safe-output screen. A
+ * completion counts when its harness reports usage for it; one that reports
+ * none adds nothing (the same as a node run without usage). The run totals
+ * and the stop are over all kinds together, across a resume too; the split is
+ * `trace.spend`. Once a ceiling is reached no further executor completion
+ * starts. The decision model (`route_by: decider`) is not metered.
  *
  * Enforcement, per unit the harness can report:
  * - live: the harness calls `onUsage` during the node; crossing a limit aborts
@@ -17,7 +23,9 @@
  * - between nodes: usage on the finished result is checked; a crossing fails the
  *   node, and the run halts before the next node starts.
  * - across a resume: the run journal records each attempt's spend (live and
- *   final), and `sweny workflow resume` seeds the run total with it.
+ *   final), and each metered completion (judge, route, reflection, screen)
+ *   as its own record; `sweny workflow resume` seeds the run total with all
+ *   of it, split by kind.
  */
 
 import type { NodeUsage } from "./types.js";
@@ -41,6 +49,25 @@ export interface Spend {
   costUsd: number;
 }
 
+/** Spend restored on a resume: the total, and its split by kind when the journal has one. */
+export interface SeedSpend extends Spend {
+  byKind?: Partial<Record<SpendKind, Spend>>;
+}
+
+/** What a unit of spend paid for. `node` is an agent node run; the rest are the executor's own completions. */
+export type SpendKind = "node" | "judge" | "route" | "reflect" | "screen";
+
+/** The order kinds are listed in, wherever the split is shown. */
+export const SPEND_KINDS: readonly SpendKind[] = ["node", "judge", "route", "reflect", "screen"];
+
+/** Spend of one {@link SpendKind}. `calls` counts the completions that reported usage. */
+export interface KindSpend extends Spend {
+  calls: number;
+}
+
+/** Spend by kind. A kind with no reported usage is absent. */
+export type SpendBreakdown = Partial<Record<SpendKind, KindSpend>>;
+
 export type BudgetUnit = "tokens" | "cost_usd";
 
 /** Recorded on the node whose spend crossed a budget (`NodeResult.budget`). */
@@ -51,9 +78,33 @@ export interface BudgetOverrun {
   limit: number;
   /** Spend at the moment of the stop (live) or at the end of the node. */
   spent: number;
+  /** The executor completion whose spend crossed it (judge, route, ...). Absent for a node run. */
+  kind?: SpendKind;
+}
+
+/**
+ * Thrown into an executor completion (judge, route, reflection, screen) the
+ * budget refuses: a ceiling was already reached, so the call is not made.
+ * Callers that swallow a failed completion (a judge's parse retry) must let
+ * this one through, so a refusal is never mistaken for a model answer.
+ */
+export class BudgetRefusal extends Error {
+  constructor(readonly breach: BudgetOverrun) {
+    super(describeOverrun(breach));
+    this.name = "BudgetRefusal";
+  }
 }
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/**
+ * Slack for comparing accumulated floats: 0.1 + 0.2 is 0.30000000000000004,
+ * which must not read as over a $0.30 limit. Far below a token or a cent.
+ */
+const EPSILON = 1e-9;
+
+/** Cost as shown: accumulated float noise rounded off (10 decimal places). */
+const roundCost = (n: number): number => Math.round(n * 1e10) / 1e10;
 
 export function toLimits(b: Budget | undefined): SpendLimits {
   return {
@@ -87,7 +138,7 @@ export function spendOf(u: NodeUsage | undefined): { tokens?: number; costUsd?: 
 
 function over(spent: number, limit: number | undefined, strictlyOver: boolean): boolean {
   if (limit === undefined) return false;
-  return strictlyOver ? spent > limit : spent >= limit;
+  return strictlyOver ? spent > limit + EPSILON : spent >= limit - EPSILON;
 }
 
 function breachOf(
@@ -100,7 +151,7 @@ function breachOf(
     return { scope, unit: "tokens", limit: limits.tokens!, spent: spent.tokens };
   }
   if (over(spent.costUsd, limits.costUsd, strictlyOver)) {
-    return { scope, unit: "cost_usd", limit: limits.costUsd!, spent: spent.costUsd };
+    return { scope, unit: "cost_usd", limit: limits.costUsd!, spent: roundCost(spent.costUsd) };
   }
   return undefined;
 }
@@ -119,11 +170,56 @@ export function describeOverrun(o: BudgetOverrun, nodeId?: string): string {
  */
 export class BudgetGuard {
   private spent: Spend = { tokens: 0, costUsd: 0 };
+  private kinds = new Map<SpendKind, KindSpend>();
 
   constructor(readonly runLimits: SpendLimits) {}
 
   get totals(): Spend {
     return { ...this.spent };
+  }
+
+  /**
+   * Spend by kind, in {@link SPEND_KINDS} order. Resumed spend is restored
+   * under its kind; a journal without meter records seeds `node` only.
+   */
+  breakdown(): SpendBreakdown {
+    const out: SpendBreakdown = {};
+    for (const k of SPEND_KINDS) {
+      const v = this.kinds.get(k);
+      if (v) out[k] = { tokens: v.tokens, costUsd: roundCost(v.costUsd), calls: v.calls };
+    }
+    return out;
+  }
+
+  /** True once any completion other than a node run reported usage. */
+  get hasMeteredCalls(): boolean {
+    return [...this.kinds.keys()].some((k) => k !== "node");
+  }
+
+  /**
+   * Count one executor completion (judge, route, ...) against the run. Usage
+   * with no tokens and no cost counts nothing. Returns the breach this report
+   * caused, judged against the totals before it, like a live node report.
+   */
+  meter(kind: SpendKind, usage: NodeUsage | undefined, nodeBudget?: NodeBudget): BudgetOverrun | undefined {
+    const u = spendOf(usage);
+    if (u.tokens === undefined && u.costUsd === undefined) return undefined;
+    const s: Spend = { tokens: u.tokens ?? 0, costUsd: u.costUsd ?? 0 };
+    const r = this.spent;
+    const breach =
+      (nodeBudget
+        ? breachOf(
+            "node",
+            nodeBudget.limits,
+            { tokens: nodeBudget.committed.tokens + s.tokens, costUsd: nodeBudget.committed.costUsd + s.costUsd },
+            true,
+          )
+        : undefined) ??
+      breachOf("run", this.runLimits, { tokens: r.tokens + s.tokens, costUsd: r.costUsd + s.costUsd }, true);
+    if (breach && kind !== "node") breach.kind = kind;
+    if (nodeBudget) nodeBudget.commit(s, kind, true);
+    else this.commit(s, kind, true);
+    return breach;
   }
 
   /** True when any limit exists at all, so the executor can skip the machinery. */
@@ -141,18 +237,41 @@ export class BudgetGuard {
   }
 
   /**
-   * Spend the run made before this process (a resumed run's journaled usage).
-   * Counted against the run ceiling like any other spend, so a crash never
-   * resets the whole-run budget.
+   * Spend the run made before this process (a resumed run's journaled usage
+   * and metered completions). Counted against the run ceiling like any other
+   * spend, so a crash never resets the whole-run budget. Restored under its
+   * kind when the journal has the split (a journal written before meter
+   * records existed has node spend only). Seeded spend is not a call: `calls`
+   * is unchanged.
    */
-  seed(s: Spend): void {
-    const ok = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
-    this.commit({ tokens: ok(s.tokens), costUsd: ok(s.costUsd) });
+  seed(s: SeedSpend): void {
+    const ok = (n: number | undefined) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0);
+    if (!s.byKind) {
+      this.commit({ tokens: ok(s.tokens), costUsd: ok(s.costUsd) }, "node", false);
+      return;
+    }
+    for (const k of SPEND_KINDS) {
+      const v = s.byKind[k];
+      if (v) this.commit({ tokens: ok(v.tokens), costUsd: ok(v.costUsd) }, k, false);
+    }
   }
 
-  /** @internal */
-  commit(s: Spend): void {
+  /**
+   * @internal `counted`: this commit is one completion that reported usage, so
+   * `calls` goes up. A commit that is not (seeded spend, an attempt that
+   * reported nothing) adds its spend only, and a zero one leaves no trace, so
+   * the split is the same with and without a limit.
+   */
+  commit(s: Spend, kind: SpendKind, counted: boolean): void {
     this.spent = { tokens: this.spent.tokens + s.tokens, costUsd: this.spent.costUsd + s.costUsd };
+    const k = this.kinds.get(kind);
+    if (!k && !counted && s.tokens === 0 && s.costUsd === 0) return;
+    const prev = k ?? { tokens: 0, costUsd: 0, calls: 0 };
+    this.kinds.set(kind, {
+      tokens: prev.tokens + s.tokens,
+      costUsd: prev.costUsd + s.costUsd,
+      calls: prev.calls + (counted ? 1 : 0),
+    });
   }
 }
 
@@ -173,15 +292,30 @@ export class NodeBudget {
     return new BudgetAttempt(this.guard, this, outer);
   }
 
+  /**
+   * Spend this visit made before a resume (a checkpointed visit's journaled
+   * spend). It counts against the node's own limit only: the run total
+   * already holds it from the seed.
+   */
+  restore(s: Spend): void {
+    const ok = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
+    this.spent = { tokens: this.spent.tokens + ok(s.tokens), costUsd: this.spent.costUsd + ok(s.costUsd) };
+  }
+
   /** @internal */
   get committed(): Spend {
     return this.spent;
   }
 
-  /** @internal */
-  commit(s: Spend): void {
+  /** Count one executor completion made during this visit (judge, retry reflection, screen). */
+  meter(kind: SpendKind, usage: NodeUsage | undefined): BudgetOverrun | undefined {
+    return this.guard.meter(kind, usage, this);
+  }
+
+  /** @internal See {@link BudgetGuard.commit}. */
+  commit(s: Spend, kind: SpendKind, counted: boolean): void {
     this.spent = { tokens: this.spent.tokens + s.tokens, costUsd: this.spent.costUsd + s.costUsd };
-    this.guard.commit(s);
+    this.guard.commit(s, kind, counted);
   }
 }
 
@@ -190,6 +324,8 @@ export class BudgetAttempt {
   private readonly controller = new AbortController();
   private live: Spend = { tokens: 0, costUsd: 0 };
   private liveUsage: NodeUsage | undefined;
+  /** A live report carried tokens or cost. */
+  private liveReported = false;
   private stopped: BudgetOverrun | undefined;
   private settled: { breach: BudgetOverrun | undefined } | undefined;
   private readonly onOuterAbort = () => this.controller.abort();
@@ -222,6 +358,7 @@ export class BudgetAttempt {
     if (this.stopped) return;
     this.liveUsage = { ...this.liveUsage, ...u };
     const s = spendOf(u);
+    if (s.tokens !== undefined || s.costUsd !== undefined) this.liveReported = true;
     // Reports are cumulative; never let a partial report move spend backwards.
     this.live = {
       tokens: Math.max(this.live.tokens, s.tokens ?? 0),
@@ -272,7 +409,9 @@ export class BudgetAttempt {
     };
     const breach = this.stopped ?? this.check(spent);
     this.settled = { breach };
-    this.node.commit(spent);
+    // A call only when the attempt reported usage, live or final: an attempt
+    // that reported none is not counted, the same as without a limit.
+    this.node.commit(spent, "node", this.liveReported || f.tokens !== undefined || f.costUsd !== undefined);
     return breach;
   }
 

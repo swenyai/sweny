@@ -283,15 +283,43 @@ describe("spend budgets (#449)", () => {
     expect(results.get("a")!.status).toBe("success");
   });
 
-  it("no budget: the agent gets the caller's own signal and no onUsage (back-compat)", async () => {
+  it("no budget: the agent gets the caller's own signal; onUsage only collects the split", async () => {
     const { calls, run } = scripted({ a: [{}], b: [{}] });
     const controller = new AbortController();
     const { results } = await exec(wf(), harnessOf(CLAUDE_CODE_CAPABILITIES, run), { signal: controller.signal });
     expect(results.get("b")!.status).toBe("success");
     for (const c of calls) {
       expect(c.req.signal).toBe(controller.signal);
-      expect(c.req.onUsage).toBeUndefined();
+      // A report never aborts anything without a limit.
+      c.req.onUsage?.({ inputTokens: 1_000_000 });
+      expect(controller.signal.aborted).toBe(false);
     }
+  });
+
+  it("no budget: the harness request is the pre-metering shape plus onUsage only", async () => {
+    const { calls, run } = scripted({ a: [{}], b: [{}] });
+    await exec(wf(), harnessOf(CLAUDE_CODE_CAPABILITIES, run));
+    const shape = (r: object) =>
+      JSON.parse(
+        JSON.stringify(
+          Object.fromEntries(
+            Object.entries(r)
+              .filter(([k]) => k !== "onUsage")
+              .map(([k, v]) => [k, typeof v === "function" ? "fn" : v]),
+          ),
+        ),
+      );
+    // Frozen from origin/main before metering, the same request for node `a`.
+    expect(shape(calls[0].req)).toEqual({
+      nodeId: "a",
+      instruction: "Do a",
+      context: { input: {} },
+      tools: [],
+      agentAccess: { envVars: [], domains: [], withhold: [] },
+      mcpServers: {},
+      onProgress: "fn",
+    });
+    expect(typeof calls[0].req.onUsage).toBe("function");
   });
 
   it("the caller's abort still reaches an agent that runs under a budget", async () => {

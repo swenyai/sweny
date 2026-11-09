@@ -66,8 +66,7 @@ A conforming executor:
 - **MUST NOT** start a node, or a retry attempt, once a ceiling is already reached.
 - **MUST** enforce a budget while the node runs when the harness reports that unit live, and otherwise between nodes. Between-node enforcement lets one node overrun before it is stopped; the executor reports `budget_live` in the node's `degraded` list.
 - **MUST** report `budget_tokens` or `budget_cost_usd` in `degraded` when the harness cannot report that unit at all (for example cost on Codex), and no budget on that unit is enforced. Under a strict harness policy the node is refused instead.
-
-Only agent node runs are metered. Judge evaluators, route decisions and retry reflections report no usage and are not counted.
+- **SHOULD** count the model calls it makes itself (judge evaluators, agent route evaluations, retry reflections, the safe-output screen) against the same budgets when the harness reports usage for them, and report the spend by kind. An executor that counts them **MUST** apply the node and run stops to the total, and **MUST NOT** start one once a ceiling is reached.
 
 ## Model Selection
 

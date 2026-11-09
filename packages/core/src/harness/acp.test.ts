@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
@@ -860,5 +861,42 @@ describe.skipIf(!haveDist)("AcpHarness skill tools over the tool bridge (needs t
     // The token reaches the shim in session/new's env list (over the agent's stdin), never in any argv.
     expect(JSON.stringify([c.args, server.args, server.command])).not.toContain(token!);
     expect(fakes.leftovers()).toEqual([]);
+  });
+});
+
+describe("env overlay", () => {
+  it("lays env over the scoped env, drops envRemove, and keeps the credential rule", async () => {
+    vi.stubEnv("MY_AGENT_KEY", "parent-key");
+    vi.stubEnv("SWENY_OVERLAY_RAW", "raw");
+    const { h } = harness({
+      authVars: ["MY_AGENT_KEY", "MY_AGENT_TOKEN"],
+      envPassthrough: ["SWENY_OVERLAY_RAW"],
+      envRemove: ["SWENY_OVERLAY_RAW"],
+      env: { MY_AGENT_TOKEN: "run-token", MY_RUN_VAR: "run", SLACK_BOT_TOKEN: "overlay-slack" },
+    });
+    fakes.script(DONE);
+    await h.run(req());
+    expect(cap().env.MY_AGENT_TOKEN).toBe("run-token");
+    expect(cap().env.MY_RUN_VAR).toBe("run");
+    expect(cap().env.SWENY_OVERLAY_RAW).toBeUndefined();
+    expect(cap().env.SLACK_BOT_TOKEN).toBeUndefined();
+    // The overlay named an auth var, so the inherited one is dropped.
+    expect(cap().env.MY_AGENT_KEY).toBeUndefined();
+  });
+});
+
+describe.skipIf(process.platform === "win32")("preflight on an overlaid PATH", () => {
+  it("finds the agent command through the overlaid PATH, not sweny's", async () => {
+    const bin = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "sweny-acp-bin-"));
+    try {
+      const exe = path.join(bin, "sweny-overlay-acp-agent");
+      fs.writeFileSync(exe, "#!/bin/sh\nexit 0\n");
+      fs.chmodSync(exe, 0o755);
+      expect(await harness({ acpCommand: "sweny-overlay-acp-agent" }).h.preflight()).toMatchObject({ ok: false });
+      const { h } = harness({ acpCommand: "sweny-overlay-acp-agent", env: { PATH: bin } });
+      expect(await h.preflight()).toMatchObject({ ok: true });
+    } finally {
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
   });
 });

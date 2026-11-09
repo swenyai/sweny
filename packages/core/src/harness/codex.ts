@@ -33,8 +33,11 @@ import { consoleLogger } from "../types.js";
 import {
   CODEX_AUTH_VARS,
   CODEX_ENV_PREFIXES,
+  agentEnvOverlay,
+  applyEnvOverlay,
   checkSandboxSupport,
   finishAgentEnv,
+  resolveExecutable,
   heldCredentials,
   hasCodexLogin,
   parseList,
@@ -46,6 +49,8 @@ import {
   withPushBlocked,
   mcpWithheld,
   type AgentAccess,
+  type AgentEnvOverlay,
+  type HarnessEnvOptions,
   type SandboxMode,
 } from "../agent-env.js";
 import type {
@@ -63,7 +68,7 @@ import type {
 import { CODEX_CAPABILITIES } from "./capabilities.js";
 import { policyGate, resolveHarnessPolicy, type HarnessPolicyMode } from "./policy.js";
 import { gitCredentialPolicy } from "../git-credentials.js";
-import { buildNodePrompt } from "./prompts.js";
+import { buildNodePrompt, reportCompletionUsage } from "./prompts.js";
 import { makeAbort } from "./abort.js";
 import { parseToolResultContent, summarizeToolError, tryParseJSON } from "./parse.js";
 import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
@@ -76,9 +81,17 @@ import {
 } from "./sandbox-wrapper.js";
 import { TOKEN_ENV } from "./tool-bridge/protocol.js";
 import { codexAuth, type AuthProbe } from "./auth.js";
-import { CHECK_TIMEOUT_MS, checkOpenAI, cliCheck, runCli } from "./diagnose.js";
+import { CHECK_TIMEOUT_MS, checkOpenAI, cliCheck, diagnoseEnv, runCli } from "./diagnose.js";
 
 export { CODEX_CAPABILITIES };
+
+/**
+ * The credentials an `env` overlay replaces as a set ({@link applyEnvOverlay}):
+ * Codex's API key and access token, and `OPENAI_API_KEY`, which stands in for
+ * `CODEX_API_KEY` ({@link resolveCodexAuthEnv}). `CODEX_HOME` is a location,
+ * not a credential: overlaying it does not drop an inherited key.
+ */
+const CODEX_CREDENTIAL_VARS: readonly string[] = ["CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "OPENAI_API_KEY"];
 
 /** Oldest Codex CLI whose flags this adapter uses (`--ignore-user-config`, `--ignore-rules`). */
 export const MIN_CODEX_VERSION = "0.159.0";
@@ -160,7 +173,7 @@ const TOOL_ITEM_KINDS = new Set([
   "collab_tool_call",
 ]);
 
-export interface CodexHarnessOptions {
+export interface CodexHarnessOptions extends HarnessEnvOptions {
   /** Model override (`--model`). Free text; sweny has no model opinion. */
   model?: string;
   /** Tool-call budget the watchdog enforces when a node sets no `max_turns` (default: 20). */
@@ -199,7 +212,7 @@ export interface CodexHarnessOptions {
   toolBridgeShim?: { command: string; args: string[] };
   /** Grace period between SIGTERM and SIGKILL when stopping Codex (default: 2000 ms). */
   killGraceMs?: number;
-  /** Login probe for `preflight()` (test seam). Default: {@link codexAuth} over `process.env`. */
+  /** Login probe for `preflight()` (test seam). Default: {@link codexAuth} over `process.env` with `env` / `envRemove` applied. */
   authProbe?: AuthProbe;
 }
 
@@ -389,6 +402,7 @@ export class CodexHarness implements AgentHarness {
   private defaultMcpServers: Record<string, McpServerConfig>;
   private envPassthrough: string[] | undefined;
   private envScope: boolean | undefined;
+  private envOverlay: AgentEnvOverlay | undefined;
   private sandboxMode: SandboxMode | undefined;
   private sandboxProbe: (() => string | undefined) | undefined;
   private sandboxWarned = false;
@@ -396,6 +410,7 @@ export class CodexHarness implements AgentHarness {
   private loginWarned = false;
   private policyMode: HarnessPolicyMode;
   private codexCommand: { command: string; args: string[] };
+  private resolvedCommand: string | undefined;
   private toolBridgeShim: { command: string; args: string[] } | undefined;
   private killGraceMs: number;
   private preflightResult: Promise<{ ok: true; version: string } | { ok: false; reason: string }> | undefined;
@@ -412,6 +427,7 @@ export class CodexHarness implements AgentHarness {
     this.defaultMcpServers = opts.defaultMcpServers ?? {};
     this.envPassthrough = opts.envPassthrough;
     this.envScope = opts.envScope;
+    this.envOverlay = agentEnvOverlay(opts);
     this.sandboxMode = opts.sandbox;
     this.sandboxProbe = opts.sandboxProbe;
     this.sandboxWrapper = opts.sandboxWrapper;
@@ -419,7 +435,7 @@ export class CodexHarness implements AgentHarness {
     this.codexCommand = opts.codexCommand ?? { command: process.env.SWENY_CODEX_PATH || "codex", args: [] };
     this.toolBridgeShim = opts.toolBridgeShim;
     this.killGraceMs = opts.killGraceMs ?? 2000;
-    this.authProbe = opts.authProbe ?? (() => codexAuth(process.env));
+    this.authProbe = opts.authProbe ?? (() => codexAuth(this.loginEnv()));
   }
 
   info(): HarnessInfo {
@@ -437,11 +453,68 @@ export class CodexHarness implements AgentHarness {
     return auth.ok ? cli : { ok: false, reason: auth.reason };
   }
 
+  /**
+   * `process.env` (or `base`, for `sweny check`) with the caller's `env` /
+   * `envRemove` applied, unscoped: where sweny reads Codex's own settings
+   * (`OPENAI_BASE_URL`) and the login probe. The scoped agent env would drop
+   * an inherited base URL.
+   */
+  private hostEnv(base?: Record<string, string | undefined>): Record<string, string> {
+    return diagnoseEnv(base, this.envOverlay, CODEX_CREDENTIAL_VARS);
+  }
+
+  /**
+   * {@link hostEnv} as the login probe should see it: an inherited
+   * OPENAI_API_KEY does not count once `envRemove` names CODEX_API_KEY, since
+   * the agent env no longer derives CODEX_API_KEY from it.
+   */
+  private loginEnv(base?: Record<string, string | undefined>): Record<string, string> {
+    const env = this.hostEnv(base);
+    const overlay = this.envOverlay;
+    if (overlay?.remove.includes("CODEX_API_KEY") && !Object.hasOwn(overlay.env, "OPENAI_API_KEY")) {
+      delete env.OPENAI_API_KEY;
+    }
+    return env;
+  }
+
+  /** The Codex executable to spawn: the one the version check resolved and ran. */
+  private cliPath(): string {
+    return this.resolvedCommand ?? this.codexCommand.command;
+  }
+
   /** `codex --version`, checked against {@link MIN_CODEX_VERSION}. Cached per instance. */
   private checkCli(): Promise<{ ok: true; version: string } | { ok: false; reason: string }> {
-    this.preflightResult ??= new Promise((resolve) => {
-      const { command, args } = this.codexCommand;
-      execFile(command, [...args, "--version"], { timeout: 30_000 }, (err, stdout) => {
+    this.preflightResult ??= (() => {
+      // Probe the file the spawn will run: resolved on the run's PATH and cwd, then reused at spawn.
+      const hostEnv = this.hostEnv();
+      this.resolvedCommand = resolveExecutable(this.codexCommand.command, hostEnv, this.cwd);
+      return this.probeVersion(this.resolvedCommand, hostEnv).then((res) => {
+        if (!res.ok) return res;
+        this.version = res.version;
+        // Newer than the tested version: the declared capabilities may no longer hold. Warn once
+        // (the result is cached per instance). Not `degraded`: that is a per-node policy report and
+        // there is no node yet; not a refusal: it would break anyone who chose `latest` on purpose.
+        if (compareVersions(res.version, TESTED_CODEX_VERSION) > 0) {
+          this.logger.warn(
+            `codex ${res.version} is newer than ${TESTED_CODEX_VERSION}, the version sweny's Codex capabilities were tested against; ` +
+              `flags and event shapes may differ. Pin @openai/codex@${TESTED_CODEX_VERSION} (action input codex-version) for the tested behavior.`,
+          );
+        }
+        return res;
+      });
+    })();
+    return this.preflightResult;
+  }
+
+  /** Run `<resolved> --version` with `hostEnv` and parse it. No caching, no side effects. */
+  private probeVersion(
+    resolved: string | undefined,
+    hostEnv: Record<string, string>,
+  ): Promise<{ ok: true; version: string } | { ok: false; reason: string }> {
+    const { command, args } = this.codexCommand;
+    return new Promise((resolve) => {
+      const opts = { timeout: 30_000, cwd: this.cwd, env: hostEnv };
+      execFile(resolved ?? command, [...args, "--version"], opts, (err, stdout) => {
         if (err) {
           const code = (err as NodeJS.ErrnoException).code;
           resolve({
@@ -462,37 +535,30 @@ export class CodexHarness implements AgentHarness {
           resolve({ ok: false, reason: `codex ${m[1]} is too old; sweny needs >= ${MIN_CODEX_VERSION}` });
           return;
         }
-        this.version = m[1];
-        // Newer than the tested version: the declared capabilities may no longer hold. Warn once
-        // (the result is cached per instance). Not `degraded`: that is a per-node policy report and
-        // there is no node yet; not a refusal: it would break anyone who chose `latest` on purpose.
-        if (compareVersions(m[1], TESTED_CODEX_VERSION) > 0) {
-          this.logger.warn(
-            `codex ${m[1]} is newer than ${TESTED_CODEX_VERSION}, the version sweny's Codex capabilities were tested against; ` +
-              `flags and event shapes may differ. Pin @openai/codex@${TESTED_CODEX_VERSION} (action input codex-version) for the tested behavior.`,
-          );
-        }
         resolve({ ok: true, version: m[1] });
       });
     });
-    return this.preflightResult;
   }
 
   /**
-   * `sweny check` (#532): the CLI and its version, a credential, the CLI's own
+   * `sweny check` (#532): the CLI and its version (resolved and parsed the way
+   * {@link preflight} does), a credential ({@link codexAuth}), the CLI's own
    * `codex login status`, and an upstream probe when an API key is set
-   * (`GET /models`: read-only, no model call). A ChatGPT login has no cheap
-   * upstream probe, so that line is skipped.
+   * (`GET /models`: read-only, no model call, no tokens). A ChatGPT login or
+   * an access token has no cheap upstream probe, so that line is skipped.
+   * Nothing is cached and no credential value is printed.
    */
   async diagnose(opts: HarnessDiagnoseOptions = {}): Promise<HarnessCheck[]> {
-    const env = opts.env ?? process.env;
+    const hostEnv = this.hostEnv(opts.env);
+    const env = this.loginEnv(opts.env);
     const timeoutMs = opts.timeoutMs ?? CHECK_TIMEOUT_MS;
-    const pre = await this.checkCli();
+    const resolved = resolveExecutable(this.codexCommand.command, hostEnv, this.cwd);
+    const pre = await this.probeVersion(resolved, hostEnv);
     const newer =
       pre.ok && compareVersions(pre.version, TESTED_CODEX_VERSION) > 0
         ? `(newer than ${TESTED_CODEX_VERSION}, the version sweny is tested against)`
         : undefined;
-    const checks: HarnessCheck[] = [cliCheck("Agent CLI (codex)", this.codexCommand.command, env, pre, newer)];
+    const checks: HarnessCheck[] = [cliCheck("Agent CLI (codex)", resolved, pre, newer)];
 
     const auth = codexAuth(env, opts.hasLogin ?? (() => hasCodexLogin(env)));
     checks.push(
@@ -500,60 +566,64 @@ export class CodexHarness implements AgentHarness {
         ? { name: "Agent auth (codex)", status: "ok", detail: `via ${auth.via}` }
         : { name: "Agent auth (codex)", status: "fail", detail: auth.reason },
     );
+    // No credential at all: the auth line already names `codex login`; asking the CLI adds nothing.
+    if (!auth.ok) return checks;
 
-    if (pre.ok) checks.push(await this.loginStatus(env, timeoutMs, auth.ok ? auth.via : undefined));
+    if (pre.ok) checks.push(await this.loginStatus(resolved, hostEnv, timeoutMs, auth.via));
 
     const keyVar = ["CODEX_API_KEY", "OPENAI_API_KEY"].find((k) => env[k]?.trim());
-    if (keyVar) {
-      checks.push(await checkOpenAI(env[keyVar]!.trim(), keyVar, env.OPENAI_BASE_URL || undefined, timeoutMs));
-    } else if (auth.ok) {
-      checks.push({
-        name: "OpenAI API (codex agent)",
-        status: "skip",
-        detail: `auth via ${auth.via}, skipping upstream API check`,
-      });
-    }
+    checks.push(
+      keyVar
+        ? await checkOpenAI(env[keyVar].trim(), keyVar, hostEnv.OPENAI_BASE_URL || undefined, timeoutMs)
+        : { name: "OpenAI API (codex agent)", status: "skip", detail: `auth via ${auth.via}, skipping upstream API check` },
+    );
     return checks;
   }
 
   /**
-   * `codex login status`: exit 0 when a login is stored, 1 when not
+   * `codex login status`: exit 0 when a login is stored, non-zero when not
    * (codex-rs/cli/src/login.rs). Its output can carry a masked key, so it is
    * classified, never printed.
    */
   private async loginStatus(
-    env: Record<string, string | undefined>,
+    resolved: string | undefined,
+    env: Record<string, string>,
     timeoutMs: number,
-    via: string | undefined,
+    via: string,
   ): Promise<HarnessCheck> {
     const name = "Agent login (codex)";
     const { command, args } = this.codexCommand;
-    const r = await runCli(command, [...args, "login", "status"], { env, timeoutMs });
-    const out = `${r.stdout}\n${r.stderr}`;
+    const r = await runCli(resolved ?? command, [...args, "login", "status"], { env, cwd: this.cwd, timeoutMs });
     if (r.code === 0) {
-      const how = /ChatGPT/i.test(out) ? "with ChatGPT" : /API key/i.test(out) ? "with an API key" : "";
-      return { name, status: "ok", detail: `logged in${how ? ` ${how}` : ""} (codex login status)` };
+      const out = `${r.stdout}\n${r.stderr}`;
+      const how = /ChatGPT/i.test(out) ? " with ChatGPT" : /API key/i.test(out) ? " with an API key" : "";
+      return { name, status: "ok", detail: `logged in${how} (codex login status)` };
     }
     if (r.code === null) return { name, status: "fail", detail: `codex login status did not finish: ${r.error}` };
     // Not logged in. Fine when an env credential carries auth instead.
-    if (via && via !== "codex login") {
-      return { name, status: "skip", detail: `no stored login; Codex authenticates with ${via}` };
+    if (via !== "codex login") {
+      return { name, status: "skip", detail: `no stored login (codex login status); Codex authenticates with ${via}` };
     }
     return {
       name,
       status: "fail",
-      detail: "codex login status: not logged in. Run `codex login`, or set CODEX_API_KEY or OPENAI_API_KEY",
+      detail: "codex login status: not logged in, though auth.json exists. Run `codex login` again",
     };
   }
 
   /**
    * Env for the Codex process: scoped like Claude Code's, with Codex's auth
-   * vars instead of Anthropic's. Skill credentials are dropped either way
-   * ({@link finishAgentEnv}) unless the node granted them with `agent_env`.
+   * vars instead of Anthropic's, then the caller's `envRemove` / `env`
+   * ({@link applyEnvOverlay}). Skill credentials are dropped either way, overlaid
+   * ones included ({@link finishAgentEnv}), unless the node granted them with `agent_env`.
    */
   private buildEnv(access?: Pick<AgentAccess, "envVars" | "withhold">): Record<string, string> {
+    const overlay = this.envOverlay;
+    const removed = new Set(overlay?.remove ?? []);
+    // `envRemove` goes first, before the OPENAI_API_KEY alias, so a removed OPENAI_API_KEY is not
+    // copied; a removed CODEX_API_KEY made by the alias is dropped again with the overlay below.
     const full: Record<string, string> = Object.fromEntries(
-      Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
+      Object.entries(process.env).filter((e): e is [string, string] => e[1] != null && !removed.has(e[0])),
     );
     const authed = resolveCodexAuthEnv(full);
     const passthrough = this.envPassthrough ?? parseList(process.env.SWENY_ENV_PASSTHROUGH);
@@ -568,6 +638,15 @@ export class CodexHarness implements AgentHarness {
       });
       reportWithheldEnv(scoped.withheld, this.logger);
       env = scoped.env;
+    }
+    if (overlay) {
+      env = applyEnvOverlay(env, overlay, CODEX_CREDENTIAL_VARS);
+      if (CODEX_CREDENTIAL_VARS.some((c) => Object.hasOwn(overlay.env, c))) {
+        // An overlaid OPENAI_API_KEY stands in for CODEX_API_KEY like an inherited one, and is then
+        // dropped, as scoping drops an inherited one: Codex reads only CODEX_API_KEY.
+        if (!env.CODEX_API_KEY && overlay.env.OPENAI_API_KEY) env.CODEX_API_KEY = overlay.env.OPENAI_API_KEY;
+        delete env.OPENAI_API_KEY;
+      }
     }
     return finishAgentEnv(env, { access, keep: CODEX_AUTH_VARS, passthrough, logger: this.logger }).env;
   }
@@ -648,7 +727,7 @@ export class CodexHarness implements AgentHarness {
     if (opts.sandbox === "workspace-write") {
       args.push(...cfg("sandbox_workspace_write.network_access", opts.network));
     }
-    const baseUrl = process.env.OPENAI_BASE_URL;
+    const baseUrl = this.hostEnv().OPENAI_BASE_URL;
     if (baseUrl) args.push(...cfg("openai_base_url", baseUrl));
     return args;
   }
@@ -1067,9 +1146,9 @@ export class CodexHarness implements AgentHarness {
         const prep = await prepareAgentSpawn({
           caps: this.capabilities,
           policy,
-          spawn: { command: this.codexCommand.command, args: argsFor(withSchema), env, cwd: this.cwd },
+          spawn: { command: this.cliPath(), args: argsFor(withSchema), env, cwd: this.cwd },
           wrapper: wrapper ?? null,
-          harnessEgress: codexBackendHosts(),
+          harnessEgress: codexBackendHosts(this.hostEnv()),
           env: process.env,
         });
         degraded = prep.degraded;
@@ -1202,13 +1281,15 @@ export class CodexHarness implements AgentHarness {
       "-",
     ];
     const out = await this.exec({
-      spawn: { command: this.codexCommand.command, args, env: this.buildEnv(), cwd: this.cwd },
+      spawn: { command: this.cliPath(), args, env: this.buildEnv(), cwd: this.cwd },
       prompt: req.prompt,
       timeoutMs: req.timeoutMs,
       signal: req.signal,
       // Classification calls use no tools; any tool call is over budget.
       maxToolCalls: 0,
     });
+    // A completion that failed was still billed: report before the outcome.
+    reportCompletionUsage(req.onUsage, out.usage, this.logger);
     if (out.spawnError) return failClosed(`codex could not start: ${out.spawnError}`);
     if (out.abortReason === "timeout") return failClosed(`timed out after ${req.timeoutMs}ms`);
     if (out.abortReason === "signal") return failClosed("aborted");

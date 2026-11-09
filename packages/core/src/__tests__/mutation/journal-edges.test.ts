@@ -1665,7 +1665,14 @@ describe("wrapWrites", () => {
   it("finds a pending linear issue by its marker", async () => {
     const args = { teamId: "T", title: "x", description: "d" };
     const key = keyOf("linear_create_issue", args);
-    const node = { id: "i1", identifier: "OFF-1", url: "https://linear.app/x", title: "x", junk: 1 };
+    const node = {
+      id: "i1",
+      identifier: "OFF-1",
+      url: "https://linear.app/x",
+      title: "x",
+      description: `d <!-- sweny-output ${markerToken(key)} -->`,
+      junk: 1,
+    };
     const fake = fakeProvider(
       "linear",
       { linear_create_issue: {} },
@@ -1676,7 +1683,9 @@ describe("wrapWrites", () => {
       issueCreate: { issue: { id: "i1", identifier: "OFF-1", url: "https://linear.app/x" } },
     });
     expect(fake.writes).toStrictEqual([]);
-    expect(fake.reads).toStrictEqual([{ tool: "linear_search_issues", args: { query: markerToken(key), limit: 5 } }]);
+    expect(fake.reads).toStrictEqual([
+      { tool: "linear_search_issues", args: { query: markerToken(key), limit: 5, withDescription: true } },
+    ]);
     const empty = fakeProvider(
       "linear",
       { linear_create_issue: {} },
@@ -1684,6 +1693,24 @@ describe("wrapWrites", () => {
     );
     await call(pendingJournal({ pending: [key] }).j, empty, "linear_create_issue", args);
     expect(empty.writes).toHaveLength(1);
+    // A fuzzy search hit without this write's marker is not ours: the write is sent, not taken as applied.
+    const loose = fakeProvider(
+      "linear",
+      { linear_create_issue: {} },
+      { linear_search_issues: { searchIssues: { nodes: [{ id: "other", description: "unrelated" }] } } },
+    );
+    await call(pendingJournal({ pending: [key] }).j, loose, "linear_create_issue", args);
+    expect(loose.writes).toHaveLength(1);
+    // A hit with no description cannot be checked: uncertain, not sent and not taken as applied.
+    const bare = fakeProvider(
+      "linear",
+      { linear_create_issue: {} },
+      { linear_search_issues: { searchIssues: { nodes: [{ id: "other" }] } } },
+    );
+    await expect(call(pendingJournal({ pending: [key] }).j, bare, "linear_create_issue", args)).rejects.toThrow(
+      "cannot confirm",
+    );
+    expect(bare.writes).toHaveLength(0);
   });
 
   it("finds a pending linear comment by its marker in the issue's comments", async () => {

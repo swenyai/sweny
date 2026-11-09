@@ -60,7 +60,8 @@ import { asClaude } from "./harness/compat.js";
 import { budgetGate, isToolClass, policyGate, resolveHarnessPolicy } from "./harness/policy.js";
 import type { HarnessPolicyMode } from "./harness/policy.js";
 import type { AgentHarness } from "./harness/types.js";
-import { BudgetGuard, describeOverrun, minLimits, spendOf, toLimits } from "./budget.js";
+import { BudgetGuard, BudgetRefusal, describeOverrun, minLimits, spendOf, toLimits } from "./budget.js";
+import type { SpendKind } from "./budget.js";
 import { createRunDecider, wantsDecider } from "./decider.js";
 import type { DeciderOperatorConfig, RunDecider } from "./decider.js";
 import { redact, runSecretValues } from "./journal.js";
@@ -100,7 +101,11 @@ export interface ExecuteOptions {
   logger?: Logger;
   /** Working directory for resolving file Sources (default: process.cwd()) */
   cwd?: string;
-  /** Environment variables for Source resolution auth lookup */
+  /**
+   * The env SWEny itself reads for this run: skill config, `context:` Source
+   * auth, the branch pusher's token and the run's identity. It never reaches
+   * the agent; to change the agent's env, pass `env` / `envRemove` to the harness.
+   */
   env?: NodeJS.ProcessEnv;
   /** Host → env-var-name map for URL Source authentication */
   fetchAuth?: Record<string, string>;
@@ -237,6 +242,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     };
     results.set(at.node, result);
     trace.steps.push({ node: at.node, status: "failed", iteration: at.iteration });
+    at.syncSpend?.();
     safeObserve(options.observer, { type: "node:exit", node: at.node, result }, logger);
     logger.error(`  ${err.message}`, { node: at.node });
     journalDegraded();
@@ -249,6 +255,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
 interface VisitCursor {
   node: string | null;
   iteration: number;
+  /** Brings `trace.spend` up to date with the run's budget guard. */
+  syncSpend?: () => void;
 }
 
 async function executeRun(
@@ -297,6 +305,132 @@ async function executeRun(
   // Spend budgets (#449): the run ceiling is the lower of the workflow's
   // `budget` and the caller's (`--max-tokens`, `--max-cost`).
   const budgetGuard = new BudgetGuard(minLimits(toLimits(workflow.budget), toLimits(options.budget)));
+  // The executor's own completions (judge, route, retry reflection, safe-output
+  // screen) report usage into the same guard as node runs, under their kind,
+  // and into the journal so a resume keeps them. Every call passes a gate
+  // first: once a ceiling is reached (or a usage record could not be
+  // journaled) the call is refused, not made. `sink` counts one completion's
+  // total and keeps any breach for the caller; it never throws into the
+  // adapter, so a journal failure inside it is held in `meterFault` and
+  // rethrown by the executor at the next step.
+  let meterFault: unknown;
+  const throwIfMeterFault = () => {
+    if (meterFault) throw meterFault;
+  };
+  const metered = (refuse: () => BudgetOverrun | undefined, sink: (u: NodeUsage) => void): Claude => {
+    const gate = () => {
+      throwIfMeterFault();
+      const stop = refuse();
+      if (stop) throw new BudgetRefusal(stop);
+    };
+    return {
+      defaultJudgeModel: claude.defaultJudgeModel,
+      run: (req) => claude.run(req),
+      evaluate: async (opts) => {
+        gate();
+        return claude.evaluate({ ...opts, onUsage: sink });
+      },
+      ask: async (opts) => {
+        gate();
+        return claude.ask({ ...opts, onUsage: sink });
+      },
+    };
+  };
+  const journalMeter = (kind: Exclude<SpendKind, "node">, node: string, iteration: number, u: NodeUsage) => {
+    if (!journal?.meter || meterFault) return;
+    try {
+      journal.meter(kind, node, iteration, u);
+    } catch (err) {
+      meterFault = err;
+    }
+  };
+  const syncSpend = () => {
+    if (budgetGuard.hasMeteredCalls) trace.spend = budgetGuard.breakdown();
+  };
+  at.syncSpend = syncSpend;
+  // A route call that crossed the run budget, or was refused because the run
+  // budget was already spent. The next node is then refused at its start; a
+  // route that ends the run fails the node it left.
+  let routeBreach: BudgetOverrun | undefined;
+  let routingFrom: { node: string; iteration: number } | undefined;
+  const routeClaude = metered(
+    () => (routeBreach ??= budgetGuard.runExhausted()),
+    (u) => {
+      const b = budgetGuard.meter("route", u);
+      if (routingFrom) journalMeter("route", routingFrom.node, routingFrom.iteration, u);
+      syncSpend();
+      if (b) {
+        routeBreach ??= b;
+        logger.warn(`  ${describeOverrun(b)}; the next node does not start`);
+      }
+    },
+  );
+  // Routing from `from`. `budgetStop` says the run ended there on the budget:
+  // the caller then writes no route record, so the journal keeps the visit
+  // ended but unrouted. A resume (with a larger cap) then routes a visit that
+  // succeeded again, like a crash between node:end and the route; a visit
+  // that had failed (`on_fail: continue`) is run again.
+  const advance = async (from: string): Promise<Routed & { budgetStop?: true }> => {
+    routeBreach = undefined;
+    routingFrom = { node: from, iteration: nodeRunCounts.get(from) ?? 1 };
+    // No paid routing once the run budget is spent: the decider (an HTTP
+    // model call) is skipped like the agent's route evaluation, which the gate refuses.
+    const spentBeforeRouting = budgetGuard.runExhausted();
+    if (spentBeforeRouting && routing.decider && !trace.deciderOff) trace.deciderOff = "run budget spent";
+    const routeOpts: AbortOptions = spentBeforeRouting ? { ...routing, decider: null } : routing;
+    let routed: Routed;
+    let refused = false;
+    try {
+      routed = await advanceFromNode(
+        workflow,
+        from,
+        results,
+        input,
+        routeClaude,
+        observer,
+        edgeCounts,
+        logger,
+        trace,
+        routeOpts,
+      );
+    } catch (err) {
+      throwIfMeterFault();
+      if (!(err instanceof BudgetRefusal)) throw err;
+      logger.warn(`  ${describeOverrun(err.breach)}; not routing from '${from}'`, { node: from });
+      routed = { next: null };
+      refused = true;
+    } finally {
+      routingFrom = undefined;
+    }
+    throwIfMeterFault();
+    const breach = routeBreach;
+    routeBreach = undefined;
+    if (breach && routed.next === null) {
+      // No node is left to refuse: the stop lands on the node the route left.
+      const prior = results.get(from);
+      if (prior && !prior.budget) {
+        const error = describeOverrun(breach, from);
+        // A node that had already failed keeps its own error; the budget reason has its own field.
+        const priorError = (prior.data as Record<string, unknown> | undefined)?.error;
+        const amended: NodeResult = {
+          ...prior,
+          status: "failed",
+          data: { ...prior.data, error: priorError ?? error, budget_error: error, budget_exceeded: true },
+          budget: breach,
+        };
+        results.set(from, amended);
+        // The trace and observers already saw the visit end: they get the amended result as an amendment, not a second exit.
+        const iteration = nodeRunCounts.get(from) ?? 1;
+        const step = [...trace.steps].reverse().find((st) => st.node === from && st.iteration === iteration);
+        if (step) step.status = "failed";
+        safeObserve(observer, { type: "node:amended", node: from, result: amended }, logger);
+      }
+      // Routing already announced its own end (an invalid target); a refused route announced nothing.
+      if (refused) safeObserve(observer, { type: "route", from, to: "(end)", reason: "budget exceeded" }, logger);
+      return { ...routed, budgetStop: true };
+    }
+    return routed;
+  };
   const harnessPolicy = options.harnessPolicy ?? resolveHarnessPolicy(runEnv);
   // #473: a checkout that persisted a git credential (actions/checkout's
   // default). Each harness masks it for read-only and staged nodes, or reports
@@ -457,19 +591,8 @@ async function executeRun(
       logger.info(`  replayed from the run journal: ${replay.result.status}`, { node: currentId });
       const from: string = currentId;
       if (replay.next === undefined) {
-        const routed = await advanceFromNode(
-          workflow,
-          from,
-          results,
-          input,
-          claude,
-          observer,
-          edgeCounts,
-          logger,
-          trace,
-          routing,
-        );
-        journal?.route(from, routed.next, routed.rung, decider?.counters);
+        const routed = await advance(from);
+        if (!routed.budgetStop) journal?.route(from, routed.next, routed.rung, decider?.counters);
         currentId = routed.next;
       } else {
         if (replay.next !== null) {
@@ -494,6 +617,32 @@ async function executeRun(
       continue;
     }
     journal?.nodeStart(currentId, iteration);
+
+    // The run budget is already spent (by a route call, or by the node before
+    // a skipped one): this node neither starts nor routes on, whatever its
+    // `requires` say, so a skipped node cannot carry the run past the stop.
+    // A checkpointed visit (resume) already ran its agent: its writes still apply.
+    const runSpent = replay?.kind === "checkpoint" ? undefined : budgetGuard.runExhausted();
+    if (runSpent) {
+      const error = describeOverrun(runSpent, currentId);
+      const result: NodeResult = {
+        status: "failed",
+        data: { error, budget_exceeded: true },
+        toolCalls: [],
+        budget: runSpent,
+      };
+      results.set(currentId, result);
+      journal?.nodeEnd(currentId, iteration, result, writeState);
+      trace.steps.push({ node: currentId, status: "failed", iteration });
+      safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
+      logger.warn(`  ${error}; not starting the node`, { node: currentId });
+      safeObserve(
+        observer,
+        { type: "route", from: currentId, to: "(end)", reason: "node failed (budget exceeded)" },
+        logger,
+      );
+      break;
+    }
 
     // Gather tools from the node's skills, then apply the node's optional
     // skill-tool filter (`tools.allow` / `tools.deny`). Filtered tools are
@@ -615,19 +764,8 @@ async function executeRun(
 
       // Apply normal routing rules (dry run gate + resolveNext).
       // TODO: dedupe with requires path — see advanceFromNode helper below
-      const routed = await advanceFromNode(
-        workflow,
-        currentId,
-        results,
-        input,
-        claude,
-        observer,
-        edgeCounts,
-        logger,
-        trace,
-        routing,
-      );
-      journal?.route(currentId, routed.next, routed.rung, decider?.counters);
+      const routed = await advance(currentId);
+      if (!routed.budgetStop) journal?.route(currentId, routed.next, routed.rung, decider?.counters);
       currentId = routed.next;
       continue;
     }
@@ -741,6 +879,12 @@ async function executeRun(
     // run's. The gate says whether the harness can keep them; a strict policy
     // refuses the node when it cannot report the budgeted unit at all.
     const nodeBudget = budgetGuard.node(toLimits(node.budget));
+    // Resume: this visit's spend before the crash counts against its node
+    // budget again (the run total already has it from the seed), whether the
+    // write stage is replayed or the visit runs again.
+    const visitPrior =
+      replay?.kind === "checkpoint" ? replay.spent : replay ? undefined : journal?.visitSpent?.(currentId, iteration);
+    if (visitPrior) nodeBudget.restore(visitPrior);
     const budgetOn = budgetGuard.active(nodeBudget.limits);
     const budgetCheck =
       budgetOn && options.harness
@@ -752,6 +896,31 @@ async function executeRun(
         : undefined;
     // A budget stop: fail_soft and on_fail: continue never apply, the run halts.
     let budgetStop: BudgetOverrun | undefined;
+    // This visit's own completions (judge scoring, retry reflection, output
+    // screen) count against the node and the run; a crossing is kept here.
+    let meterBreach: BudgetOverrun | undefined;
+    const visitId: string = currentId;
+    const visitClaude = (kind: Exclude<SpendKind, "node">): Claude =>
+      metered(
+        // Latched: once refused, every later call of this visit is refused too.
+        () => (meterBreach ??= budgetOn ? nodeBudget.exhausted() : undefined),
+        (u) => {
+          const b = nodeBudget.meter(kind, u);
+          journalMeter(kind, visitId, iteration, u);
+          syncSpend();
+          meterBreach ??= b;
+        },
+      );
+    const judgeClaude = visitClaude("judge");
+    const reflectClaude = visitClaude("reflect");
+    const screenClaude = visitClaude("screen");
+    // A ceiling reached before a paid executor call (judges, reflection): the
+    // node fails with the budget reason instead of making the call.
+    const stopAtCeiling = (r: NodeResult, b: BudgetOverrun): NodeResult => {
+      const error = describeOverrun(b, visitId);
+      logger.warn(`  ${error}`, { node: currentId });
+      return { ...r, status: "failed", data: { ...r.data, error, budget_exceeded: true }, budget: b };
+    };
     let previous: NodeResult | undefined;
 
     while (true) {
@@ -760,6 +929,8 @@ async function executeRun(
         // write intents; the write stage below skips what the journal shows was already applied.
         ({ result, agentRunFailed, attempt } = replay);
         intents.push(...replay.intents);
+        // The visit's own spend before the crash counts against its node budget
+        // again (the run total already has it from the seed).
         break;
       }
       const refusal = gate?.refuse ?? budgetCheck?.refuse;
@@ -811,23 +982,21 @@ async function executeRun(
       }
       const journalUsage = journal?.usage
         ? (u: NodeUsage) => {
-            liveUsage = { ...liveUsage, ...u };
             if (journalFault) return;
             try {
-              journal!.usage!(usageNode, iteration, usageAttempt, liveUsage, false);
+              journal!.usage!(usageNode, iteration, usageAttempt, liveUsage!, false);
             } catch (err) {
               journalFault = err;
               journalStop?.abort(err);
             }
           }
         : undefined;
-      const onUsage =
-        attemptBudget || journalUsage
-          ? (u: NodeUsage) => {
-              attemptBudget?.onUsage(u);
-              journalUsage?.(u);
-            }
-          : undefined;
+      // Live usage is always collected: with no limit it still feeds the split by kind.
+      const onUsage = (u: NodeUsage) => {
+        liveUsage = { ...liveUsage, ...u };
+        attemptBudget?.onUsage(u);
+        journalUsage?.(u);
+      };
       try {
         result = await claude.run({
           nodeId: currentId,
@@ -845,13 +1014,15 @@ async function executeRun(
           ...(nodePolicy ? { policy: nodePolicy } : {}),
           ...(readOnlyNode || stageOutputs ? {} : { mcpServers: skillMcpServers }),
           ...(readOnlyNode ? { readOnly: true } : {}),
-          ...(onUsage ? { onUsage } : {}),
+          onUsage,
           onProgress: (message) => {
             safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
           },
         });
         // Commit the attempt's spend before anything here can throw (#549); `finish` below reads the breach.
-        attemptBudget?.settle(result.usage);
+        if (attemptBudget) attemptBudget.settle(result.usage);
+        // No limit to enforce: still count the run, so the split by kind is complete.
+        else budgetGuard.meter("node", attemptSpend(result.usage, liveUsage));
       } catch (err) {
         if (journalFault) throw journalFault;
         // The attempt ended abnormally (abort, timeout, harness error): whether its agent was
@@ -1000,13 +1171,34 @@ async function executeRun(
         // observers and downstream context see the contract violation.
         result.evals = [failure];
       } else {
-        const evalResults = await evaluateAll(node.eval, result, {
-          aliases: toolAliases,
-          claude,
-          node,
-          workflow,
-        });
-        result.evals = evalResults;
+        // With a budget on, judges run one at a time, so a crossing (or a
+        // ceiling already reached) refuses the rest instead of all starting at once.
+        let evalResults: EvalResult[] | undefined;
+        try {
+          evalResults = await evaluateAll(node.eval, result, {
+            aliases: toolAliases,
+            claude: judgeClaude,
+            node,
+            workflow,
+            sequential: budgetOn,
+            ...(signal ? { signal } : {}),
+            ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+          });
+        } catch (err) {
+          throwIfMeterFault();
+          if (!(err instanceof BudgetRefusal)) throw err;
+        }
+        throwIfMeterFault();
+        if (evalResults) result.evals = evalResults;
+        if (meterBreach || !evalResults) {
+          // Judge spend crossed a ceiling, or a judge was refused at one (the
+          // refusal latched it): the node fails whatever the verdicts said.
+          const stop = meterBreach ?? nodeBudget.exhausted() ?? budgetGuard.runExhausted();
+          result = stop ? stopAtCeiling(result, stop) : result;
+          agentRunFailed = true;
+          budgetStop = stop;
+          break;
+        }
         outcome = aggregateEval(evalResults, node.eval_policy ?? "all_pass");
       }
       if (outcome.pass) break;
@@ -1050,13 +1242,21 @@ async function executeRun(
         evalFailures: outcome.failures,
         toolCalls: result.toolCalls,
         nodeInstruction: resolvedInstruction,
-        claude,
+        claude: reflectClaude,
         logger,
         context,
         model: nodeModel,
         signal,
         timeoutMs,
       });
+      throwIfMeterFault();
+      // A reflection refused at a ceiling (or one whose spend crossed it): no further attempt.
+      if (meterBreach) {
+        result = stopAtCeiling(result, meterBreach);
+        agentRunFailed = true;
+        budgetStop = meterBreach;
+        break;
+      }
       currentInstruction = `${preamble}\n\n---\n\n${instruction}`;
       safeObserve(
         observer,
@@ -1113,19 +1313,35 @@ async function executeRun(
           state: writeState,
           logger,
           input: runInput,
-          screen: async (writes) =>
-            claude.ask({
+          ...(journal?.reconcile
+            ? {
+                reconcile: (sk: Skill, tool: string, args: unknown, ctx: ToolContext) =>
+                  journal.reconcile!(visitId, iteration, sk, tool, args, ctx),
+              }
+            : {}),
+          screen: async (writes) => {
+            const verdict = await screenClaude.ask({
               instruction: SAFE_OUTPUT_SCREEN_INSTRUCTION,
               context: { writes },
               model: nodeModel,
               signal,
               timeoutMs,
-            }),
+            });
+            // A screen whose spend crossed a ceiling, or whose meter record the
+            // journal could not write, allows nothing: the writes are vetoed.
+            return meterBreach || meterFault ? null : verdict;
+          },
         });
+        throwIfMeterFault();
         result = { ...result, outputs: stage.receipts };
         if (stage.error) {
           logger.warn(`  ${stage.error}`, { node: currentId });
           result = { ...result, status: "failed", data: { ...result.data, error: stage.error } };
+        }
+        if (meterBreach && !budgetStop) {
+          // The screen's spend crossed a ceiling: the node fails and the run halts.
+          result = stopAtCeiling(result, meterBreach);
+          budgetStop = meterBreach;
         }
       } else if (intents.length > 0) {
         result = {
@@ -1162,19 +1378,8 @@ async function executeRun(
 
     // Dry run gate + routing — shared with requires path via advanceFromNode helper.
     const routedFrom: string = currentId;
-    const routed = await advanceFromNode(
-      workflow,
-      currentId,
-      results,
-      input,
-      claude,
-      observer,
-      edgeCounts,
-      logger,
-      trace,
-      routing,
-    );
-    journal?.route(routedFrom, routed.next, routed.rung, decider?.counters);
+    const routed = await advance(routedFrom);
+    if (!routed.budgetStop) journal?.route(routedFrom, routed.next, routed.rung, decider?.counters);
     currentId = routed.next;
   }
 
@@ -1187,10 +1392,26 @@ async function executeRun(
     logger,
   );
 
+  syncSpend();
   return { results, trace };
 }
 
 // ─── Internals ───────────────────────────────────────────────────
+
+/**
+ * An attempt's spend as usage: per unit, the larger of the final report and
+ * the last live one (what `BudgetAttempt.settle` commits), so the split is the
+ * same with and without a limit. Undefined when neither reported anything.
+ */
+function attemptSpend(final: NodeUsage | undefined, live: NodeUsage | undefined): NodeUsage | undefined {
+  const f = spendOf(final);
+  const l = spendOf(live);
+  const tokens = f.tokens === undefined && l.tokens === undefined ? undefined : Math.max(f.tokens ?? 0, l.tokens ?? 0);
+  const costUsd =
+    f.costUsd === undefined && l.costUsd === undefined ? undefined : Math.max(f.costUsd ?? 0, l.costUsd ?? 0);
+  if (tokens === undefined && costUsd === undefined) return undefined;
+  return { ...(tokens !== undefined ? { inputTokens: tokens } : {}), ...(costUsd !== undefined ? { costUsd } : {}) };
+}
 
 /**
  * Thrown when a conditional routing decision could not be made and there is

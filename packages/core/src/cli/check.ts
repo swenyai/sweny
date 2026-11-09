@@ -30,7 +30,11 @@ export interface CheckOptions {
    * (no workflows found), the legacy config-driven checks run.
    */
   scope?: ReadonlySet<string>;
-  /** A local Claude Code login exists, so no API key is required. */
+  /**
+   * Not read by the agent lines since #532: each harness probes its own stored
+   * login. Kept so existing callers compile; {@link validateCheckInputs} takes
+   * its own copy.
+   */
   claudeCodeLogin?: boolean;
   /** The agent harness to diagnose (test seam). Default: `createHarness(codingAgentProvider)`. */
   harness?: Pick<AgentHarness, "diagnose">;
@@ -128,7 +132,7 @@ export async function checkProviderConnectivity(config: CliConfig, opts: CheckOp
  */
 export async function checkAgent(
   config: CliConfig,
-  opts: Pick<CheckOptions, "claudeCodeLogin" | "harness" | "env"> = {},
+  opts: Pick<CheckOptions, "harness" | "env"> = {},
 ): Promise<CheckResult[]> {
   const agent = config.codingAgentProvider;
   const name = `Coding agent (${agent})`;
@@ -140,12 +144,7 @@ export async function checkAgent(
     return [{ name, status: "fail", detail: err instanceof Error ? err.message : String(err) }];
   }
   if (!harness.diagnose) return [{ name, status: "skip", detail: "This agent has no preflight checks" }];
-  return harness.diagnose({
-    env: agentCheckEnv(config, opts.env ?? process.env),
-    timeoutMs: CHECK_TIMEOUT_MS,
-    // `sweny check` detects the Claude Code login once, up front; other agents probe their own.
-    hasLogin: agent === "claude" ? () => !!opts.claudeCodeLogin : undefined,
-  });
+  return harness.diagnose({ env: agentCheckEnv(config, opts.env ?? process.env), timeoutMs: CHECK_TIMEOUT_MS });
 }
 
 /** Env for the agent checks: the process env, with the agent settings `.sweny.yml` can also carry. */

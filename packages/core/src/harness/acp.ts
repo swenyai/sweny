@@ -50,8 +50,12 @@ import * as path from "node:path";
 import type { JSONSchema, Logger, McpServerConfig, NodeResult, NodeUsage, ToolCall, ToolContext } from "../types.js";
 import { consoleLogger } from "../types.js";
 import {
+  agentEnvOverlay,
+  applyEnvOverlay,
   finishAgentEnv,
   heldCredentials,
+  overlaidProcessEnv,
+  resolveExecutable,
   parseList,
   reportWithheldEnv,
   resolveEnvScope,
@@ -60,6 +64,8 @@ import {
   withPushBlocked,
   mcpWithheld,
   type AgentAccess,
+  type AgentEnvOverlay,
+  type HarnessEnvOptions,
   type SandboxMode,
 } from "../agent-env.js";
 import type {
@@ -78,7 +84,7 @@ import type {
 import { ACP_CAPABILITIES } from "./capabilities.js";
 import { policyGate, resolveHarnessPolicy, TOOL_CLASSES, type HarnessPolicyMode } from "./policy.js";
 import { gitCredentialPolicy } from "../git-credentials.js";
-import { buildNodePrompt } from "./prompts.js";
+import { buildNodePrompt, reportCompletionUsage } from "./prompts.js";
 import { makeAbort } from "./abort.js";
 import { parseToolResultContent, schemaMismatches, summarizeToolError, tryParseJSON } from "./parse.js";
 import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
@@ -92,7 +98,7 @@ import {
 import { TOKEN_ENV } from "./tool-bridge/protocol.js";
 import { translateDenyNames } from "./codex.js";
 import { RPC_ERROR, RpcError, RpcPeer, splitCommandLine } from "./acp-rpc.js";
-import { resolveOnPath } from "./diagnose.js";
+import { diagnoseEnv } from "./diagnose.js";
 
 export { ACP_CAPABILITIES };
 
@@ -105,7 +111,7 @@ const PROCESS_EXITED = "agent process exited";
 /** Name of the MCP server that carries sweny's skill tools (the tool bridge). */
 const BRIDGE_SERVER = "sweny-core";
 
-export interface AcpHarnessOptions {
+export interface AcpHarnessOptions extends HarnessEnvOptions {
   /**
    * The agent to run: a command line (`"opencode acp"`, the part after `acp:`)
    * or an explicit `{command, args}`. Never run through a shell.
@@ -343,6 +349,7 @@ export class AcpHarness implements AgentHarness {
   private envPassthrough: string[] | undefined;
   private authVars: string[];
   private envScope: boolean | undefined;
+  private envOverlay: AgentEnvOverlay | undefined;
   private sandboxMode: SandboxMode | undefined;
   private sandboxWrapper: SandboxWrapper | null | undefined;
   private policyMode: HarnessPolicyMode;
@@ -376,6 +383,7 @@ export class AcpHarness implements AgentHarness {
     this.envPassthrough = opts.envPassthrough;
     this.authVars = opts.authVars ?? [];
     this.envScope = opts.envScope;
+    this.envOverlay = agentEnvOverlay(opts);
     this.sandboxMode = opts.sandbox;
     this.sandboxWrapper = opts.sandboxWrapper;
     this.policyMode = opts.policy ?? resolveHarnessPolicy(process.env, undefined, this.logger);
@@ -396,7 +404,8 @@ export class AcpHarness implements AgentHarness {
    * first run (`agentInfo.version`).
    */
   async preflight(): Promise<{ ok: true; version: string } | { ok: false; reason: string }> {
-    if (!resolveOnPath(this.agent.command, process.env)) return { ok: false, reason: this.notFoundReason() };
+    const found = resolveExecutable(this.agent.command, overlaidProcessEnv(this.envOverlay, this.authVars), this.cwd);
+    if (!found) return { ok: false, reason: this.notFoundReason() };
     return { ok: true, version: this.agentVersion };
   }
 
@@ -406,21 +415,27 @@ export class AcpHarness implements AgentHarness {
   }
 
   /**
-   * `sweny check` (#532): the command is on PATH, and the operator-named auth
-   * vars are set. The agent is not started (same reason as `preflight`), so
-   * its version and its own login are reported on the first run.
+   * `sweny check` (#532): the command resolves (the way {@link preflight}
+   * does), and the operator-named auth vars are set. The agent is not started
+   * (same reason as `preflight`), so its version and its own login are
+   * reported on the first run. No credential value is printed.
    */
   async diagnose(opts: HarnessDiagnoseOptions = {}): Promise<HarnessCheck[]> {
-    const env = opts.env ?? process.env;
-    const found = resolveOnPath(this.agent.command, env);
+    const env = diagnoseEnv(opts.env, this.envOverlay, this.authVars);
+    const cliName = `Agent CLI (${this.id})`;
+    const found = resolveExecutable(this.agent.command, env, this.cwd);
     const cli: HarnessCheck = found
-      ? { name: `Agent CLI (${this.id})`, status: "ok", detail: `${found} (the agent reports its version when a run starts)` }
-      : { name: `Agent CLI (${this.id})`, status: "fail", detail: this.notFoundReason() };
+      ? { name: cliName, status: "ok", detail: `${found} (the agent reports its version when a run starts)` }
+      : { name: cliName, status: "fail", detail: this.notFoundReason() };
     const authName = `Agent auth (${this.id})`;
     const missing = this.authVars.filter((v) => !env[v]?.trim());
     const auth: HarnessCheck =
       this.authVars.length === 0
-        ? { name: authName, status: "skip", detail: "ACP agents handle their own login; the agent reports a missing one on the first run" }
+        ? {
+            name: authName,
+            status: "skip",
+            detail: "ACP agents handle their own login; the agent reports a missing one when a run starts",
+          }
         : missing.length > 0
           ? { name: authName, status: "fail", detail: `Missing: ${missing.join(", ")}` }
           : { name: authName, status: "ok", detail: `set: ${this.authVars.join(", ")}` };
@@ -432,6 +447,8 @@ export class AcpHarness implements AgentHarness {
    * vars the operator named. Skill credentials are dropped either way
    * ({@link finishAgentEnv}) unless the node granted them with `agent_env`; an
    * operator-named auth var stays, and the gate counts it if it is a write token.
+   * The caller's `envRemove` / `env` are applied after scoping
+   * ({@link applyEnvOverlay}), before that credential rule.
    */
   private buildEnv(access?: Pick<AgentAccess, "envVars" | "withhold">): Record<string, string> {
     const full: Record<string, string> = Object.fromEntries(
@@ -450,6 +467,7 @@ export class AcpHarness implements AgentHarness {
       reportWithheldEnv(scoped.withheld, this.logger);
       env = scoped.env;
     }
+    env = applyEnvOverlay(env, this.envOverlay, this.authVars);
     return finishAgentEnv(env, { access, keep: this.authVars, passthrough, logger: this.logger }).env;
   }
 
@@ -1137,6 +1155,8 @@ export class AcpHarness implements AgentHarness {
       await prep.cleanup();
     }
     if (conv.agentVersion) this.agentVersion = conv.agentVersion;
+    // A completion that failed was still billed: report before the outcome.
+    if (conv.costUsd !== undefined) reportCompletionUsage(req.onUsage, { costUsd: conv.costUsd }, this.logger);
     if (conv.spawnError) return failClosed(`the ACP agent could not start: ${conv.spawnError}`);
     if (conv.abortReason === "timeout") return failClosed(`timed out after ${req.timeoutMs}ms`);
     if (conv.abortReason === "signal") return failClosed("aborted");

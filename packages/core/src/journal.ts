@@ -53,6 +53,9 @@
  *   route            the edge taken after the visit (null = the run ended), and the rung that chose it
  *   usage            spend of one agent attempt (cumulative; one per model turn that raised it, written
  *                    synchronously, and the final figure when the attempt returns)
+ *   meter            spend of one of the executor's own completions (judge, route, reflect, screen),
+ *                    with a unique call id, written when it is counted. Judge, reflect and screen
+ *                    sit inside the visit; route sits after its node:end, before its route record
  *   agent:unsandboxed the visit's agent ran without an enforced sandbox
  *   run:end          success | failed | crashed
  *
@@ -61,8 +64,9 @@
  * the node with the reason, so a resume never under-counts spend or repeats a
  * write the journal did not see.
  *
- * Spend: a resume seeds the run budget with every attempt's journaled usage,
- * from authenticated records only, so a crash never resets the whole-run ceiling.
+ * Spend: a resume seeds the run budget with every attempt's journaled usage
+ * and every metered completion, by kind, from authenticated records only, so
+ * a crash never resets the whole-run ceiling.
  *
  * Recovery: an unterminated tail that is not complete JSON (power loss
  * mid-append) is truncated. An unterminated tail that IS complete JSON is
@@ -109,7 +113,7 @@ import { isRefusal, refusalReason } from "./types.js";
 import type { SafeOutputIntent, WriteStageState } from "./safe-outputs.js";
 import { resolveNodePermissions } from "./node-policy.js";
 import { CURRENT_SPEC_VERSION } from "./migrations.js";
-import { spendOf, type Spend } from "./budget.js";
+import { spendOf, type SeedSpend, type Spend, type SpendKind } from "./budget.js";
 import type { DeciderCounters } from "./decider.js";
 
 /**
@@ -1095,8 +1099,14 @@ export interface ResumePlan {
   receipts: Map<string, OutputRecord>;
   /** Writes whose handler refused (`output:refused`, #544): replayed on resume, never taken for applied. */
   refusals: Map<string, OutputRecord>;
-  /** Spend every earlier attempt journaled: the run budget starts here on resume. */
-  priorSpend: Spend;
+  /** Spend every earlier attempt and metered completion journaled, by kind: the run budget starts here on resume. */
+  priorSpend: SeedSpend;
+  /**
+   * Spend journaled per visit (`node#iteration`): its agent attempts and its
+   * judge, reflect and screen calls, every segment. A checkpointed visit's
+   * node budget resumes from it.
+   */
+  visitSpend: Map<string, Spend>;
   /**
    * Nodes whose agent ran without an enforced sandbox in an earlier attempt.
    * Such an agent could read the run key, so the journal's spend and write
@@ -1120,9 +1130,13 @@ const RECORD_TYPES = new Set([
   "node:end",
   "route",
   "usage",
+  "meter",
   "agent:unsandboxed",
   "run:end",
 ]);
+
+/** The executor's own completions a `meter` record can name. */
+const METER_KINDS = new Set<string>(["judge", "route", "reflect", "screen"]);
 
 const isPosInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v > 0;
 const isName = (v: unknown): v is string => typeof v === "string" && v.length > 0;
@@ -1141,7 +1155,10 @@ const isCounters = (v: unknown): v is DeciderCounters =>
  * first; nothing but run:resume after run:end; a visit starts only where the
  * last route pointed (or the entry), or re-starts an unfinished or failed
  * visit after a resume; checkpoints, writes, usage and node:end only inside
- * the open visit; one route per finished visit, from that visit's node.
+ * the open visit; one route per finished visit, from that visit's node. A
+ * judge, reflect or screen meter record sits inside the open visit; a route
+ * meter record after the visit's node:end and before its route record (the
+ * route call is made then). Every meter record has its own call id.
  * Throws {@link JournalIntegrityError}.
  */
 export function checkRecordSequence(records: JournalRecord[]): void {
@@ -1162,6 +1179,7 @@ export function checkRecordSequence(records: JournalRecord[]): void {
   const visits = new Map<string, number>();
   const checkpointed = new Set<string>();
   const intentKeys = new Set<string>();
+  const meterCalls = new Set<string>();
   const inVisit = (r: JournalRecord) => {
     if (!cur || cur.ended) bad(r, "is outside any open node visit");
     if (r.node !== cur!.node || r.iteration !== cur!.iteration) {
@@ -1230,6 +1248,24 @@ export function checkRecordSequence(records: JournalRecord[]): void {
           bad(r, "has invalid amounts");
         }
         break;
+      case "meter": {
+        if (!METER_KINDS.has(r.kind as string)) bad(r, "has an unknown kind");
+        if (!isAmount(r.tokens) || !isAmount(r.cost_usd)) bad(r, "has invalid amounts");
+        if (!isName(r.call) || meterCalls.has(r.call as string)) bad(r, "has no call id, or one already used");
+        meterCalls.add(r.call as string);
+        if (r.kind !== "route") {
+          inVisit(r);
+          break;
+        }
+        if (!cur || !cur.ended || cur.routed) bad(r, "meters a route call outside a finished, unrouted visit");
+        if (r.node !== cur!.node || r.iteration !== cur!.iteration) {
+          bad(
+            r,
+            `names ${String(r.node)}#${String(r.iteration)}, but the visit being routed is ${cur!.node}#${cur!.iteration}`,
+          );
+        }
+        break;
+      }
       case "agent:unsandboxed":
         inVisit(r);
         break;
@@ -1293,11 +1329,19 @@ export function checkJournalAgainstWorkflow(records: JournalRecord[], workflow: 
  * Spend the journal shows: per agent attempt (of each run segment), the
  * largest cumulative usage it reported, live or final, summed.
  */
-function journaledSpend(records: JournalRecord[]): Spend {
+function journaledSpend(records: JournalRecord[]): SeedSpend {
   const perAttempt = new Map<string, Spend>();
+  const metered = new Map<SpendKind, Spend>();
   let segment = 1;
   for (const r of records) {
     if (r.type === "run:resume") segment++;
+    if (r.type === "meter") {
+      // One record per completion, each counted once (call ids are unique).
+      const kind = r.kind as SpendKind;
+      const prev = metered.get(kind) ?? { tokens: 0, costUsd: 0 };
+      metered.set(kind, { tokens: prev.tokens + (r.tokens as number), costUsd: prev.costUsd + (r.cost_usd as number) });
+      continue;
+    }
     if (r.type !== "usage") continue;
     const k = `${segment}|${visitKey(r.node as string, r.iteration as number)}|${String(r.attempt)}`;
     const prev = perAttempt.get(k) ?? { tokens: 0, costUsd: 0 };
@@ -1306,12 +1350,47 @@ function journaledSpend(records: JournalRecord[]): Spend {
       costUsd: Math.max(prev.costUsd, r.cost_usd as number),
     });
   }
-  const total: Spend = { tokens: 0, costUsd: 0 };
+  const node: Spend = { tokens: 0, costUsd: 0 };
   for (const s of perAttempt.values()) {
-    total.tokens += s.tokens;
-    total.costUsd += s.costUsd;
+    node.tokens += s.tokens;
+    node.costUsd += s.costUsd;
   }
-  return total;
+  if (metered.size === 0) return node;
+  const byKind: Partial<Record<SpendKind, Spend>> = { node: { ...node } };
+  const total: Spend = { ...node };
+  for (const [k, v] of metered) {
+    byKind[k] = v;
+    total.tokens += v.tokens;
+    total.costUsd += v.costUsd;
+  }
+  return { ...total, byKind };
+}
+
+/** Per visit: the largest usage of each agent attempt (per segment) plus its own judge, reflect and screen meters. */
+function visitSpendOf(records: JournalRecord[]): Map<string, Spend> {
+  const attempts = new Map<string, { visit: string; s: Spend }>();
+  const out = new Map<string, Spend>();
+  const add = (visit: string, s: Spend) => {
+    const prev = out.get(visit) ?? { tokens: 0, costUsd: 0 };
+    out.set(visit, { tokens: prev.tokens + s.tokens, costUsd: prev.costUsd + s.costUsd });
+  };
+  let segment = 1;
+  for (const r of records) {
+    if (r.type === "run:resume") segment++;
+    const visit = visitKey(r.node as string, r.iteration as number);
+    if (r.type === "meter" && r.kind !== "route") {
+      add(visit, { tokens: r.tokens as number, costUsd: r.cost_usd as number });
+    } else if (r.type === "usage") {
+      const k = `${segment}|${visit}|${String(r.attempt)}`;
+      const prev = attempts.get(k)?.s ?? { tokens: 0, costUsd: 0 };
+      attempts.set(k, {
+        visit,
+        s: { tokens: Math.max(prev.tokens, r.tokens as number), costUsd: Math.max(prev.costUsd, r.cost_usd as number) },
+      });
+    }
+  }
+  for (const { visit, s } of attempts.values()) add(visit, s);
+  return out;
 }
 
 /** Work out what a resume replays and where it picks up. Throws {@link JournalIntegrityError} for an impossible sequence. */
@@ -1466,6 +1545,7 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
     receipts,
     refusals,
     priorSpend: journaledSpend(records),
+    visitSpend: visitSpendOf(records),
     unsandboxed: [...new Set(records.filter((r) => r.type === "agent:unsandboxed").map((r) => String(r.node)))],
     ...(start.decider
       ? { decider: { ...start.decider, ...(deciderCounters ? { counters: { ...deciderCounters } } : {}) } }
@@ -1621,14 +1701,24 @@ async function probeProvider(
         return { state: "applied", output: toolName === "github_create_issue" ? hit : {} };
       }
       case "linear_create_issue": {
-        const out = (await callRead(skill, "linear_search_issues", { query: token, limit: 5 }, ctx)) as {
+        const out = (await callRead(
+          skill,
+          "linear_search_issues",
+          { query: token, limit: 5, withDescription: true },
+          ctx,
+        )) as {
           searchIssues?: { nodes?: Array<Record<string, unknown>> };
         };
         const nodes = out?.searchIssues?.nodes;
         if (!Array.isArray(nodes)) return { state: "unknown", reason: "search returned no result list" };
-        return nodes.length > 0
-          ? { state: "applied", output: { issueCreate: { issue: nodes[0] } } }
-          : { state: "absent" };
+        // Search is fuzzy: only an issue whose description carries this write's marker is ours.
+        const hit = nodes.find((n) => typeof n?.description === "string" && n.description.includes(token));
+        if (hit) return { state: "applied", output: { issueCreate: { issue: hit } } };
+        // A hit without a description cannot be checked for the marker: unknown, never assumed either way.
+        if (nodes.some((n) => typeof n?.description !== "string")) {
+          return { state: "unknown", reason: "search hits carry no description to check for the marker" };
+        }
+        return { state: "absent" };
       }
       case "linear_add_comment": {
         const out = (await callRead(skill, "linear_list_comments", { issueId: args.issueId }, ctx)) as {
@@ -1703,7 +1793,7 @@ export interface JournalCheckpoint {
 
 export type JournalReplay =
   | { kind: "complete"; result: NodeResult; next?: string | null; rung?: RouteRung }
-  | ({ kind: "checkpoint" } & JournalCheckpoint);
+  | ({ kind: "checkpoint"; spent?: Spend } & JournalCheckpoint);
 
 /**
  * The executor's view of a journal (`ExecuteOptions.journal`). A hook that
@@ -1718,6 +1808,22 @@ export interface ExecutionJournal {
   checkpoint(node: string, iteration: number, cp: JournalCheckpoint): void;
   /** The skill map the write stage applies through: write tools journaled and made idempotent. */
   wrapWrites(node: string, iteration: number, skills: Map<string, Skill>): Map<string, Skill>;
+  /** Spend an earlier segment journaled for this visit (resume): its node budget starts there. */
+  visitSpent?(node: string, iteration: number): Spend | undefined;
+  /**
+   * Resume: whether this write was applied before the crash, from its receipt
+   * or, for an outstanding intent, the provider's read-only probes (a found
+   * write is recorded as recovered). `unknown` when the probe could not tell
+   * and repeat writes are not allowed.
+   */
+  reconcile?(
+    node: string,
+    iteration: number,
+    skill: Skill,
+    tool: string,
+    args: unknown,
+    ctx: ToolContext,
+  ): Promise<"applied" | "unknown" | "absent">;
   nodeEnd(node: string, iteration: number, result: NodeResult, writeState: WriteStageState): void;
   /** The edge taken after a visit, and for a decision the rung that chose it (#357), so resume replays it. */
   route(from: string, to: string | null, rung?: RouteRung, decider?: DeciderCounters): void;
@@ -1726,10 +1832,16 @@ export interface ExecutionJournal {
    * attempt returned, otherwise a live report (written at once when it raises the spend).
    */
   usage?(node: string, iteration: number, attempt: number, usage: NodeUsage, final: boolean): void;
+  /**
+   * Spend of one of the executor's own completions (judge, route, reflect,
+   * screen), written when it is counted. `node`/`iteration` name the visit it
+   * belongs to; for a route call, the visit being routed from.
+   */
+  meter?(kind: Exclude<SpendKind, "node">, node: string, iteration: number, usage: NodeUsage): void;
   /** The visit's agent ran without an enforced sandbox: recorded so a resume can say so. */
   uncontained?(node: string, iteration: number): void;
-  /** Spend earlier attempts of this run already journaled (resume); the run budget starts from it. */
-  priorSpend?(): Spend | undefined;
+  /** Spend earlier attempts of this run already journaled (resume), by kind when known; the run budget starts from it. */
+  priorSpend?(): SeedSpend | undefined;
   /** Receipt `degraded` entries this journal adds to the run (e.g. `journal_unsandboxed`). */
   degraded?(): string[];
   /** The decider state earlier attempts of this run journaled (resume); undefined otherwise. */
@@ -2131,6 +2243,7 @@ export class RunJournal implements ExecutionJournal {
         intents: structuredClone(cp.intents),
         agentRunFailed: cp.agent_failed,
         attempt: cp.attempt,
+        ...(plan.visitSpend.has(k) ? { spent: { ...plan.visitSpend.get(k)! } } : {}),
       };
     }
     return undefined;
@@ -2188,6 +2301,20 @@ export class RunJournal implements ExecutionJournal {
     this.append("usage", { node, iteration, attempt, tokens, cost_usd: costUsd, final });
   }
 
+  /** Journal one metered completion, synchronously, before the executor acts on it. */
+  meter(kind: Exclude<SpendKind, "node">, node: string, iteration: number, usage: NodeUsage): void {
+    const s = spendOf(usage);
+    if (s.tokens === undefined && s.costUsd === undefined) return;
+    this.append("meter", {
+      kind,
+      call: crypto.randomUUID(),
+      node,
+      iteration,
+      tokens: s.tokens ?? 0,
+      cost_usd: s.costUsd ?? 0,
+    });
+  }
+
   uncontained(node: string, iteration: number): void {
     const k = visitKey(node, iteration);
     if (this.uncontainedVisits.has(k)) return;
@@ -2204,8 +2331,16 @@ export class RunJournal implements ExecutionJournal {
     ];
   }
 
-  priorSpend(): Spend | undefined {
-    return this.resume ? { ...this.resume.plan.priorSpend } : undefined;
+  priorSpend(): SeedSpend | undefined {
+    if (!this.resume) return undefined;
+    const p = this.resume.plan.priorSpend;
+    return {
+      tokens: p.tokens,
+      costUsd: p.costUsd,
+      ...(p.byKind
+        ? { byKind: Object.fromEntries(Object.entries(p.byKind).map(([k, v]) => [k, { ...v }])) as SeedSpend["byKind"] }
+        : {}),
+    };
   }
 
   /** Close the run: `run:end` (when the journal still works), then release the lock. Never throws. */
@@ -2233,12 +2368,61 @@ export class RunJournal implements ExecutionJournal {
     return out;
   }
 
+  visitSpent(node: string, iteration: number): Spend | undefined {
+    const s = this.resume?.plan.visitSpend.get(visitKey(node, iteration));
+    return s ? { ...s } : undefined;
+  }
+
+  /** Outputs of writes {@link reconcile} found on the provider, replayed by the write handler. */
+  private recoveredOutputs = new Map<string, unknown>();
+  /** Provider probes already made for a write key: the handler reuses reconcile's, never probes twice. */
+  private probes = new Map<string, ReturnType<typeof probeProvider>>();
+
+  async reconcile(
+    node: string,
+    iteration: number,
+    skill: Skill,
+    tool: string,
+    args: unknown,
+    ctx: ToolContext,
+  ): Promise<"applied" | "unknown" | "absent"> {
+    const plan = this.resume?.plan;
+    if (!plan) return "absent";
+    const key = canonicalHash({ node, iteration, tool, args });
+    if (plan.receipts.has(key) || this.recoveredOutputs.has(key)) return "applied";
+    const refusal = plan.refusals.get(key);
+    if (refusal && refusal.retry !== true) return "absent";
+    const pending = plan.intents.has(key);
+    if (!pending && !plan.checkpoints.has(visitKey(node, iteration))) return "absent";
+    const probe = await this.probe(key, tool, args, skill, ctx);
+    if (probe.state === "applied") {
+      const output = slimOutput(probe.output);
+      this.append("output:applied", { node, iteration, key, tool, output, recovered: true });
+      this.recoveredOutputs.set(key, output);
+      this.logger.info(`  run journal: ${tool} found on the provider; not re-sent`, { node });
+      return "applied";
+    }
+    return probe.state === "unknown" && pending && !this.resume?.allowRepeatWrites ? "unknown" : "absent";
+  }
+
+  private probe(key: string, tool: string, args: unknown, skill: Skill, ctx: ToolContext) {
+    const cached = this.probes.get(key);
+    if (cached) return cached;
+    // Look back from a little before the intent (clock skew between this host and the provider).
+    const intentAt = Date.parse(String(this.resume?.plan.intents.get(key)?.at ?? ""));
+    const since = Number.isFinite(intentAt) ? new Date(intentAt - 5 * 60_000).toISOString() : undefined;
+    const p = probeProvider(tool, (args ?? {}) as Record<string, unknown>, key, skill, ctx, since);
+    this.probes.set(key, p);
+    return p;
+  }
+
   private wrapTool(node: string, iteration: number, skill: Skill, tool: Tool): Tool {
     return {
       ...tool,
       handler: async (args: unknown, ctx: ToolContext) => {
         const key = canonicalHash({ node, iteration, tool: tool.name, args });
         const plan = this.resume?.plan;
+        if (this.recoveredOutputs.has(key)) return this.recoveredOutputs.get(key) ?? null;
         const receipt = plan?.receipts.get(key);
         if (receipt) {
           this.logger.info(`  run journal: ${tool.name} already applied before the crash; not re-sent`, { node });
@@ -2253,10 +2437,7 @@ export class RunJournal implements ExecutionJournal {
         const replayingStage = !!plan?.checkpoints.has(visitKey(node, iteration));
         const pending = plan?.intents.has(key) === true;
         if (pending || replayingStage) {
-          // Look back from a little before the intent (clock skew between this host and the provider).
-          const intentAt = Date.parse(String(plan?.intents.get(key)?.at ?? ""));
-          const since = Number.isFinite(intentAt) ? new Date(intentAt - 5 * 60_000).toISOString() : undefined;
-          const probe = await probeProvider(tool.name, (args ?? {}) as Record<string, unknown>, key, skill, ctx, since);
+          const probe = await this.probe(key, tool.name, args, skill, ctx);
           if (probe.state === "applied") {
             const output = slimOutput(probe.output);
             this.append("output:applied", { node, iteration, key, tool: tool.name, output, recovered: true });

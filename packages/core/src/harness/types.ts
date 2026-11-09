@@ -10,7 +10,7 @@
  */
 
 import type { AgentAccess } from "../agent-env.js";
-import type { Claude, Logger, NodeResult } from "../types.js";
+import type { Claude, Logger, NodeResult, NodeUsage } from "../types.js";
 
 export type HarnessId = "claude-code" | "mock" | "codex" | "pi" | "hermes" | "gemini" | `acp:${string}`;
 
@@ -164,6 +164,14 @@ export interface HarnessCompleteRequest {
    * logs ("claude.ask: ..." vs "claude.evaluate: ..."); it never changes the query.
    */
   purpose?: "ask" | "evaluate";
+  /**
+   * Called at most once per completion with that completion's total usage
+   * (not cumulative, unlike the run request's `onUsage`), before any failure
+   * check: a failed completion was still billed. An adapter that cannot report
+   * usage never calls it. Guard the call so a throwing hook never changes the
+   * result or repeats the completion (in-tree adapters use `reportCompletionUsage`).
+   */
+  onUsage?: (usage: NodeUsage) => void;
 }
 
 /**

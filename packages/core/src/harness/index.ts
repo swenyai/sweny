@@ -34,7 +34,7 @@ export {
   TOOL_CLASSES,
 } from "./policy.js";
 export type { HarnessPolicyMode } from "./policy.js";
-export { ask, evaluate, buildAskPrompt, buildEvaluatePrompt } from "./prompts.js";
+export { ask, evaluate, buildAskPrompt, buildEvaluatePrompt, reportCompletionUsage } from "./prompts.js";
 export { ClaudeCodeHarness, CLAUDE_CODE_CAPABILITIES } from "./claude-code.js";
 export type { ClaudeCodeHarnessOptions } from "./claude-code.js";
 export { CodexHarness, CODEX_CAPABILITIES, MIN_CODEX_VERSION } from "./codex.js";

@@ -1423,3 +1423,56 @@ describe("workflow config", () => {
     expect(validateWorkflow(w).map((e) => e.code)).toContain("DUPLICATE_EDGE");
   });
 });
+
+describe("the decider and the spend budget", () => {
+  const run = (budget: Workflow["budget"] | undefined, baseUrl: string) => {
+    let evaluated = 0;
+    const claude = {
+      async run() {
+        return {
+          status: "success" as const,
+          data: { severity: "high", count: 3, note: "n" },
+          toolCalls: [],
+          usage: { inputTokens: 100, outputTokens: 0 },
+        };
+      },
+      async evaluate() {
+        evaluated++;
+        return "handle_high";
+      },
+      async ask() {
+        return "";
+      },
+    };
+    const workflow = { ...wf(), ...(budget ? { budget } : {}) };
+    return execute(
+      workflow,
+      {},
+      {
+        skills: createSkillMap([]),
+        claude,
+        config: {},
+        env: {},
+        decider: op(baseUrl),
+        logger: silent,
+      },
+    ).then((r) => ({ ...r, evaluated: () => evaluated }));
+  };
+
+  it("is not asked once the run budget is spent; the stop lands on the node", async () => {
+    const srv = await fakeServer({ json: confident("handle_high") });
+    const { results, evaluated, trace } = await run({ tokens: 100 }, srv.baseUrl);
+    expect(srv.seen).toHaveLength(0);
+    expect(trace.deciderOff).toBe("run budget spent");
+    expect(evaluated()).toBe(0);
+    expect(results.get("check")!.budget).toMatchObject({ scope: "run", limit: 100, spent: 100 });
+    expect(results.has("handle_high")).toBe(false);
+  });
+
+  it("control: under the budget it is asked as usual", async () => {
+    const srv = await fakeServer({ json: confident("handle_high") });
+    const { results } = await run({ tokens: 10_000 }, srv.baseUrl);
+    expect(srv.seen).toHaveLength(1);
+    expect(results.has("handle_high")).toBe(true);
+  });
+});

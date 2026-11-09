@@ -191,3 +191,18 @@ describe("evaluateJudge", () => {
     expect(out.reasoning?.length).toBe(800);
   });
 });
+
+describe("evaluateJudge and an aborted run", () => {
+  it("a call that throws because the run was aborted is not retried as a parse failure", async () => {
+    const ac = new AbortController();
+    const ask = vi.fn(async () => {
+      ac.abort();
+      throw new Error("aborted");
+    });
+    const claude = { ask, evaluate: vi.fn(), run: vi.fn() } as unknown as Claude;
+    const ev = { name: "j", kind: "judge", rubric: "ok?" } as Evaluator;
+    const result = { status: "success", data: {}, toolCalls: [] } as NodeResult;
+    await expect(evaluateJudge(ev, result, claude, { model: "m", signal: ac.signal })).rejects.toThrow("aborted");
+    expect(ask).toHaveBeenCalledTimes(1);
+  });
+});

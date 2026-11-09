@@ -5,30 +5,38 @@
  * tokens). Nothing here prints a credential value.
  */
 
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { execFile } from "node:child_process";
+import { applyEnvOverlay, type AgentEnvOverlay } from "../agent-env.js";
 import type { HarnessCheck } from "./types.js";
 
 /** Per-probe timeout: a hung connect or CLI must not make `sweny check` hang. */
 export const CHECK_TIMEOUT_MS = 5000;
 
-/** The executable a bare command resolves to on `env.PATH`, or the command itself when it is a path. */
-export function resolveOnPath(command: string, env: Record<string, string | undefined>): string | undefined {
-  const ok = (p: string) => {
-    try {
-      fs.accessSync(p, fs.constants.X_OK);
-      return fs.statSync(p).isFile();
-    } catch {
-      return false;
-    }
-  };
-  if (command.includes(path.sep) || command.includes("/")) return ok(command) ? command : undefined;
-  for (const dir of (env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
-    const p = path.join(dir, command);
-    if (ok(p)) return p;
-  }
-  return undefined;
+/**
+ * The env a harness's checks read: `base` (default `process.env`) with the
+ * harness's `env` / `envRemove` overlay applied the way `preflight()` applies
+ * it (`overlaidProcessEnv` in agent-env.ts, which this matches for
+ * `process.env`), so `sweny check` sees the same PATH, HOME and credentials a
+ * run would. `SWENY_*` overlay names stay out, as there.
+ */
+export function diagnoseEnv(
+  base: Record<string, string | undefined> | undefined,
+  overlay: AgentEnvOverlay | undefined,
+  credentials: readonly string[],
+): Record<string, string> {
+  const full: Record<string, string> = Object.fromEntries(
+    Object.entries(base ?? process.env).filter((e): e is [string, string] => e[1] != null),
+  );
+  if (!overlay) return full;
+  const own = (n: string) => !n.startsWith("SWENY_");
+  return applyEnvOverlay(
+    full,
+    {
+      env: Object.fromEntries(Object.entries(overlay.env).filter(([k]) => own(k))),
+      remove: overlay.remove.filter(own),
+    },
+    credentials,
+  );
 }
 
 /** Redact a URL to scheme + host so userinfo / query (which can carry a key) never logs. */
@@ -56,19 +64,17 @@ export function networkErrorMessage(err: unknown, timeoutMs = CHECK_TIMEOUT_MS):
 }
 
 /**
- * The CLI line: the adapter's own version check (its `preflight` result, so
- * the binary resolves and parses exactly as a run would) plus where it lives.
+ * The CLI line: the adapter's own version check (the same resolution and
+ * parse a run's `preflight()` does) plus the file it resolved to.
  */
 export function cliCheck(
   name: string,
-  command: string,
-  env: Record<string, string | undefined>,
+  resolved: string | undefined,
   pre: { ok: true; version: string } | { ok: false; reason: string },
   note?: string,
 ): HarnessCheck {
   if (!pre.ok) return { name, status: "fail", detail: pre.reason };
-  const where = resolveOnPath(command, env);
-  return { name, status: "ok", detail: [pre.version, where && `(${where})`, note].filter(Boolean).join(" ") };
+  return { name, status: "ok", detail: [pre.version, resolved && `(${resolved})`, note].filter(Boolean).join(" ") };
 }
 
 export interface CliRun {
@@ -84,13 +90,14 @@ export interface CliRun {
 export function runCli(
   command: string,
   args: string[],
-  opts: { env?: Record<string, string | undefined>; timeoutMs?: number } = {},
+  opts: { env?: Record<string, string | undefined>; cwd?: string; timeoutMs?: number } = {},
 ): Promise<CliRun> {
   const env = Object.fromEntries(
     Object.entries(opts.env ?? process.env).filter((e): e is [string, string] => e[1] != null),
   );
   return new Promise((resolve) => {
-    execFile(command, args, { env, timeout: opts.timeoutMs ?? CHECK_TIMEOUT_MS }, (err, stdout, stderr) => {
+    const execOpts = { env, cwd: opts.cwd, timeout: opts.timeoutMs ?? CHECK_TIMEOUT_MS };
+    execFile(command, args, execOpts, (err, stdout, stderr) => {
       const out = { stdout: String(stdout ?? ""), stderr: String(stderr ?? "") };
       if (!err) return resolve({ code: 0, ...out });
       const e = err as NodeJS.ErrnoException & { code?: unknown; killed?: boolean };

@@ -161,6 +161,16 @@ describe("linear skill", () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.variables.query).toBe("memory leak");
     expect(body.variables.first).toBe(5);
+    // Agent results carry no descriptions; only the journal's resume probe asks for them.
+    expect(body.query).not.toContain("description");
+  });
+
+  it("search_issues adds description only for the resume probe", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ data: { searchIssues: { nodes: [] } } }));
+    const tool = findTool(linear.tools, "linear_search_issues");
+    await tool.handler({ query: "sweny-output abc", limit: 5, withDescription: true }, ctx());
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).query).toContain("description");
+    expect(JSON.stringify(tool.input_schema)).not.toContain("withDescription");
   });
 
   it("update_issue sends correct mutation", async () => {
