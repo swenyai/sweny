@@ -1623,7 +1623,7 @@ describe("replay keeps every NodeResult field (#581)", () => {
     const end = readJournal(journalFile(cwd)).records.find((r) => r.type === "node:end" && r.node === "a")!;
     expect(end.result).toMatchObject({
       status: "success",
-      evals: KEPT.evals,
+      // evals are left out: the executor rewrites them for a node with no `eval` block (journalResult covers them).
       usage: KEPT.usage,
       skippedWrites: KEPT.skippedWrites,
       harness: KEPT.harness,
@@ -1643,7 +1643,13 @@ describe("replay keeps every NodeResult field (#581)", () => {
 
   it("a journal record without the newer fields still replays", async () => {
     const cwd = tmp();
-    const old: NodeResult = { status: "success", data: { value: "a-out" }, toolCalls: [], usage: { costUsd: 0.1 } };
+    const old: NodeResult = {
+      status: "success",
+      data: { value: "a-out" },
+      toolCalls: [],
+      contained: true,
+      usage: { costUsd: 0.1 },
+    };
     expect(await firstRun(cwd, chain(), agentReturning(old), [], killAt("node:start", "b"))).toBe(true);
 
     const end = readJournal(journalFile(cwd)).records.find((r) => r.type === "node:end" && r.node === "a")!;
