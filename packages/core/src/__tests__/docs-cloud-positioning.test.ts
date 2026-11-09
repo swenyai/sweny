@@ -7,6 +7,7 @@ import { Command } from "commander";
 import { registerImplementCommand, registerTriageCommand } from "../cli/config.js";
 import { SUPPORTED_AGENTS, unsupportedAgentError } from "../harness/agents.js";
 import { registerTryCommand } from "../cli/try.js";
+import { DEPRECATED_FLAGS, deprecatedFlagName } from "../cli/deprecated-flags.js";
 
 /**
  * The hosted cloud service is an experiment that is not running and not open
@@ -123,6 +124,14 @@ function section(md: string, heading: string): string {
   return next === -1 ? rest : rest.slice(0, next);
 }
 
+/** `md` without the `## <heading>` section (up to the next `## `). */
+function withoutSection(md: string, heading: string): string {
+  const start = md.indexOf(`\n## ${heading}`);
+  if (start === -1) return md;
+  const next = md.indexOf("\n## ", start + 1);
+  return next === -1 ? md.slice(0, start) : md.slice(0, start) + md.slice(next);
+}
+
 /** `--flag` names in the first column of a docs options table. */
 function documentedFlags(md: string): string[] {
   return [...md.matchAll(/^\|\s*`(--[a-z0-9-]+)/gm)].map((m) => m[1]);
@@ -177,11 +186,25 @@ describe("every documented CLI flag exists in --help", () => {
   it("no docs page documents a parsed-but-unread flag", () => {
     const hits: string[] = [];
     for (const rel of ["README.md", ...docFiles("packages/web/src/content/docs/cli")]) {
-      const text = read(rel);
+      // The one place they may be named: the "Deprecated flags" note, which says they do nothing.
+      const text = withoutSection(read(rel), "Deprecated flags");
       for (const flag of DEAD_FLAGS)
         if (text.includes(`${flag} `) || text.includes(`${flag}\``)) hits.push(`${rel}: ${flag}`);
     }
     expect(hits).toEqual([]);
+  });
+});
+
+describe("deprecated flags note", () => {
+  it("commands.md lists every deprecated flag as having no effect", () => {
+    const md = read("packages/web/src/content/docs/cli/commands.md");
+    const note = section(md, "Deprecated flags");
+    expect(note).toMatch(/no effect/);
+    for (const flag of DEAD_FLAGS) expect(note, flag).toContain(flag);
+  });
+
+  it("the flag table and the docs-honesty list agree", () => {
+    expect(DEPRECATED_FLAGS.map((d) => deprecatedFlagName(d.flag)).sort()).toEqual([...DEAD_FLAGS].sort());
   });
 });
 
