@@ -263,6 +263,14 @@ A conforming validator MUST enforce the following rules:
 | `MIXED_EDGE_CONDITIONS`    | A node's conditional out-edges mix expressions and natural language.                                                                             |
 | `DUPLICATE_EDGE`           | Two edges share the same `from` and `to`. Merge them into one edge whose condition covers both (OR).                                             |
 
+### Warnings
+
+Warnings do not stop a workflow loading.
+
+| Code                     | Meaning                                                                                                                                                                                            |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OUTPUT_SCHEMA_FALLBACK` | A node's `output` schema does not compile, so its output keeps the earlier top-level check (see [Output Schema Semantics](/nodes#output-schema-semantics)). Deprecated: a future minor rejects it. |
+
 ## Safe Outputs Policy
 
 `safe_outputs` sets the ceiling and run-wide limits for every node's [`outputs`](/nodes#safe-outputs).

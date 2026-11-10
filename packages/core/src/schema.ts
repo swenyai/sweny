@@ -42,6 +42,7 @@ import { sourceZ } from "./sources.js";
 import { resolveNodePermissions } from "./node-policy.js";
 import { workflowInputsZ, WORKFLOW_INPUT_TYPES } from "./inputs.js";
 import { checkExpression, isWhenExpression, WHEN_EXPR_MAX_LENGTH } from "./when.js";
+import { outputSchemaError } from "./output-contract.js";
 
 // Studio and other schema-only consumers label edges without importing the root entry.
 export { isWhenExpression, whenLabel } from "./when.js";
@@ -550,6 +551,23 @@ export interface WorkflowError {
 }
 
 /**
+ * A finding that does not stop the workflow loading (#573): something that
+ * works today and is deprecated. `OUTPUT_SCHEMA_FALLBACK`: a node's `output`
+ * schema does not compile, so its output keeps the pre-#573 top-level check;
+ * a future minor will refuse to load it.
+ */
+export interface WorkflowWarning {
+  code: "OUTPUT_SCHEMA_FALLBACK";
+  message: string;
+  nodeId: string;
+}
+
+export interface ValidateWorkflowOptions {
+  /** Receives warning-level findings. They never appear in the returned errors. */
+  warnings?: WorkflowWarning[];
+}
+
+/**
  * Validate a workflow's graph structure.
  *
  * Checks:
@@ -566,6 +584,7 @@ export interface WorkflowError {
 export function validateWorkflow(
   workflow: Workflow | z.infer<typeof workflowZ>,
   knownSkills?: Set<string>,
+  options: ValidateWorkflowOptions = {},
 ): WorkflowError[] {
   const errors: WorkflowError[] = [];
   const nodeIds = new Set(Object.keys(workflow.nodes));
@@ -802,6 +821,23 @@ export function validateWorkflow(
       errors.push({
         code: "RETRY_MAX_EXCEEDED",
         message: `Node "${nodeId}" declares retry.max ${max}, above the ceiling of ${NODE_RETRY_MAX_CEILING}`,
+        nodeId,
+      });
+    }
+  }
+
+  // Output schemas compile with the validator the executor checks outputs
+  // with (#573). One that does not compile still loads, as it did before: a
+  // warning, and the node keeps the pre-#573 top-level check. Deprecated.
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    const why = outputSchemaError(node.output);
+    if (why !== undefined) {
+      options.warnings?.push({
+        code: "OUTPUT_SCHEMA_FALLBACK",
+        message:
+          `Node "${nodeId}" declares an output schema the validator cannot compile (${why}). ` +
+          `Its output gets only the old top-level check (required fields, top-level types and enums). ` +
+          `Deprecated: a future minor will refuse to load this workflow; fix the schema or name its draft in $schema.`,
         nodeId,
       });
     }

@@ -51,7 +51,7 @@ import type { ExpressionResult, ExpressionScope, ExprNode } from "./when.js";
 import { buildRetryPreamble } from "./retry.js";
 import { resolveExecutionModel } from "./model.js";
 import { buildToolAliases } from "./skills/index.js";
-import { validateWorkflow } from "./schema.js";
+import { validateWorkflow, type WorkflowWarning } from "./schema.js";
 import { grantedAgentEnv, resolveAgentAccess } from "./agent-env.js";
 import { gitCredentialWarning, scanGitCredentials } from "./git-credentials.js";
 // #473: the sweny-side branch push in `github_create_pr` (Node only; skills/ stays browser-safe).
@@ -82,6 +82,14 @@ import {
   type SafeOutputIntent,
 } from "./safe-outputs.js";
 import { JournalWriteError, type ExecutionJournal, type JournalReplay } from "./journal.js";
+import {
+  COUNT_OF_KEYWORD,
+  checkOutputContract,
+  contractFailureMessage,
+  contractPaths,
+  listContractProblems,
+  outputContractProblems,
+} from "./output-contract.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -294,7 +302,7 @@ async function executeRun(
   const maxSteps = options.max_steps ?? DEFAULT_MAX_STEPS;
   let stepCount = 0; // total node executions across the run (loop iterations included)
 
-  validate(workflow, skills);
+  validate(workflow, skills, logger);
 
   // Safe outputs (#365): run-wide caps and dedupe, the staged switch and the
   // triggering actor, resolved once per run.
@@ -1009,6 +1017,8 @@ async function executeRun(
           context,
           tools: trackedTools,
           outputSchema: harnessSchema(node.output),
+          // The executor checks the output and asks for one repair itself, the same on every harness.
+          ...(node.output ? { callerRepairsOutput: true } : {}),
           maxTurns: node.max_turns,
           disallowedTools: node.disallowed_tools,
           ...(denyClasses.length > 0 ? { deny: denyClasses } : {}),
@@ -1093,35 +1103,25 @@ async function executeRun(
         break;
       }
 
-      // Required-field gate: if the source node's declared output schema
-      // marks fields as `required`, those fields are the routing contract.
-      // An agent that omits a required field has violated the contract; we
-      // fail the node loudly rather than letting routing guess against a
-      // half-built data view. See the offload release-notes field bug:
-      // an optional quality_retry_count was declared in the schema but
-      // omitted by the agent, the route view silently dropped the key,
-      // and an "is 0 OR is undefined" condition ghost-matched.
-      //
-      // We only check declared `required` fields, not full JSON Schema
-      // validation. Type mismatches, formats, additionalProperties, etc.
-      // stay the workflow author's problem and don't have the same
-      // routing-correctness blast radius.
-      // A missing required field is a contract violation handled on the same
-      // footing as an eval failure: an otherwise-recoverable one-off omission
-      // should self-heal on a second attempt when the node has `retry`
-      // configured. We synthesize an eval-shaped failure so the retry preamble
-      // and trace bookkeeping below treat it identically. When no retry is
-      // configured (or the budget is exhausted), it still hard-fails the node.
-      // Output contract (#357): required fields present, declared types and
-      // enums respected, declared counts consistent. One repair round trip
-      // first, for every harness: the agent is told exactly what is wrong.
-      const contract = outputContractProblems(result.data, node.output);
+      // Output contract (#357, #573): the emitted data is checked against the
+      // node's declared `output` JSON Schema at every depth (nested objects,
+      // arrays of objects, enums, `required` at any depth,
+      // additionalProperties), plus `x-sweny-count-of` counts. The check runs
+      // here, on the data every harness returns, so a violation reads the same
+      // whichever harness ran the node, each problem with its exact path and
+      // never the emitted value. One repair round trip first, for every
+      // harness: the agent is told exactly what is wrong. A check that cannot
+      // run (it threw) fails this node, never the run, and gets no repair.
+      const checked = checkOutputContract(result.data, node.output);
+      const contract = "problems" in checked ? checked.problems : [];
       if (contract.length > 0 && !repaired) {
         // Part of this node visit, like a retry of the same call: no extra
         // max_steps slot. Its spend still counts (budget, journal usage).
         repaired = true;
-        const listed = contract.map((p) => `- ${p.field}: ${p.problem}`).join("\n");
-        logger.warn(`  output contract: ${contract.map((p) => p.field).join(", ")}; asking the agent once to fix it`, {
+        const listed = listContractProblems(contract)
+          .map((line) => `- ${line}`)
+          .join("\n");
+        logger.warn(`  output contract: ${contractPaths(contract).join(", ")}; asking the agent once to fix it`, {
           node: currentId,
         });
         safeObserve(
@@ -1130,25 +1130,28 @@ async function executeRun(
             type: "node:warning",
             node: currentId,
             reason: "output contract violated; one repair attempt",
-            fields: contract.map((p) => p.field),
+            fields: contractPaths(contract),
           },
           logger,
         );
         currentInstruction =
           `Your previous output did not match this step's declared output schema:\n${listed}\n\n` +
-          `Do the step again and return the complete output with every listed field present and of the declared type.` +
+          `Do the step again and return the complete output, with every listed field present and matching the declared schema.` +
           `\n\n---\n\n${currentInstruction}`;
         continue;
       }
-      // Still wrong after the repair. A field an expression routes on is not a
-      // node failure: routes that read it fall through to the next rung
-      // (decider or agent) at routing time. Other missing required fields keep
-      // failing the node, as before.
+      // Still wrong after the repair. A problem under a field an expression
+      // routes on is not a node failure: routes that read it fall through to
+      // the next rung (decider or agent) at routing time. Every other problem
+      // fails the node, on the same footing as an eval failure: with `retry`
+      // configured, the reflection and retry path below gets another attempt.
+      // A schema that does not compile keeps the pre-#573 rule (deprecated):
+      // only a missing field fails the node.
       const routedOn = routingFieldsOf(workflow, currentId);
       const tolerated = contract.filter((p) => routedOn.has(p.field));
       if (tolerated.length > 0) {
         logger.warn(
-          `  output contract still violated for routing field(s) ${tolerated.map((p) => p.field).join(", ")}; ` +
+          `  output contract still violated for routing field(s) ${contractPaths(tolerated).join(", ")}; ` +
             `routes that read them fall through to the next rung`,
           { node: currentId },
         );
@@ -1158,20 +1161,24 @@ async function executeRun(
             type: "node:warning",
             node: currentId,
             reason: "routing fields missing or invalid after repair; their routes fall through",
-            fields: tolerated.map((p) => p.field),
+            fields: contractPaths(tolerated),
           },
           logger,
         );
       }
-      const missingRequired = contract
-        .filter((p) => p.kind === "missing" && !routedOn.has(p.field))
-        .map((p) => p.field);
+      const broken = contract.filter((p) => !routedOn.has(p.field) && (p.kind === "missing" || !p.fallback));
+      const contractError =
+        "error" in checked
+          ? `output validation error: ${checked.error}`
+          : broken.length > 0
+            ? contractFailureMessage(broken)
+            : undefined;
 
       let outcome: AggregateOutcome;
-      if (missingRequired.length > 0) {
-        const msg = `output schema violation: required field(s) missing from emitted data: ${missingRequired.join(", ")}`;
-        const failure: EvalResult = { name: "output_required", kind: "value", pass: false, reasoning: msg };
-        outcome = { pass: false, error: msg, failures: [failure] };
+      if (contractError !== undefined) {
+        const name = broken.some((p) => p.kind === "missing") ? "output_required" : "output_schema";
+        const failure: EvalResult = { name, kind: "value", pass: false, reasoning: contractError };
+        outcome = { pass: false, error: contractError, failures: [failure] };
         // Still record the synthesized failure as the node's eval result so
         // observers and downstream context see the contract violation.
         result.evals = [failure];
@@ -1723,8 +1730,12 @@ export function deciderRoutingState(
     const fields = fieldsOf(id);
     if (fields.size > 0 && r.status === "success") {
       const data = (r.data ?? {}) as Record<string, unknown>;
+      // A field that breaks the node's contract by any rule (#573) is sent as null, like a mistyped one.
+      const broken = invalidOutputFields(r, hasOwn(workflow.nodes, id) ? workflow.nodes[id] : undefined);
       const output: Record<string, unknown> = Object.create(null);
-      for (const [k, spec] of fields) output[k] = projectValue(spec, hasOwn(data, k) ? data[k] : undefined);
+      for (const [k, spec] of fields) {
+        output[k] = broken.has(k) ? null : projectValue(spec, hasOwn(data, k) ? data[k] : undefined);
+      }
       entry.output = output;
     }
     if (r.evals && r.evals.length > 0) {
@@ -1842,129 +1853,21 @@ export function buildBoundedContext(
   };
 }
 
-/**
- * Return the declared `required` field names for a node's output schema,
- * or an empty array when no required block is declared. Tolerant of
- * malformed schemas (mirrors getDeclaredOutputProperties).
- */
-function getDeclaredRequiredFields(output: JSONSchema | undefined): string[] {
-  if (!output || typeof output !== "object") return [];
-  const required = (output as Record<string, unknown>).required;
-  if (!Array.isArray(required)) return [];
-  return required.filter((r): r is string => typeof r === "string");
-}
-
-/** One way a node's emitted data breaks its declared output contract. */
-export interface ContractProblem {
-  field: string;
-  kind: "missing" | "invalid";
-  problem: string;
-}
-
-/** Keyword on an integer output property: the count sweny cross-checks against an array in the same output. */
-export const COUNT_OF_KEYWORD = "x-sweny-count-of";
-
-interface CountOf {
-  /** Top-level array property whose items are counted. */
-  array: string;
-  /** Item field -> allowed values; an item counts only when every listed field has one of them. */
-  where?: Record<string, unknown[]>;
-  /** Item fields that must be non-empty strings for the item to count. */
-  non_empty?: string[];
-}
-
-function typeMatches(t: unknown, v: unknown): boolean {
-  switch (t) {
-    case "string":
-      return typeof v === "string";
-    case "number":
-      return typeof v === "number" && Number.isFinite(v);
-    case "integer":
-      return typeof v === "number" && Number.isInteger(v);
-    case "boolean":
-      return typeof v === "boolean";
-    case "array":
-      return Array.isArray(v);
-    case "object":
-      return typeof v === "object" && v !== null && !Array.isArray(v);
-    case "null":
-      return v === null;
-    default:
-      return true; // unknown or absent type: not checked
-  }
-}
-
-function countOf(spec: CountOf, data: Record<string, unknown>): number | undefined {
-  const items = hasOwn(data, spec.array) ? data[spec.array] : undefined;
-  if (!Array.isArray(items)) return undefined;
-  let n = 0;
-  for (const item of items) {
-    if (!item || typeof item !== "object") continue;
-    const it = item as Record<string, unknown>;
-    const whereOk = Object.entries(spec.where ?? {}).every(
-      ([k, allowed]) => hasOwn(it, k) && Array.isArray(allowed) && allowed.some((a) => a === it[k]),
-    );
-    const nonEmptyOk = (spec.non_empty ?? []).every(
-      (k) => hasOwn(it, k) && typeof it[k] === "string" && (it[k] as string).trim() !== "",
-    );
-    if (whereOk && nonEmptyOk) n++;
-  }
-  return n;
-}
+// The output contract (#357, #573) lives in output-contract.ts; re-exported for existing importers.
+export { COUNT_OF_KEYWORD, outputContractProblems };
 
 /**
- * Check emitted data against the declared output contract (#357): every
- * `required` field present; every present top-level property of its declared
- * `type` and inside its `enum`; and every `x-sweny-count-of` integer equal to
- * the count it declares over its array. Not full JSON Schema: formats,
- * nested shapes and additionalProperties stay the author's concern.
+ * The top-level output fields of a node's result that are present but break
+ * its contract (#573), at any depth and by any rule. Routing reads them as
+ * unknown and the decider never sees their values. A check that cannot run
+ * (it threw) marks every declared field, so nothing unchecked routes.
  */
-export function outputContractProblems(data: unknown, output: JSONSchema | undefined): ContractProblem[] {
-  if (!output || typeof output !== "object") return [];
-  const obj = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
-  const problems: ContractProblem[] = [];
-  for (const k of getDeclaredRequiredFields(output)) {
-    if (!hasOwn(obj, k)) problems.push({ field: k, kind: "missing", problem: "required but missing" });
-  }
-  const props = (output as { properties?: unknown }).properties;
-  if (!props || typeof props !== "object") return problems;
-  for (const [k, raw] of Object.entries(props as Record<string, unknown>)) {
-    if (!hasOwn(obj, k) || !raw || typeof raw !== "object") continue;
-    const p = raw as { type?: unknown; enum?: unknown; [COUNT_OF_KEYWORD]?: unknown };
-    const v = obj[k];
-    const types = Array.isArray(p.type) ? p.type : p.type === undefined ? [] : [p.type];
-    if (types.length > 0 && !types.some((t) => typeMatches(t, v))) {
-      problems.push({ field: k, kind: "invalid", problem: `expected ${types.join(" or ")}, got ${JSON.stringify(v)}` });
-      continue;
-    }
-    if (Array.isArray(p.enum) && !p.enum.some((e) => e === v)) {
-      problems.push({
-        field: k,
-        kind: "invalid",
-        problem: `expected one of ${JSON.stringify(p.enum)}, got ${JSON.stringify(v)}`,
-      });
-      continue;
-    }
-    const spec = p[COUNT_OF_KEYWORD];
-    if (spec && typeof spec === "object" && typeof (spec as CountOf).array === "string") {
-      const want = countOf(spec as CountOf, obj);
-      if (want === undefined) {
-        problems.push({
-          field: k,
-          kind: "invalid",
-          problem: `cannot be checked: '${(spec as CountOf).array}' is not a list`,
-        });
-      } else if (v !== want) {
-        problems.push({
-          field: k,
-          kind: "invalid",
-          problem: `is ${JSON.stringify(v)} but '${(spec as CountOf).array}' has ${want} matching item(s)`,
-        });
-      }
-    }
-  }
-  return problems;
+function invalidOutputFields(result: NodeResult, node: Node | undefined): Set<string> {
+  const checked = checkOutputContract(result.data, node?.output);
+  if ("error" in checked) return getDeclaredOutputProperties(node?.output) ?? new Set();
+  return new Set(checked.problems.filter((p) => p.kind === "invalid").map((p) => p.field));
 }
+export type { ContractProblem } from "./output-contract.js";
 
 /**
  * Required tools the agent never called, when that is the only reason a node
@@ -2776,8 +2679,7 @@ function resolveByExpressions(
   for (const [id, r] of results.entries()) {
     if (r.status !== "success") continue;
     const node = hasOwn(workflow.nodes, id) ? workflow.nodes[id] : undefined;
-    for (const p of outputContractProblems(r.data, node?.output))
-      if (p.kind === "invalid") invalid.add(`${id}.${p.field}`);
+    for (const f of invalidOutputFields(r, node)) invalid.add(`${id}.${f}`);
     scope[id] = buildPriorNodeContext(r);
   }
 
@@ -2853,7 +2755,7 @@ function resolveByExpressions(
 /**
  * Validate a workflow definition before execution.
  */
-function validate(workflow: Workflow, skills: Map<string, Skill>): void {
+function validate(workflow: Workflow, skills: Map<string, Skill>, logger: Logger): void {
   for (const [id, def] of Object.entries(workflow.skills ?? {})) {
     if (!def.instruction?.trim()) {
       throw new Error(`Inline skill "${id}" must provide a non-empty instruction`);
@@ -2878,12 +2780,15 @@ function validate(workflow: Workflow, skills: Map<string, Skill>): void {
   // reach execute() without the loader, so without this they got none of it
   // (#326). Runs once per execute() call, before any node runs. Skill
   // availability stays a warning below, so no knownSkills here.
-  const structural = validateWorkflow(workflow);
+  const loadWarnings: WorkflowWarning[] = [];
+  const structural = validateWorkflow(workflow, undefined, { warnings: loadWarnings });
   if (structural.length > 0) {
     throw new Error(
       `Invalid workflow "${workflow.id}":\n${structural.map((e) => `  ${e.code}: ${e.message}`).join("\n")}`,
     );
   }
+  // Deprecated but still loading (#573): said once per run, never silently.
+  for (const w of loadWarnings) logger.warn(`  ${w.code}: ${w.message}`, { node: w.nodeId });
 
   // Check that each node has at least one available skill (if it lists any)
   for (const [nodeId, node] of Object.entries(workflow.nodes)) {

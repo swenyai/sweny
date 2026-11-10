@@ -1090,6 +1090,12 @@ export interface Claude {
     context: Record<string, unknown>;
     tools: Tool[];
     outputSchema?: JSONSchema;
+    /**
+     * The caller checks the output against `outputSchema` and asks for one
+     * repair itself (sweny's executor, #573), so the harness must not run a
+     * correction turn of its own: one repair loop on every harness.
+     */
+    callerRepairsOutput?: boolean;
     /** Called with status messages while Claude is working (tool name, etc.) */
     onProgress?: (message: string) => void;
     /** MCP servers declared by this node's resolved skills. Explicit client configs win. */
