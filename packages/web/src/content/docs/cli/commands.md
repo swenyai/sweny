@@ -51,7 +51,7 @@ The coding agent you picked (`--agent` or `coding-agent-provider`) gets its own 
 
 | Agent | What `sweny check` verifies |
 |-------|-----------------------------|
-| `claude` | The Claude Agent SDK version sweny ships with; then a stored Claude Code login, or `ANTHROPIC_API_KEY` against `GET /v1/models` (or your gateway when `ANTHROPIC_BASE_URL` is set). An OAuth or bearer token with no gateway is reported by mode, without a network call. |
+| `claude` | The version of the agent SDK sweny bundles for Claude Code; then a stored Claude Code login, or `ANTHROPIC_API_KEY` against `GET /v1/models` (or your gateway when `ANTHROPIC_BASE_URL` is set). An OAuth or bearer token with no gateway is reported by mode, without a network call. |
 | `codex` | `codex --version` (the same binary and version floor a run uses); a credential (`CODEX_API_KEY`, `OPENAI_API_KEY`, `CODEX_ACCESS_TOKEN`, or `codex login`); `codex login status`; and, with an API key, `GET /models` on `OPENAI_BASE_URL` (default `https://api.openai.com/v1`). |
 | `pi` | `pi --version`; and the one provider credential a run would hand pi, or the `SWENY_PI_MODELS_JSON` file. No upstream probe: pi talks to many providers. |
 | `acp:<command>` | The command resolves on `PATH`. The agent is not started, so its version and login are reported when a run starts. |
