@@ -560,7 +560,7 @@ Each entry in `eval` is an **Evaluator** with these fields:
 
 | Field       | Required                          | Applies to      | Description                                                                                                        |
 | ----------- | --------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `name`      | REQUIRED                          | all kinds       | Stable identifier for the evaluator. Used in result objects and retry preambles.                                   |
+| `name`      | REQUIRED                          | all kinds       | Stable identifier for the evaluator, unique within the node. Used in result objects and retry preambles.           |
 | `kind`      | REQUIRED                          | all kinds       | One of `value`, `function`, `judge`.                                                                               |
 | `rule`      | REQUIRED for `value` / `function` | value, function | The deterministic rule. See per-kind shapes below.                                                                 |
 | `rubric`    | REQUIRED for `judge`              | judge           | Natural-language rubric the judge model evaluates against the node's data and trace.                               |

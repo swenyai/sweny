@@ -532,6 +532,7 @@ export interface WorkflowError {
     | "UNBOUNDED_CYCLE"
     | "AMBIGUOUS_EDGES"
     | "UNSUPPORTED_EVAL_POLICY"
+    | "DUPLICATE_EVALUATOR"
     | "INVALID_INLINE_SKILL"
     | "EDGE_ITERATIONS_EXCEEDED"
     | "RETRY_MAX_EXCEEDED"
@@ -821,6 +822,23 @@ export function validateWorkflow(
         message: `Node "${nodeId}" declares eval_policy "${node.eval_policy}", which is reserved but not yet implemented; use "all_pass" (the only supported policy in v1.0)`,
         nodeId,
       });
+    }
+  }
+
+  // Evaluator names are a node's eval keys: results, retry preambles, routes
+  // (`node.evals.<name>.pass`) and the required-tool repair look a verdict up
+  // by name, so two evaluators with one name would make that lookup ambiguous.
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    const seen = new Set<string>();
+    for (const e of node.eval ?? []) {
+      if (seen.has(e.name)) {
+        errors.push({
+          code: "DUPLICATE_EVALUATOR",
+          message: `Node "${nodeId}" declares two evaluators named "${e.name}"; evaluator names must be unique within a node`,
+          nodeId,
+        });
+      }
+      seen.add(e.name);
     }
   }
 
