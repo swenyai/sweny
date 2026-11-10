@@ -70,7 +70,10 @@ export function buildTryFixture(record: RunRecord, answers: RunAnswers | null, o
     if (!workflow.nodes[n.id]) refuse(`node "${n.id}" is not in the ${record.workflow_id} template`);
     if (n.status !== "success") refuse(`node "${n.id}" ended ${n.status}`);
     const usage = usageOf(n);
-    const declared = answers!.nodes[n.id];
+    // Only nodes whose template declares an output schema: a free-form `summary` (what answers.json
+    // keeps for a node with no schema) is the agent's working notes, not the answer, and stays out.
+    const schema = workflow.nodes[n.id].output as { properties?: Record<string, unknown> } | undefined;
+    const declared = schema?.properties && Object.keys(schema.properties).length > 0 ? answers!.nodes[n.id] : undefined;
     const output = declared ? (redact(declared, secrets).value as Record<string, unknown>) : undefined;
     nodes[n.id] = {
       duration_ms: n.duration_ms,

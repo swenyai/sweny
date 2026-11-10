@@ -61,7 +61,7 @@ jobs:
           {
             echo '### Captured fixture'
             echo
-            echo 'Download the `try-fixture` artifact and commit it as `packages/core/src/cli/try-fixture.json`.'
+            echo "Download the try-fixture artifact and commit it as packages/core/src/cli/try-fixture.json."
             echo
             jq '{illustrative, captured_at, workflow, sample_repo, harness, policy, nodes: (.nodes | map_values({duration_ms, tool_calls: (.tool_calls | add // 0), usage}))}' try-fixture.json | sed 's/^/    /'
           } >> "$GITHUB_STEP_SUMMARY"
