@@ -6,3 +6,4 @@ node_modules/
 packages/web/.next/
 packages/web/.astro/
 coverage/
+.sweny/workflows/

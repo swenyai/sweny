@@ -27,7 +27,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: swenyai/sweny@v5
+      # First-party action on its moving release tag: the v5 path every user runs.
+      # Pinning a hash here would stop dogfooding it, so zizmor's pin rule is waived.
+      - uses: swenyai/sweny@v5 # zizmor: ignore[unpinned-uses]
         with:
           workflow: .sweny/workflows/weekly-digest.yml
           notify-on-failure: issue # one sticky issue, only when a run fails
