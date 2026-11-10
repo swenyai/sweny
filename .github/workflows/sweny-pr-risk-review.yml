@@ -37,7 +37,6 @@ jobs:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           input: '{"repo": "${{ github.repository }}", "pr_number": ${{ github.event.pull_request.number }}}'
           max-cost: "0.50" # USD per run, harness-reported; a crossing halts the run
-          verbose: "true" # TEMP: diagnose the agent tool list (#537); remove before landing
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SWENY_SANDBOX: strict # fail closed instead of running the agent unsandboxed
