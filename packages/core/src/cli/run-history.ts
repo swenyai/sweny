@@ -361,6 +361,27 @@ const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const numOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const RUNGS: ReadonlySet<string> = new Set(["expr", "decider", "agent"]);
+const SANDBOX_MODES: ReadonlySet<string> = new Set(["off", "auto", "strict"]);
+const count = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+
+/**
+ * Per-tool counts read back: own keys only, names within the writer's own limits (no control
+ * characters, at most TOOL_NAME_MAX long, at most TOOL_COUNTS_MAX of them), values non-negative
+ * integers. Anything else is dropped; undefined when nothing is left.
+ */
+function parseToolCounts(v: unknown): Record<string, number> | undefined {
+  if (!isObj(v)) return undefined;
+  const out: Record<string, number> = {};
+  let kept = 0;
+  for (const [k, c] of Object.entries(v)) {
+    if (kept >= TOOL_COUNTS_MAX) break;
+    // eslint-disable-next-line no-control-regex
+    if (k === "" || k.length > TOOL_NAME_MAX || /[\u0000-\u001f\u007f]/.test(k) || !count(c)) continue;
+    Object.defineProperty(out, k, { value: c, enumerable: true, writable: true, configurable: true });
+    kept++;
+  }
+  return kept > 0 ? out : undefined;
+}
 
 /**
  * A typed, allow-listed copy of a stored record, or null when it is not a run record. History is
@@ -393,15 +414,23 @@ function parseRecord(v: unknown): RunRecord | null {
     status: v.status as RunStatus,
     nodes: v.nodes
       .filter((n): n is Record<string, unknown> => isObj(n) && typeof n.id === "string" && typeof n.status === "string")
-      .map((n) => ({
-        id: n.id as string,
-        status: n.status as RunNodeRecord["status"],
-        duration_ms: num(n.duration_ms),
-        tool_calls: num(n.tool_calls),
-        tokens: numOrNull(n.tokens),
-        cost_usd: numOrNull(n.cost_usd),
-        retries: num(n.retries),
-      })),
+      .map((n) => {
+        const toolCounts = parseToolCounts(n.tool_counts);
+        return {
+          id: n.id as string,
+          status: n.status as RunNodeRecord["status"],
+          duration_ms: num(n.duration_ms),
+          tool_calls: num(n.tool_calls),
+          tokens: numOrNull(n.tokens),
+          cost_usd: numOrNull(n.cost_usd),
+          retries: num(n.retries),
+          // detail_version 1 fields: optional, kept only when well-formed.
+          ...(toolCounts ? { tool_counts: toolCounts } : {}),
+          ...(count(n.tokens_in) ? { tokens_in: n.tokens_in } : {}),
+          ...(count(n.tokens_out) ? { tokens_out: n.tokens_out } : {}),
+          ...(count(n.num_turns) ? { num_turns: n.num_turns } : {}),
+        };
+      }),
     routes: v.routes
       .filter((e): e is Record<string, unknown> => isObj(e) && typeof e.from === "string" && typeof e.to === "string")
       .map((e) => ({
@@ -420,6 +449,20 @@ function parseRecord(v: unknown): RunRecord | null {
   };
   if (isObj(v.harness) && typeof v.harness.id === "string" && typeof v.harness.version === "string") {
     out.harness = { id: v.harness.id, version: v.harness.version };
+  }
+  if (count(v.detail_version) && v.detail_version >= 1) out.detail_version = v.detail_version;
+  if (
+    isObj(v.policy) &&
+    typeof v.policy.scoped === "boolean" &&
+    typeof v.policy.sandboxed === "boolean" &&
+    typeof v.policy.sandbox === "string" &&
+    SANDBOX_MODES.has(v.policy.sandbox)
+  ) {
+    out.policy = {
+      scoped: v.policy.scoped,
+      sandbox: v.policy.sandbox as RunPolicyRecord["sandbox"],
+      sandboxed: v.policy.sandboxed,
+    };
   }
   if (Array.isArray(v.degraded)) out.degraded = v.degraded.filter((d): d is string => typeof d === "string");
   if (isObj(v.spend)) {

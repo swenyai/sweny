@@ -218,6 +218,60 @@ describe("detail fields (#537): optional, versioned, old records still read", ()
     expect(r).not.toHaveProperty("policy");
   });
 
+  it("round-trips through listRuns: the detail fields survive the allow-list read", () => {
+    const d = tmp();
+    const written = record({ results: rich, trace: undefined, nodeDurations: new Map([["a", 10]]) });
+    writeRunRecord(written, d);
+    const [r] = listRuns(d);
+    expect(r.detail_version).toBe(1);
+    expect(r.policy).toEqual({ scoped: true, sandbox: "strict", sandboxed: true });
+    expect(r.nodes[0]).toEqual(written.nodes[0]);
+    expect(Object.keys(r.nodes[0].tool_counts!)).toEqual(["Read", "Grep", "Evilname"]);
+  });
+
+  it("forged detail values are dropped on read, the rest of the record kept", () => {
+    const d = tmp();
+    const written = record({ results: rich, trace: undefined, nodeDurations: new Map([["a", 10]]) });
+    const forged = JSON.parse(JSON.stringify(written));
+    forged.detail_version = "1";
+    forged.policy = { scoped: "yes", sandbox: "chroot", sandboxed: true };
+    forged.nodes[0].tool_counts = {
+      Read: -1,
+      Grep: 1.5,
+      [`Bad\u001b[2Jname`]: 3,
+      ["x".repeat(500)]: 1,
+      Good: 2,
+      Str: "9",
+    };
+    forged.nodes[0].tokens_in = "100";
+    forged.nodes[0].tokens_out = -5;
+    forged.nodes[0].num_turns = null;
+    fs.mkdirSync(path.join(d, RUN_HISTORY_DIR), { recursive: true });
+    fs.writeFileSync(path.join(d, RUN_HISTORY_DIR, `${written.run_id}.json`), JSON.stringify(forged));
+    const [r] = listRuns(d);
+    expect(r.run_id).toBe(written.run_id);
+    expect(r.detail_version).toBeUndefined();
+    expect(r.policy).toBeUndefined();
+    expect(r.nodes[0].tool_counts).toEqual({ Good: 2 });
+    expect(r.nodes[0]).not.toHaveProperty("tokens_in");
+    expect(r.nodes[0]).not.toHaveProperty("tokens_out");
+    expect(r.nodes[0]).not.toHaveProperty("num_turns");
+    expect(r.nodes[0].tokens).toBe(150);
+  });
+
+  it("a non-object tool_counts, and a forged field on the record, are dropped", () => {
+    const d = tmp();
+    const written = record({ results: rich, trace: undefined });
+    const forged = JSON.parse(JSON.stringify(written));
+    forged.nodes[0].tool_counts = ["Read"];
+    forged.surprise = "x";
+    fs.mkdirSync(path.join(d, RUN_HISTORY_DIR), { recursive: true });
+    fs.writeFileSync(path.join(d, RUN_HISTORY_DIR, `${written.run_id}.json`), JSON.stringify(forged));
+    const [r] = listRuns(d);
+    expect(r.nodes[0]).not.toHaveProperty("tool_counts");
+    expect(r).not.toHaveProperty("surprise");
+  });
+
   it("a record written before detail_version reads back unchanged, with the fields undefined", () => {
     const d = tmp();
     const legacy = {
