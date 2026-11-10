@@ -21,6 +21,7 @@ import type {
   Logger,
   SafeOutputDeclaration,
   SafeOutputPin,
+  SafeOutputTarget,
   SafeOutputReceipt,
   SafeOutputsPolicy,
   SafeOutputState,
@@ -152,7 +153,8 @@ export function createEmitOutputTool(
 export function safeOutputsInstruction(declarations: SafeOutputDeclaration[], input?: Record<string, unknown>): string {
   const lines = declarations.map((d) => {
     const parts = [`at most ${d.max ?? 1}`];
-    if (d.target) parts.push(`target ${d.target}`);
+    const target = resolveTarget(d.target, input);
+    if (target) parts.push(`target ${target}`);
     if (d.number !== undefined) {
       const pin = resolvePin(d.number, input);
       parts.push(pin ? `only issue or PR ${pin} (the number may be omitted)` : "pinned issue not set for this run");
@@ -224,6 +226,17 @@ export function actorTrusted(policy: SafeOutputsPolicy | undefined, actor: Actor
  * The issue or PR a declaration pins, as a string. `{ input: name }` reads the
  * run input; an absent or empty value is `undefined`, which refuses the write.
  */
+/** A declared target: the literal, or the run input it names. Empty or missing: undefined. */
+export function resolveTarget(
+  target: SafeOutputTarget | undefined,
+  input?: Record<string, unknown>,
+): string | undefined {
+  const raw = typeof target === "object" ? input?.[target.input] : target;
+  if (typeof raw !== "string") return undefined;
+  const v = raw.trim();
+  return v.length > 0 ? v : undefined;
+}
+
 export function resolvePin(pin: SafeOutputPin, input?: Record<string, unknown>): string | undefined {
   const raw = typeof pin === "object" ? input?.[pin.input] : pin;
   if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) return String(raw);
@@ -522,11 +535,20 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       refuse("no skill can apply this type");
       continue;
     }
-    // The run's repo from the operator's env, never one a workspace .env introduced.
+    // The declared target (a literal, or the run input it names), else the run's
+    // repo from the operator's env, never one a workspace .env introduced.
     const pinned =
-      decl.target ?? (via === "github" ? trustedEnvValue(o.env, "GITHUB_REPOSITORY") || undefined : undefined);
+      resolveTarget(decl.target, o.input) ??
+      (via === "github" ? trustedEnvValue(o.env, "GITHUB_REPOSITORY") || undefined : undefined);
     if (intent.target && pinned && intent.target.toLowerCase() !== pinned.toLowerCase()) {
       refuse("target outside the declared target", { via });
+      continue;
+    }
+    // #598: an output pinned to one issue or PR is pinned to one repository too, and that
+    // repository comes only from the declaration, a run input, or GITHUB_REPOSITORY. Never
+    // from the agent: PR #N of any repo the token can write to is not the pinned PR.
+    if (via === "github" && decl.number !== undefined && !pinned) {
+      refuse("pinned output needs a trusted repository", { via });
       continue;
     }
     const target = intent.target ?? pinned;

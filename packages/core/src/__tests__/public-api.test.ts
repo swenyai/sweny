@@ -149,3 +149,37 @@ describe("public API surface: AgentHarness seam (#330)", () => {
     expect(() => core.createHarness("nope")).toThrow(/Unsupported coding agent "nope"/);
   });
 });
+
+// #582: the run-history and validate helpers the MCP server calls are public.
+describe("public API surface: run history and validate helpers (#582)", () => {
+  it("exports the run-history readers, diff helpers and formatters as functions", () => {
+    expect(typeof core.listRuns).toBe("function");
+    expect(typeof core.readRunAnswers).toBe("function");
+    expect(typeof core.compareAnswers).toBe("function");
+    expect(typeof core.printableRun).toBe("function");
+    expect(typeof core.pickRunsForDiff).toBe("function");
+    expect(typeof core.formatRunsTable).toBe("function");
+    expect(typeof core.sanitizeTerminal).toBe("function");
+    expect(typeof core.skillEnvWarnings).toBe("function");
+  });
+
+  it("exports the history directory constant", () => {
+    expect(core.RUN_HISTORY_DIR).toBe(join(".sweny", "runs"));
+  });
+
+  it("listRuns reads an empty history, and sanitizeTerminal strips control sequences", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sweny-public-api-"));
+    try {
+      expect(core.listRuns(dir)).toEqual([]);
+      expect(core.sanitizeTerminal("a\u001b[31mb\u001b]0;x\u0007c")).toBe("abc");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not put the run-history helpers in the browser surface (they read the filesystem)", () => {
+    const b = browser as Record<string, unknown>;
+    expect(b.listRuns).toBeUndefined();
+    expect(b.readRunAnswers).toBeUndefined();
+  });
+});

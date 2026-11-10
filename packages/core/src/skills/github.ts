@@ -64,6 +64,146 @@ async function gh(path: string, ctx: ToolContext, init?: RequestInit): Promise<u
   return res.json();
 }
 
+/**
+ * Hard caps for `github_get_pr_patches`: the agent names the files, the tool
+ * decides how much of them it gets. A reviewer's evidence, not the whole diff.
+ */
+export const PR_PATCH_CAPS = { maxFiles: 8, maxBytesPerFile: 6000, maxTotalBytes: 24000 } as const;
+
+/** The PR files endpoint lists at most 3000 files, 100 a page. */
+const PR_FILES_MAX_PAGES = 30;
+
+export interface PrPatchHunk {
+  /** The hunk header alone, e.g. `@@ -10,6 +10,9 @@`. */
+  header: string;
+  /** New-file line range the hunk covers (`start` = `end` = the old position for a pure deletion). */
+  new_start: number;
+  new_end: number;
+  /** The hunk body (context, `+` and `-` lines), header line included. */
+  text: string;
+  /** True when the byte cap cut this hunk short. */
+  cut?: boolean;
+}
+
+export interface PrPatchSelection {
+  files: Array<{
+    filename: string;
+    status: string;
+    additions: number;
+    deletions: number;
+    hunks: PrPatchHunk[];
+    /** True when the byte caps dropped or cut any of this file's hunks. */
+    truncated: boolean;
+    hunks_omitted: number;
+  }>;
+  omitted: Array<{ filename: string; reason: string }>;
+  /** True when anything requested was left out or cut. */
+  truncated: boolean;
+  bytes: number;
+  caps: typeof PR_PATCH_CAPS;
+}
+
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+/** Split a GitHub file patch into hunks at each `@@` header. */
+export function splitHunks(patch: string): PrPatchHunk[] {
+  const hunks: PrPatchHunk[] = [];
+  let cur: PrPatchHunk | null = null;
+  for (const line of patch.split("\n")) {
+    const m = HUNK_HEADER.exec(line);
+    if (m) {
+      const start = Number(m[3]);
+      const len = m[4] === undefined ? 1 : Number(m[4]);
+      cur = { header: m[0], new_start: start, new_end: len > 0 ? start + len - 1 : start, text: line };
+      hunks.push(cur);
+    } else if (cur) {
+      cur.text += `\n${line}`;
+    }
+  }
+  return hunks;
+}
+
+const utf8 = new TextEncoder();
+const byteLength = (s: string) => utf8.encode(s).length;
+
+/** The longest prefix of `s` that fits in `max` UTF-8 bytes, never splitting a character. */
+function cutToBytes(s: string, max: number): string {
+  let out = "";
+  let used = 0;
+  for (const ch of s) {
+    const n = byteLength(ch);
+    if (used + n > max) break;
+    out += ch;
+    used += n;
+  }
+  return out;
+}
+
+/**
+ * Apply {@link PR_PATCH_CAPS} to the requested files, in the order asked.
+ * Pure: `found` is the PR's file records by filename (GitHub's `patch` is
+ * absent for binary files and for diffs too large for the API).
+ */
+export function selectPrPatches(wanted: string[], found: Map<string, Record<string, unknown>>): PrPatchSelection {
+  const caps = PR_PATCH_CAPS;
+  const out: PrPatchSelection = { files: [], omitted: [], truncated: false, bytes: 0, caps };
+  for (const filename of wanted) {
+    const f = found.get(filename);
+    if (!f) {
+      out.omitted.push({ filename, reason: "not a changed file in this pull request" });
+      continue;
+    }
+    if (typeof f.patch !== "string" || f.patch.length === 0) {
+      out.omitted.push({ filename, reason: "no patch from GitHub (binary file, or a diff too large for the API)" });
+      continue;
+    }
+    if (out.files.length >= caps.maxFiles) {
+      out.omitted.push({ filename, reason: `file cap (${caps.maxFiles} files)` });
+      continue;
+    }
+    const left = caps.maxTotalBytes - out.bytes;
+    if (left <= 0) {
+      out.omitted.push({ filename, reason: `byte budget spent (${caps.maxTotalBytes} bytes in all)` });
+      continue;
+    }
+    const budget = Math.min(caps.maxBytesPerFile, left);
+    const all = splitHunks(f.patch);
+    const hunks: PrPatchHunk[] = [];
+    let used = 0;
+    for (const h of all) {
+      const n = byteLength(h.text);
+      if (used + n <= budget) {
+        hunks.push(h);
+        used += n;
+        continue;
+      }
+      // The first hunk that does not fit: keep its head when nothing of this
+      // file fits yet, so a large single-hunk file still shows its start.
+      if (hunks.length === 0) {
+        const text = cutToBytes(h.text, budget);
+        hunks.push({ ...h, text, cut: true });
+        used += byteLength(text);
+      }
+      break;
+    }
+    const dropped = all.length - hunks.length;
+    const truncated = dropped > 0 || hunks.some((h) => h.cut);
+    out.files.push({
+      filename,
+      status: String(f.status ?? ""),
+      additions: Number(f.additions ?? 0),
+      deletions: Number(f.deletions ?? 0),
+      hunks,
+      truncated,
+      hunks_omitted: dropped,
+    });
+    out.bytes += used;
+    if (truncated) out.truncated = true;
+  }
+  if (out.omitted.length > 0) out.truncated = true;
+  return out;
+}
+
 /** The GraphQL endpoint beside the REST base: `/api/graphql` on GHES, `/graphql` on github.com. */
 export function githubGraphqlUrl(apiUrl: string | undefined): string {
   const base = githubApiBase(apiUrl);
@@ -763,6 +903,43 @@ export const github: Skill = {
             changes: f.changes,
           })),
         };
+      },
+    },
+    {
+      name: "github_get_pr_patches",
+      access: "read",
+      description:
+        "Read the patch hunks of named files in a pull request, under hard caps " +
+        `(${PR_PATCH_CAPS.maxFiles} files, ${PR_PATCH_CAPS.maxBytesPerFile} bytes a file, ` +
+        `${PR_PATCH_CAPS.maxTotalBytes} bytes in all). ` +
+        "Each hunk carries its header (e.g. '@@ -10,6 +10,9 @@') and its new-file line range. " +
+        "Everything left out is listed in `omitted` with the reason, and cut files are marked `truncated`. " +
+        "Pass the riskiest paths first: the caps keep the order you give.",
+      input_schema: {
+        type: "object",
+        properties: {
+          repo: { type: "string", description: "owner/repo" },
+          number: { type: "number", description: "Pull request number" },
+          paths: {
+            type: "array",
+            items: { type: "string" },
+            description: `Changed file paths to read, most important first (at most ${PR_PATCH_CAPS.maxFiles} are read)`,
+          },
+        },
+        required: ["repo", "number", "paths"],
+      },
+      handler: async (input: { repo: string; number: number; paths: string[] }, ctx) => {
+        const wanted = [...new Set((Array.isArray(input.paths) ? input.paths : []).map(String))];
+        const found = new Map<string, Record<string, unknown>>();
+        for (let page = 1; page <= PR_FILES_MAX_PAGES; page++) {
+          const batch = (await gh(
+            `/repos/${input.repo}/pulls/${input.number}/files?per_page=100&page=${page}`,
+            ctx,
+          )) as Array<Record<string, unknown>>;
+          for (const f of batch) if (wanted.includes(String(f.filename))) found.set(String(f.filename), f);
+          if (batch.length < 100 || found.size === wanted.length) break;
+        }
+        return selectPrPatches(wanted, found);
       },
     },
     {

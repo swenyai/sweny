@@ -60,8 +60,8 @@ read-only dry run, output checks, timeouts, untrusted-input fencing, cleanup.
 ## Quickstart
 
 Want to see a run first? `sweny try` replays a recorded demo with no login, no credentials, no network and no
-model calls, and prints the same progress, answer, receipt and PR comment a real run does (the sample data is
-illustrative):
+model calls, and prints the same progress, answer, receipt and PR comment a real run does (labelled: illustrative sample
+data until a real run is committed, then a replay of a real run):
 
 ```bash
 npm install -g @sweny-ai/core
@@ -97,8 +97,10 @@ credentials it can't infer:
 ```bash
 $EDITOR .env                # fill in GITHUB_TOKEN etc. for the skills your workflow uses
 sweny check                 # verify only the credentials your workflows need
-sweny workflow run .sweny/workflows/pr-review.yml
+sweny workflow run .sweny/workflows/pr-review.yml --input '{"pr_number": 42}'
 ```
+
+Templates are safe by default: every node is read-only unless it declares a write, and pr-review posts one comment and never approves.
 
 Already have a `.sweny.yml`? `sweny new` adds additional workflows to it non-destructively.
 
@@ -125,7 +127,7 @@ sweny upgrade --check  # dry-run: just report the available version
 
 ## What it does
 
-Describe a task in plain English. SWEny builds a DAG of focused AI agents. Each node gets its own MCP tool set scoped by the skills it declares, structured output, and conditional routing. Every tool call is tracked. (The underlying agent process keeps its built-in tools available so nodes stay agentic inside their box; see [ARCHITECTURE.md](./ARCHITECTURE.md#what-scoped-tools-means) for the exact capability contract.)
+Describe a task in plain English. SWEny builds a DAG of focused AI agents. Each node gets its own MCP tool set scoped by the skills it declares, structured output, and conditional routing. Every tool call is tracked. (Each node also gets only the built-in agent tools its permissions allow, so it stays agentic inside its box; see [ARCHITECTURE.md](./ARCHITECTURE.md#what-scoped-tools-means) for the exact capability contract.)
 
 Run `sweny new`, pick "Describe your own", and enter: "audit our repo for security issues, scan dependencies, and create Linear tickets for anything critical".
 
@@ -261,16 +263,13 @@ Drift
 <summary>Sample output: pr-risk-review</summary>
 
 ```text
-Risk: high (size m, 6 files)
+Risk: high (size m, 6 files, no test touched)
+Areas: auth (src/auth/session.ts), data-migration (db/migrations/0041_add_index.sql), dependencies (package-lock.json)
 
-- src/auth/session.ts changed and no test file was touched
-- db/migrations/0041_add_index.sql is a data migration
-
-Where to look
-- session secret handling in src/auth/session.ts
-- whether 0041 needs a concurrent index build
-
-Read-only scope review. No code was changed.
+- src/auth/session.ts @@ -40,6 +40,7 @@ `secure: false,`: Sets the secure option to false.
+- db/migrations/0041_add_index.sql @@ -0,0 +1,3 @@ `CREATE INDEX idx_orders_user ON orders (user_id);`: Creates index idx_orders_user on orders.user_id.
+Not read: package-lock.json (no patch from GitHub)
+Read-only risk triage. No code was changed.
 ```
 
 </details>

@@ -1037,6 +1037,51 @@ describe("validateWorkflow", () => {
     expect(errors).toContainEqual(expect.objectContaining({ code: "UNSUPPORTED_EVAL_POLICY", nodeId: "a" }));
   });
 
+  it("rejects two evaluators with one name in a node (DUPLICATE_EVALUATOR)", () => {
+    const parsed = parseWorkflow({
+      id: "p",
+      name: "P",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: {
+          name: "A",
+          instruction: "Do A",
+          skills: [],
+          eval: [
+            { name: "called", kind: "function", rule: { all_tools_called: ["x"] } },
+            { name: "called", kind: "function", rule: { no_tool_called: ["y"] } },
+          ],
+        },
+      },
+      edges: [],
+    });
+    const errors = validateWorkflow(parsed).filter((e) => e.code === "DUPLICATE_EVALUATOR");
+    expect(errors).toEqual([
+      {
+        code: "DUPLICATE_EVALUATOR",
+        message: 'Node "a" declares two evaluators named "called"; evaluator names must be unique within a node',
+        nodeId: "a",
+      },
+    ]);
+  });
+
+  it("accepts one evaluator name in two different nodes", () => {
+    const evalOf = (name: string) => [{ name, kind: "function" as const, rule: { any_tool_called: ["x"] } }];
+    const parsed = parseWorkflow({
+      id: "p",
+      name: "P",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "Do A", skills: [], eval: evalOf("called") },
+        b: { name: "B", instruction: "Do B", skills: [], eval: evalOf("called") },
+      },
+      edges: [{ from: "a", to: "b" }],
+    });
+    expect(validateWorkflow(parsed).filter((e) => e.code === "DUPLICATE_EVALUATOR")).toEqual([]);
+  });
+
   it("validates triage workflow", () => {
     expect(validateWorkflow(triageWorkflow)).toEqual([]);
   });
