@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "illustrative": false,
+  "captured_at": "2026-11-12T14:00:00.000Z",
+  "notice": "A replay of a real run. Test fixture: not shipped, the content is made up for specs.",
+  "workflow": "explain-repo",
+  "sample_repo": "acme/widget-service",
+  "harness": { "id": "claude-code", "version": "0.0.0-test" },
+  "policy": { "envScope": true, "sandbox": "strict", "sandboxStarted": true },
+  "nodes": {
+    "survey": {
+      "duration_ms": 12000,
+      "tool_calls": { "Bash": 4, "Read": 2 },
+      "usage": { "inputTokens": 1000, "outputTokens": 2000, "costUsd": 0.1, "numTurns": 4 }
+    },
+    "explain": {
+      "duration_ms": 6000,
+      "tool_calls": { "StructuredOutput": 1 },
+      "usage": { "inputTokens": 500, "outputTokens": 800, "costUsd": 0.05, "numTurns": 2 },
+      "output": {
+        "purpose": "Widget Service stores and serves widgets over HTTP. It is a test fixture: long enough that the answer block needs compacting for the README demo.",
+        "how_to_run": [
+          "Use Node >=22, then run: npm install",
+          "npm run build",
+          "npm run typecheck",
+          "npm test",
+          "npm run lint",
+          "npm start (serves on port 8080)"
+        ],
+        "key_files": [
+          "README.md: start here for the concepts",
+          "src/server.ts: the entry point",
+          "src/routes/widgets.ts: the CRUD endpoints",
+          "src/db/schema.sql: the tables",
+          "src/queue.ts: the background worker",
+          "test/widgets.test.ts: the API tests",
+          "Dockerfile: the production image, built from the repo root so workspaces resolve and the lockfile is honoured"
+        ],
+        "risks": [
+          "No auth on any route.",
+          "The worker retries forever on a bad payload.",
+          "The README does not mention the PORT or DB_PATH variables.",
+          "Migrations run on start, so two replicas can race."
+        ]
+      }
+    }
+  }
+}

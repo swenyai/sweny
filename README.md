@@ -60,8 +60,8 @@ read-only dry run, output checks, timeouts, untrusted-input fencing, cleanup.
 ## Quickstart
 
 Want to see a run first? `sweny try` replays a recorded demo with no login, no credentials, no network and no
-model calls, and prints the same progress, answer, receipt and PR comment a real run does (the sample data is
-illustrative):
+model calls, and prints the same progress, answer, receipt and PR comment a real run does (labelled: illustrative sample
+data until a real run is committed, then a replay of a real run):
 
 ```bash
 npm install -g @sweny-ai/core
@@ -127,7 +127,7 @@ sweny upgrade --check  # dry-run: just report the available version
 
 ## What it does
 
-Describe a task in plain English. SWEny builds a DAG of focused AI agents. Each node gets its own MCP tool set scoped by the skills it declares, structured output, and conditional routing. Every tool call is tracked. (The underlying agent process keeps its built-in tools available so nodes stay agentic inside their box; see [ARCHITECTURE.md](./ARCHITECTURE.md#what-scoped-tools-means) for the exact capability contract.)
+Describe a task in plain English. SWEny builds a DAG of focused AI agents. Each node gets its own MCP tool set scoped by the skills it declares, structured output, and conditional routing. Every tool call is tracked. (Each node also gets only the built-in agent tools its permissions allow, so it stays agentic inside its box; see [ARCHITECTURE.md](./ARCHITECTURE.md#what-scoped-tools-means) for the exact capability contract.)
 
 Run `sweny new`, pick "Describe your own", and enter: "audit our repo for security issues, scan dependencies, and create Linear tickets for anything critical".
 

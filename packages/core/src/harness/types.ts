@@ -152,6 +152,14 @@ export interface HarnessRunRequest extends ClaudeRunRequest {
 export interface HarnessRunResult extends NodeResult {
   harness: HarnessInfo;
   degraded: string[];
+  /**
+   * Names of every tool the agent was given for this run, as the agent itself
+   * listed them (Claude Code: the init message; MCP tools as
+   * `mcp__<server>__<tool>`). The executor repairs a skipped required tool
+   * only when it is on this list. Absent when the harness does not report it,
+   * and then no such repair happens. Never journaled.
+   */
+  agentTools?: string[];
 }
 
 export interface HarnessCompleteRequest {

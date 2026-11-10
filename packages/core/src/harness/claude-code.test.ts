@@ -460,6 +460,8 @@ describe("ClaudeCodeHarness", () => {
         CLAUDE_CODE_OAUTH_TOKEN: "parent-oauth",
         CLAUDE_CODE_USE_BEDROCK: "1",
         AWS_REGION: "us-east-1",
+        // Set by the harness since tool search is off when no server defers its tools.
+        ENABLE_TOOL_SEARCH: "false",
       };
       const FROZEN_UNSCOPED = { ...FROZEN_SCOPED, SWENY_SANDBOX: "off", DATABASE_URL: "postgres://x" };
 

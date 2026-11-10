@@ -302,6 +302,7 @@ SWEny validates workflows before execution. The `sweny workflow validate` comman
 | No unbounded cycles       | `UNBOUNDED_CYCLE`          | Any cycle must have at least one edge with `max_iterations`. The detector removes bounded edges, then checks the remaining subgraph for cycles. |
 | Edge iteration ceiling    | `EDGE_ITERATIONS_EXCEEDED` | `max_iterations` may not exceed 100.                                                                                                            |
 | Retry ceiling             | `RETRY_MAX_EXCEEDED`       | `retry.max` may not exceed 10.                                                                                                                  |
+| Unique evaluator names | `DUPLICATE_EVALUATOR` | Evaluator `name`s must be unique within a node. |
 | Known skills              | `UNKNOWN_SKILL`            | If a skill catalog is provided, all referenced skill IDs must exist in it.                                                                      |
 | Valid inline skills       | `INVALID_INLINE_SKILL`     | Inline `skills` entries in a workflow must declare `instruction`, `mcp`, or both.                                                               |
 | Budget ceiling            | `BUDGET_CEILING`           | A node's `budget.tokens` or `budget.cost_usd` may not exceed the workflow's.                                                                    |
