@@ -29,6 +29,7 @@ The GitHub skill gives Claude access to repositories, issues, pull requests, and
 | `github_list_recent_commits` | List recent commits on a branch (default: main) |
 | `github_get_file` | Get a file's contents from a repository at a given ref |
 | `github_list_pr_files` | List the files changed in a pull request with status and line counts (read-only) |
+| `github_get_pr_patches` | Read the patch hunks of named files in a pull request, capped at 8 files, 6000 bytes a file and 24000 bytes in all; lists what it left out (read-only) |
 | `github_list_dependabot_alerts` | List open Dependabot alerts: package, severity, advisory id, patched version (read-only; needs a token with Dependabot alerts access, not the built-in Actions token) |
 
 ## Setup

@@ -265,14 +265,16 @@ Drift
 ```text
 Risk: high (size m, 6 files)
 
-- src/auth/session.ts changed and no test file was touched
-- db/migrations/0041_add_index.sql is a data migration
+- The session cookie is set without the secure flag (src/auth/session.ts @@ -40,6 +40,7 @@ `secure: false,`)
+- A data migration adds an index without CONCURRENTLY (db/migrations/0041_add_index.sql @@ -0,0 +1,3 @@ `CREATE INDEX idx_orders_user ON orders (user_id);`)
+- No test file was touched.
 
 Where to look
-- session secret handling in src/auth/session.ts
+- cookie flags in src/auth/session.ts
 - whether 0041 needs a concurrent index build
 
-Read-only scope review. No code was changed.
+Not read: package-lock.json (no patch from GitHub)
+Read-only risk triage. No code was changed.
 ```
 
 </details>
