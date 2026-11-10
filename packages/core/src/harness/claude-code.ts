@@ -726,12 +726,19 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     const useBridge = this.toolBridge && tools.length > 0;
     const sdkTools = useBridge ? [] : tools.map((t) => coreToolToSdkTool(t, this.defaultContext));
 
-    // Create in-process MCP server
+    // Create in-process MCP server. `alwaysLoad`: Claude Code defers every MCP
+    // server's tools behind ToolSearch by default and starts MCP servers
+    // without waiting, so a node's skill tools were not on the model's first
+    // turn and it could answer without them (dogfood run 42884113267: the
+    // pr-risk-review scope node called only StructuredOutput). These are the
+    // few tools the node was given to do its job; they load up front, and the
+    // query waits for the server before the first turn.
     const mcpServer = useBridge
       ? undefined
       : createSdkMcpServer({
           name: "sweny-core",
           tools: sdkTools,
+          alwaysLoad: true,
         });
     let bridge: ToolBridge | undefined;
 
@@ -768,6 +775,13 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       const allMcpServers: Record<string, any> = mcpWithheld(!!readOnly, agentAccess)
         ? {}
         : { ...this.defaultMcpServers, ...opts.mcpServers, ...this.mcpServers };
+      // A server the node's own skills declare (stdio or http) carries tools the
+      // node's checks require, so it loads up front like sweny-core below
+      // (Claude Code otherwise defers them behind ToolSearch). An explicit
+      // `alwaysLoad` in the server config wins.
+      for (const name of Object.keys(opts.mcpServers ?? {})) {
+        if (allMcpServers[name]) allMcpServers[name] = { alwaysLoad: true, ...allMcpServers[name] };
+      }
       if (useBridge) {
         // Only `tools` (already allow/deny and dry-run filtered by the
         // executor) are exposed. Under readOnly it is still the only MCP
@@ -778,7 +792,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
           logger: this.logger,
           ...(this.toolBridgeShim ? { shimCommand: this.toolBridgeShim } : {}),
         });
-        allMcpServers["sweny-core"] = bridge.mcpServer;
+        // Same reason as the in-process server: the node's tools load up front.
+        allMcpServers["sweny-core"] = { ...bridge.mcpServer, alwaysLoad: true };
       } else if (sdkTools.length > 0) {
         allMcpServers["sweny-core"] = mcpServer;
       }
@@ -822,6 +837,20 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       });
 
       for await (const message of stream) {
+        if (message.type === "system" && (message as any).subtype === "init") {
+          // What the agent was actually given: the tool list (--verbose) and,
+          // loudly, a node tool server that did not come up.
+          const init = message as any;
+          if (Array.isArray(init.tools)) this.logger.debug(`  agent tools: ${init.tools.join(", ")}`);
+          const core = Array.isArray(init.mcp_servers)
+            ? init.mcp_servers.find((s: any) => s?.name === "sweny-core")
+            : undefined;
+          if (allMcpServers["sweny-core"] && core && core.status !== "connected") {
+            this.logger.warn(
+              `  sweny-core tool server is ${core.status} at start; the node's skill tools may be missing`,
+            );
+          }
+        }
         if (message.type === "tool_progress") {
           const tp = message as any;
           if (tp.tool_name && typeof tp.elapsed_time_seconds === "number") {

@@ -122,11 +122,15 @@ describe("skill-declared MCP execution (#328)", () => {
       mcp: { url: "https://caller.invalid/mcp" },
     };
     await run(workflow(mcp), new Map([[skill.id, skill]]));
-    expect(query.mock.calls[0][0].options.mcpServers?.external).toEqual({ ...skill.mcp, type: "http" });
+    expect(query.mock.calls[0][0].options.mcpServers?.external).toEqual({
+      alwaysLoad: true,
+      ...skill.mcp,
+      type: "http",
+    });
     query.mockClear();
     const explicit = { url: "https://explicit.invalid/mcp" };
     await run(workflow(mcp), new Map([[skill.id, skill]]), false, client({ external: explicit }));
-    expect(query.mock.calls[0][0].options.mcpServers.external).toEqual(explicit);
+    expect(query.mock.calls[0][0].options.mcpServers.external).toEqual({ alwaysLoad: true, ...explicit });
   });
   it("honors discovery's stdio opt-in before wiring a SKILL.md server", async () => {
     const skillDir = join(dir, ".sweny", "skills", "external");
@@ -144,7 +148,7 @@ describe("skill-declared MCP execution (#328)", () => {
     query.mockClear();
     const allowed = discoverSkillsWithDiagnostics(dir, { SWENY_ALLOW_SKILL_STDIO_COMMAND: "1" });
     await run(wf, new Map(allowed.skills.map((skill) => [skill.id, skill])));
-    expect(query.mock.calls[0][0].options.mcpServers.external).toEqual({ ...mcp, type: "stdio" });
+    expect(query.mock.calls[0][0].options.mcpServers.external).toEqual({ alwaysLoad: true, ...mcp, type: "stdio" });
   });
 
   it("passes declared skill credentials and server env into the stdio process under env scoping", async () => {
@@ -199,7 +203,7 @@ describe("skill-declared MCP execution (#328)", () => {
       false,
       new ClaudeClient({ logger: quiet, sandbox: "off", envScope: false, defaultMcpServers: defaults }),
     );
-    expect(query.mock.calls[0][0].options.mcpServers.github).toEqual(custom);
+    expect(query.mock.calls[0][0].options.mcpServers.github).toEqual({ alwaysLoad: true, ...custom });
     expect(query.mock.calls[1][0].options.mcpServers.github).toEqual(defaults.github);
     query.mockClear();
     const explicit = { type: "http" as const, url: "https://explicit.invalid/mcp" };
@@ -215,7 +219,7 @@ describe("skill-declared MCP execution (#328)", () => {
         mcpServers: { github: explicit },
       }),
     );
-    expect(query.mock.calls[0][0].options.mcpServers.github).toEqual(explicit);
+    expect(query.mock.calls[0][0].options.mcpServers.github).toEqual({ alwaysLoad: true, ...explicit });
   });
 
   it("accepts a resolved MCP-only skill without imposing the inline instruction requirement", async () => {
@@ -231,7 +235,7 @@ describe("skill-declared MCP execution (#328)", () => {
       mcp,
     };
     await run(wf, new Map([[skill.id, skill]]));
-    expect(query.mock.calls[0][0].options.mcpServers.external).toEqual({ ...mcp, type: "stdio" });
+    expect(query.mock.calls[0][0].options.mcpServers.external).toEqual({ alwaysLoad: true, ...mcp, type: "stdio" });
   });
 
   it.each(["inline", "resolved"])("rejects a %s MCP declaration using the engine server name", async (source) => {

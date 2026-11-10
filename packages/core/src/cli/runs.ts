@@ -7,6 +7,7 @@
  */
 
 import type { Command } from "commander";
+import type { RouteRung } from "../types.js";
 import {
   findRun,
   listRuns,
@@ -76,42 +77,67 @@ function pad(s: string, w: number, right = false): string {
 const finite = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const finiteOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+const RUNG = new Set(["expr", "decider", "agent"]);
+
 /**
- * A copy of a history record that is safe to print. `.sweny/runs/` is writable by an agent, so every
- * string read from a record goes through {@link sanitizeTerminal} (control sequences stripped, length
- * capped) and every number is coerced to a finite number. Only for display: matching and `--json`
- * use the record as read.
+ * A copy of a history record that is safe to print and to export. `.sweny/runs/` is writable by an
+ * agent, so the copy is built from an explicit allow-list of typed fields, never by spreading the
+ * record: unknown keys are dropped at every level, every string goes through {@link sanitizeTerminal}
+ * (control sequences stripped, length capped), every number is coerced finite, and malformed node and
+ * route entries are skipped. The table, the diff and every `--json` output use it.
  */
 export function printableRun(r: RunRecord): RunRecord {
   const t = (v: unknown, max = 64) => sanitizeTerminal(v, max);
-  return {
-    ...r,
-    run_id: t(r.run_id),
-    workflow_id: t(r.workflow_id),
-    workflow_hash: t(r.workflow_hash),
-    started_at: t(r.started_at),
-    status: t(r.status, 16) as RunStatus,
-    duration_ms: finite(r.duration_ms),
-    nodes: r.nodes.map((n) => ({
-      id: t(n.id),
-      status: t(n.status, 16) as RunNodeRecord["status"],
-      duration_ms: finite(n.duration_ms),
-      tool_calls: finite(n.tool_calls),
-      tokens: finiteOrNull(n.tokens),
-      cost_usd: finiteOrNull(n.cost_usd),
-      retries: finite(n.retries),
-    })),
-    routes: r.routes.map((e) => ({ from: t(e.from), to: t(e.to) })),
+  const rec = r as unknown as Record<string, unknown>;
+  const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+  const totals = isObj(rec.totals) ? rec.totals : {};
+  const out: RunRecord = {
+    schema_version: finite(rec.schema_version),
+    run_id: t(rec.run_id),
+    workflow_id: t(rec.workflow_id),
+    workflow_hash: t(rec.workflow_hash),
+    started_at: t(rec.started_at),
+    duration_ms: finite(rec.duration_ms),
+    status: t(rec.status, 16) as RunStatus,
+    nodes: list(rec.nodes)
+      .filter(isObj)
+      .map((n) => ({
+        id: t(n.id),
+        status: t(n.status, 16) as RunNodeRecord["status"],
+        duration_ms: finite(n.duration_ms),
+        tool_calls: finite(n.tool_calls),
+        tokens: finiteOrNull(n.tokens),
+        cost_usd: finiteOrNull(n.cost_usd),
+        retries: finite(n.retries),
+      })),
+    routes: list(rec.routes)
+      .filter((e): e is Record<string, unknown> => isObj(e) && typeof e.from === "string" && typeof e.to === "string")
+      .map((e) => ({
+        from: t(e.from),
+        to: t(e.to),
+        ...(typeof e.rung === "string" && RUNG.has(e.rung) ? { rung: e.rung as RouteRung } : {}),
+      })),
     totals: {
-      nodes_total: finite(r.totals.nodes_total),
-      nodes_ok: finite(r.totals.nodes_ok),
-      nodes_skipped: finite(r.totals.nodes_skipped),
-      tool_calls: finite(r.totals.tool_calls),
-      tokens: finiteOrNull(r.totals.tokens),
-      cost_usd: finiteOrNull(r.totals.cost_usd),
+      nodes_total: finite(totals.nodes_total),
+      nodes_ok: finite(totals.nodes_ok),
+      nodes_skipped: finite(totals.nodes_skipped),
+      tool_calls: finite(totals.tool_calls),
+      tokens: finiteOrNull(totals.tokens),
+      cost_usd: finiteOrNull(totals.cost_usd),
     },
-    ...(r.spend && typeof r.spend === "object" ? { spend: printableSpend(r.spend) } : {}),
   };
+  if (isObj(rec.harness)) out.harness = { id: t(rec.harness.id), version: t(rec.harness.version) };
+  if (Array.isArray(rec.degraded)) {
+    out.degraded = rec.degraded.filter((d): d is string => typeof d === "string").map((d) => t(d));
+  }
+  if (isObj(rec.spend)) out.spend = printableSpend(rec.spend as NonNullable<RunRecord["spend"]>);
+  return out;
+}
+
+/** `sweny runs --json`: the validated records, never the raw ones. */
+export function formatRunsJson(records: RunRecord[]): string {
+  return JSON.stringify(records.map(printableRun), null, 2) + "\n";
 }
 
 /** The record's split, or its totals as all node spend when it has none. */
@@ -503,7 +529,8 @@ export function runRunsDiff(refs: string[], opts: { workflow?: string; json?: bo
   const { a, b } = picked;
   const answers = compareAnswers(readRunAnswers(a.run_id, io.cwd), readRunAnswers(b.run_id, io.cwd));
   if (opts.json) {
-    io.stdout.write(JSON.stringify({ schema_version: 1, a, b, answers }, null, 2) + "\n");
+    const body = { schema_version: 1, a: printableRun(a), b: printableRun(b), answers };
+    io.stdout.write(JSON.stringify(body, null, 2) + "\n");
     return 0;
   }
   io.stdout.write(
@@ -532,7 +559,7 @@ export function registerRunsCommand(program: Command): Command {
       if (opts.workflow) runs = runs.filter((r) => r.workflow_id === opts.workflow);
       runs = runs.slice(0, limit);
       if (opts.json) {
-        process.stdout.write(JSON.stringify(runs, null, 2) + "\n");
+        process.stdout.write(formatRunsJson(runs));
         return;
       }
       process.stdout.write(

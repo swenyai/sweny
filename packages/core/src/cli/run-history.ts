@@ -357,20 +357,80 @@ export function recordRun(record: RunRecord, cwd: string = process.cwd()): boole
   return true;
 }
 
-function isRecord(v: unknown): v is RunRecord {
-  const r = v as RunRecord;
-  return (
-    !!r &&
-    typeof r === "object" &&
-    r.schema_version === RUN_HISTORY_SCHEMA_VERSION &&
-    typeof r.run_id === "string" &&
-    typeof r.workflow_id === "string" &&
-    typeof r.started_at === "string" &&
-    Array.isArray(r.nodes) &&
-    Array.isArray(r.routes) &&
-    !!r.totals &&
-    typeof r.totals === "object"
-  );
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+const numOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+const RUNGS: ReadonlySet<string> = new Set(["expr", "decider", "agent"]);
+
+/**
+ * A typed, allow-listed copy of a stored record, or null when it is not a run record. History is
+ * agent-writable, so a record is never passed through: only the documented fields are copied, numbers
+ * are made finite, and malformed node, route, harness, degraded and spend entries are dropped. Strings
+ * are kept as read (terminal safety is the printer's job, see `printableRun`).
+ */
+function parseRecord(v: unknown): RunRecord | null {
+  if (!isObj(v)) return null;
+  if (
+    v.schema_version !== RUN_HISTORY_SCHEMA_VERSION ||
+    typeof v.run_id !== "string" ||
+    typeof v.workflow_id !== "string" ||
+    typeof v.started_at !== "string" ||
+    typeof v.status !== "string" ||
+    !Array.isArray(v.nodes) ||
+    !Array.isArray(v.routes) ||
+    !isObj(v.totals)
+  ) {
+    return null;
+  }
+  const t = v.totals;
+  const out: RunRecord = {
+    schema_version: RUN_HISTORY_SCHEMA_VERSION,
+    run_id: v.run_id,
+    workflow_id: v.workflow_id,
+    workflow_hash: typeof v.workflow_hash === "string" ? v.workflow_hash : "",
+    started_at: v.started_at,
+    duration_ms: num(v.duration_ms),
+    status: v.status as RunStatus,
+    nodes: v.nodes
+      .filter((n): n is Record<string, unknown> => isObj(n) && typeof n.id === "string" && typeof n.status === "string")
+      .map((n) => ({
+        id: n.id as string,
+        status: n.status as RunNodeRecord["status"],
+        duration_ms: num(n.duration_ms),
+        tool_calls: num(n.tool_calls),
+        tokens: numOrNull(n.tokens),
+        cost_usd: numOrNull(n.cost_usd),
+        retries: num(n.retries),
+      })),
+    routes: v.routes
+      .filter((e): e is Record<string, unknown> => isObj(e) && typeof e.from === "string" && typeof e.to === "string")
+      .map((e) => ({
+        from: e.from as string,
+        to: e.to as string,
+        ...(typeof e.rung === "string" && RUNGS.has(e.rung) ? { rung: e.rung as RouteRung } : {}),
+      })),
+    totals: {
+      nodes_total: num(t.nodes_total),
+      nodes_ok: num(t.nodes_ok),
+      nodes_skipped: num(t.nodes_skipped),
+      tool_calls: num(t.tool_calls),
+      tokens: numOrNull(t.tokens),
+      cost_usd: numOrNull(t.cost_usd),
+    },
+  };
+  if (isObj(v.harness) && typeof v.harness.id === "string" && typeof v.harness.version === "string") {
+    out.harness = { id: v.harness.id, version: v.harness.version };
+  }
+  if (Array.isArray(v.degraded)) out.degraded = v.degraded.filter((d): d is string => typeof d === "string");
+  if (isObj(v.spend)) {
+    const spend: NonNullable<RunRecord["spend"]> = {};
+    for (const k of SPEND_KINDS) {
+      const e = Object.hasOwn(v.spend, k) ? v.spend[k] : undefined;
+      if (isObj(e)) spend[k] = { tokens: num(e.tokens), cost_usd: num(e.cost_usd), calls: num(e.calls) };
+    }
+    out.spend = spend;
+  }
+  return out;
 }
 
 /**
@@ -395,7 +455,8 @@ export function listRuns(cwd: string = process.cwd()): RunRecord[] {
       const st = fs.lstatSync(file);
       if (!st.isFile() || st.size > RECORD_READ_MAX_BYTES) continue;
       const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
-      if (isRecord(parsed) && RUN_ID_RE.test(parsed.run_id) && f === `${parsed.run_id}.json`) out.push(parsed);
+      const rec = parseRecord(parsed);
+      if (rec && RUN_ID_RE.test(rec.run_id) && f === `${rec.run_id}.json`) out.push(rec);
     } catch {
       // corrupt record: skip
     }
