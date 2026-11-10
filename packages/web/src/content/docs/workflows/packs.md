@@ -226,9 +226,10 @@ jobs:
 
 ### Gates
 
-- `scope`: function gates (it listed the files, it wrote nothing) and value gates on size and risky-area names.
-- `assess`: a function gate that it read the hunks, value gates on the risk level and that every reason cites a file, a hunk header and a quoted changed line, and the pack's only judge gate: no reason may say more than its quoted line shows (no claimed bugs, no inferred behavior). A failed gate gets one retry with the gate's reasoning in front of the step; a second failure fails the run.
-- `post-comment`: function gate that the comment was requested, value gate on the result. SWEny posts it after the step.
+- `scope`: function gates (it listed the files, it wrote nothing) and value gates on size and risky-area names. It lists the test files and risky-area paths it found, and SWEny recounts both lists: a count that disagrees gets one repair request.
+- **The risk level is SWEny's, not the model's.** `assess` has three out-edges with `when` expressions over the scope measurements, evaluated with no model call. High: a risky area changed, and either no test was touched or the change is size l or xl. Medium: a risky area changed with tests, or no risky area but a source change of size m or larger with no tests. Low: everything else. Each level has its own comment node, pinned to that level by a value gate.
+- `assess`: writes at most 4 notes, each a file, a hunk header, one quoted changed line, and an observation of at most 140 characters that only restates that line. Rule gates check the shape of every note (hunk header format, one-line quote, one-line observation within the cap) and that it read the hunks. The pack's only judge gate checks one thing: no observation says more than its quoted line (no consequences, no intent, no claimed bugs). A failed gate gets one retry with the gate's reasoning in front of the step; a second failure fails the run.
+- `comment-high`, `comment-medium`, `comment-low`: function gate that the comment was requested, value gate that it carries the routed level. SWEny posts it after the step.
 
 The review is one comment on the PR, updated in place on later runs: the findings plus one link to the run's receipt. Cost, tokens, duration and the DAG go to the Action's job summary, not the thread. A run whose findings match the last post writes nothing, and the job summary says so. See [PR comment](/action/inputs/#pr-comment).
 
@@ -249,16 +250,11 @@ This starts a new model run for each push. New findings update the same comment;
 Illustrative, not captured from a run.
 
 ```text
-Risk: high (size m, 6 files)
+Risk: high (size m, 6 files, no test touched)
+Areas: auth (src/auth/session.ts), data-migration (db/migrations/0041_add_index.sql), dependencies (package-lock.json)
 
-- The session cookie is set without the secure flag (src/auth/session.ts @@ -40,6 +40,7 @@ `secure: false,`)
-- A data migration adds an index without CONCURRENTLY (db/migrations/0041_add_index.sql @@ -0,0 +1,3 @@ `CREATE INDEX idx_orders_user ON orders (user_id);`)
-- No test file was touched.
-
-Where to look
-- cookie flags in src/auth/session.ts
-- whether 0041 needs a concurrent index build
-
+- src/auth/session.ts @@ -40,6 +40,7 @@ `secure: false,`: Sets the secure option to false.
+- db/migrations/0041_add_index.sql @@ -0,0 +1,3 @@ `CREATE INDEX idx_orders_user ON orders (user_id);`: Creates index idx_orders_user on orders.user_id.
 Not read: package-lock.json (no patch from GitHub)
 Read-only risk triage. No code was changed.
 ```
