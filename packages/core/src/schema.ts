@@ -1134,17 +1134,17 @@ export const workflowJsonSchema = {
           },
         },
         {
-          // output_grounded reads the tool trace: function only.
-          if: { properties: { kind: { const: "value" } } },
-          then: { properties: { rule: { not: { required: ["output_grounded"] } } } },
-        },
-        {
           if: { properties: { kind: { const: "judge" } } },
           then: {
             required: ["rubric"],
             // `rule` is value / function only.
             not: { required: ["rule"] },
           },
+        },
+        {
+          // output_grounded reads the tool trace: function only.
+          if: { properties: { kind: { const: "value" } } },
+          then: { properties: { rule: { not: { required: ["output_grounded"] } } } },
         },
       ],
     },

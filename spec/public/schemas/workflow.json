@@ -271,6 +271,21 @@
           "if": {
             "properties": {
               "kind": {
+                "const": "judge"
+              }
+            }
+          },
+          "then": {
+            "required": ["rubric"],
+            "not": {
+              "required": ["rule"]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
                 "const": "value"
               }
             }
@@ -282,21 +297,6 @@
                   "required": ["output_grounded"]
                 }
               }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "kind": {
-                "const": "judge"
-              }
-            }
-          },
-          "then": {
-            "required": ["rubric"],
-            "not": {
-              "required": ["rule"]
             }
           }
         }

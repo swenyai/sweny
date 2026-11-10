@@ -59,7 +59,7 @@ describe("output_grounded in the executor", () => {
         ],
       },
     });
-    const results = await execute(twoNodes(), {}, { skills: createSkillMap([]), claude, logger: silent });
+    const { results } = await execute(twoNodes(), {}, { skills: createSkillMap([]), claude, logger: silent });
     const write = results.get("write")!;
     expect(write.status).toBe("success");
     expect(write.evals?.[0]).toMatchObject({ name: "cites_only_seen", kind: "function", pass: true });
@@ -70,7 +70,7 @@ describe("output_grounded in the executor", () => {
       gather: { status: "success", data: { tickets: ["OPS-1"] }, toolCalls: [] },
       write: { status: "success", data: { todo: "OPS-1 and OPS-404" }, toolCalls: [] },
     });
-    const results = await execute(twoNodes(), {}, { skills: createSkillMap([]), claude, logger: silent });
+    const { results } = await execute(twoNodes(), {}, { skills: createSkillMap([]), claude, logger: silent });
     const write = results.get("write")!;
     expect(write.status).toBe("failed");
     expect(write.evals?.[0]?.pass).toBe(false);
@@ -83,7 +83,7 @@ describe("output_grounded in the executor", () => {
       gather: { status: "success", data: {}, toolCalls: [] },
       write: { status: "success", data: { todo: "OPS-77" }, toolCalls: [] },
     });
-    const results = await execute(
+    const { results } = await execute(
       twoNodes(),
       { ticket: "OPS-77" },
       { skills: createSkillMap([]), claude, logger: silent },
