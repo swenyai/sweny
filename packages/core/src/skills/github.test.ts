@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { github, encodeRepoFilePath, githubGraphqlUrl, resolveCommentAuthor } from "./github.js";
+import {
+  github,
+  encodeRepoFilePath,
+  githubGraphqlUrl,
+  resolveCommentAuthor,
+  PR_PATCH_CAPS,
+  selectPrPatches,
+  splitHunks,
+} from "./github.js";
 import { isToolRefusal, type Logger, type ToolContext } from "../types.js";
 
 const ctx = (overrides: Partial<ToolContext> = {}): ToolContext => ({
@@ -996,6 +1004,113 @@ describe("github_list_pr_files", () => {
     expect(out.count).toBe(1);
     expect(out.truncated).toBe(false);
     expect(out.files[0]).toEqual({ filename: "src/a.ts", status: "modified", additions: 3, deletions: 1, changes: 4 });
+  });
+});
+
+describe("github_get_pr_patches", () => {
+  const tool = github.tools.find((t) => t.name === "github_get_pr_patches")!;
+  afterEach(() => vi.unstubAllGlobals());
+
+  const file = (filename: string, patch?: string) => ({
+    filename,
+    status: "modified",
+    additions: 2,
+    deletions: 1,
+    changes: 3,
+    ...(patch === undefined ? {} : { patch }),
+  });
+  const hunk = (start: number, body: string) => `@@ -${start},2 +${start},3 @@ ctx\n ${body}\n+added\n-removed`;
+
+  it("is a read tool that returns the named files' hunks with headers and line ranges", async () => {
+    expect(tool.access).toBe("read");
+    const patch = `${hunk(10, "a")}\n${hunk(40, "b")}`;
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, [file("src/a.ts", patch), file("src/b.ts", "x")]));
+    vi.stubGlobal("fetch", fetchMock);
+    const out: any = await tool.handler({ repo: "o/r", number: 7, paths: ["src/a.ts"] }, ctx());
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.github.com/repos/o/r/pulls/7/files?per_page=100&page=1");
+    expect(out.files).toHaveLength(1);
+    expect(out.files[0].hunks.map((h: any) => [h.header, h.new_start, h.new_end])).toEqual([
+      ["@@ -10,2 +10,3 @@", 10, 12],
+      ["@@ -40,2 +40,3 @@", 40, 42],
+    ]);
+    expect(out.files[0].hunks[0].text).toBe(hunk(10, "a"));
+    expect(out.files[0].truncated).toBe(false);
+    expect(out.truncated).toBe(false);
+    expect(out.omitted).toEqual([]);
+    expect(out.caps).toEqual(PR_PATCH_CAPS);
+  });
+
+  it("reads past the first page until every named file is found", async () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => file(`f${i}.ts`, hunk(1, "x")));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, page1))
+      .mockResolvedValueOnce(jsonResponse(200, [file("late.ts", hunk(1, "y"))]));
+    vi.stubGlobal("fetch", fetchMock);
+    const out: any = await tool.handler({ repo: "o/r", number: 7, paths: ["late.ts"] }, ctx());
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toContain("&page=2");
+    expect(out.files.map((f: any) => f.filename)).toEqual(["late.ts"]);
+  });
+
+  it("enforces the file cap in the order asked and names every file it left out", async () => {
+    const names = Array.from({ length: PR_PATCH_CAPS.maxFiles + 2 }, (_, i) => `f${i}.ts`);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse(200, [...names.map((n) => file(n, hunk(1, n))), file("bin.png")])),
+    );
+    const out: any = await tool.handler({ repo: "o/r", number: 7, paths: [...names, "bin.png", "nope.ts"] }, ctx());
+    expect(out.files.map((f: any) => f.filename)).toEqual(names.slice(0, PR_PATCH_CAPS.maxFiles));
+    expect(out.omitted).toEqual([
+      { filename: names[PR_PATCH_CAPS.maxFiles], reason: `file cap (${PR_PATCH_CAPS.maxFiles} files)` },
+      { filename: names[PR_PATCH_CAPS.maxFiles + 1], reason: `file cap (${PR_PATCH_CAPS.maxFiles} files)` },
+      { filename: "bin.png", reason: "no patch from GitHub (binary file, or a diff too large for the API)" },
+      { filename: "nope.ts", reason: "not a changed file in this pull request" },
+    ]);
+    expect(out.truncated).toBe(true);
+  });
+
+  it("caps bytes per file: whole hunks first, then reports how many it dropped", () => {
+    const big = "x".repeat(PR_PATCH_CAPS.maxBytesPerFile / 2);
+    const patch = [hunk(1, big), hunk(100, big), hunk(200, big)].join("\n");
+    const out = selectPrPatches(["a.ts"], new Map([["a.ts", file("a.ts", patch)]]));
+    const f = out.files[0]!;
+    expect(f.hunks.map((h) => h.header)).toEqual(["@@ -1,2 +1,3 @@"]);
+    expect(f.hunks_omitted).toBe(2);
+    expect(f.truncated).toBe(true);
+    expect(out.truncated).toBe(true);
+    expect(out.bytes).toBeLessThanOrEqual(PR_PATCH_CAPS.maxBytesPerFile);
+  });
+
+  it("cuts a single oversized hunk to the cap without splitting a character, and marks it cut", () => {
+    const patch = hunk(5, "é".repeat(PR_PATCH_CAPS.maxBytesPerFile));
+    const out = selectPrPatches(["a.ts"], new Map([["a.ts", file("a.ts", patch)]]));
+    const h = out.files[0]!.hunks[0]!;
+    expect(h.cut).toBe(true);
+    expect(h.header).toBe("@@ -5,2 +5,3 @@");
+    expect(new TextEncoder().encode(h.text).length).toBeLessThanOrEqual(PR_PATCH_CAPS.maxBytesPerFile);
+    expect(h.text).not.toContain("�");
+    expect(out.files[0]!.truncated).toBe(true);
+  });
+
+  it("caps total bytes across files and names the files the budget left out", () => {
+    const body = "y".repeat(PR_PATCH_CAPS.maxBytesPerFile - 100);
+    const n = Math.ceil(PR_PATCH_CAPS.maxTotalBytes / (PR_PATCH_CAPS.maxBytesPerFile - 50)) + 1;
+    const names = Array.from({ length: Math.min(n, PR_PATCH_CAPS.maxFiles) }, (_, i) => `g${i}.ts`);
+    const out = selectPrPatches(names, new Map(names.map((nm) => [nm, file(nm, hunk(1, body))])));
+    expect(out.bytes).toBeLessThanOrEqual(PR_PATCH_CAPS.maxTotalBytes);
+    expect(out.omitted.some((o) => o.reason.startsWith("byte budget spent"))).toBe(true);
+    expect(out.truncated).toBe(true);
+    for (const o of out.omitted) expect(names).toContain(o.filename);
+  });
+
+  it("a pure deletion hunk sits at its old position", () => {
+    expect(splitHunks("@@ -3,2 +2,0 @@\n-a\n-b")[0]).toMatchObject({
+      header: "@@ -3,2 +2,0 @@",
+      new_start: 2,
+      new_end: 2,
+    });
+    expect(splitHunks("@@ -1 +1 @@\n-a\n+b")[0]).toMatchObject({ header: "@@ -1 +1 @@", new_start: 1, new_end: 1 });
   });
 });
 

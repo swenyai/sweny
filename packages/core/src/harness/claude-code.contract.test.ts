@@ -20,4 +20,6 @@ runContractSuite(
   },
   fakes,
   "claude-code",
+  // The harness sets ENABLE_TOOL_SEARCH itself (CLAUDE_CODE_HARNESS_VARS: tool search off when nothing is deferred).
+  { authVars: ["ENABLE_TOOL_SEARCH"] },
 );

@@ -1,8 +1,14 @@
+spec_version: "2"
 id: data-sync-example
 name: Data Sync Pipeline (example)
 description: Sync structured records from a source to a target, with a judge checking every mapping for fidelity.
 workflow_type: data_sync
 entry: fetch-records
+
+# Safe by default (spec_version 2): this example only reports what it would
+# write, so every node is read-only. Declare permissions on sync-target when
+# you point it at a real target.
+permissions: read
 
 nodes:
   fetch-records:

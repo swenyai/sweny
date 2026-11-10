@@ -28,14 +28,27 @@ sweny try
 sweny try --fast        # skip the pacing
 ```
 
-The recording is illustrative sample data (a fictional repo, hand-written timings and token counts), not output from a real run. Nothing runs and no files are written. When you are ready for a real run, use [`sweny new`](#sweny-new).
+The label says what the recording is. Until a real run is committed it is illustrative sample data (a fictional repo, hand-written timings and token counts). A recording of a real run says "a replay of a real run on `<date>`" instead, with the recorded tool-call counts, tokens, cost and answer (redacted); its timings are scaled to about 8 seconds so the replay stays short. Nothing runs and no files are written. When you are ready for a real run, use [`sweny new`](#sweny-new).
+
+On a live terminal the replay is paced by those scaled timings. Piped, under `CI`, or with `--fast` it prints at once. `NO_COLOR` turns color off.
+
+### Capture a real run
+
+`sweny try --capture <run>` turns a recorded run into the fixture `sweny try` replays. `<run>` is `latest`, a run id, or a path under `.sweny/runs/`. The run must have succeeded and been recorded by a sweny that keeps per-tool call counts. The answer is redacted again before it is written.
+
+```bash
+sweny try --capture latest --repo swenyai/sweny --out packages/core/src/cli/try-fixture.json
+```
 
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--fast` | Replay instantly instead of pacing the progress | `false` |
-| `--pace <ms>` | Milliseconds each node takes to replay | `1200` |
+| `--pace <ms>` | Fixed milliseconds per node | recorded timings, scaled |
 | `--comment-file <path>` | Also write the PR-comment markdown to `<path>` | none |
 | `--record <file.svg>` | Write the demo as an animated, self-contained SVG terminal recording to `<file.svg>` | none |
+| `--capture <run>` | Convert a recorded run into a try fixture instead of replaying | none |
+| `--repo <owner/name>` | With `--capture`: the repo the run was on | `GITHUB_REPOSITORY` |
+| `--out <file>` | With `--capture`: write the fixture to `<file>` | stdout |
 
 ## sweny check
 
@@ -275,7 +288,7 @@ sweny workflow upgrade <file> [--dry-run]
 |--------|-------------|---------|
 | `--dry-run` | Report what would change without writing the file | `false` |
 
-Workflows carry an optional `spec_version` (absent means `"1"`). Older files still load: the CLI migrates them in memory and prints one warning pointing here. `upgrade` applies the same migrations and writes the file back. YAML comments, blank lines and key order are kept for everything a migration does not touch; comments on values a migration replaces or removes are not. A file newer than your CLI is refused with a prompt to run `sweny upgrade`.
+Workflows carry an optional `spec_version` (absent means `"1"`; the current version is `"2"`). Older files still load: the CLI migrates them in memory and prints one warning pointing here, plus one per node that can write only because nothing limits it. Upgrading to `"2"` writes `permissions: write` on those nodes, with a comment on each, so the file runs as before; see [Permissions and defaults](/workflows/yaml-reference/#permissions-and-defaults). `upgrade` applies the same migrations and writes the file back. YAML comments, blank lines and key order are kept for everything a migration does not touch; comments on values a migration replaces or removes are not. A file newer than your CLI is refused with a prompt to run `sweny upgrade`.
 
 ### sweny workflow run
 
