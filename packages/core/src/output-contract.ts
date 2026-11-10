@@ -110,10 +110,12 @@ function validatorFor(schema: JSONSchema): Validator {
   return /2019-09/.test(dialect) ? DRAFT_2019 : DRAFT_2020;
 }
 
+const INVALID_SCHEMA = "schema is invalid: ";
+
 /** ajv repeats a meta-schema complaint once per branch it tried: say each once. */
 function oneEach(message: string): string {
-  const [, head, rest] = /^(schema is invalid: |)(.*)$/s.exec(message)!;
-  return head + [...new Set(rest.split(", "))].join(", ");
+  const head = message.startsWith(INVALID_SCHEMA) ? INVALID_SCHEMA : "";
+  return head + [...new Set(message.slice(head.length).split(", "))].join(", ");
 }
 
 type Compiled = { validate: ValidateFunction } | { error: string };
@@ -158,7 +160,7 @@ function pointerSegments(pointer: string): string[] {
 }
 
 /** One step down the data. Every segment but a final missing or extra key exists, since ajv found it there. */
-const step = (cur: unknown, seg: string): unknown => (cur as Record<string, unknown> | undefined)?.[seg];
+const step = (cur: unknown, seg: string): unknown => (cur as Record<string, unknown>)[seg];
 
 /**
  * `["findings", "1", "severity"]` over the data -> `findings[1].severity`.
@@ -235,9 +237,9 @@ function typeMatches(t: unknown, v: unknown): boolean {
     case "string":
       return typeof v === "string";
     case "number":
-      return typeof v === "number" && Number.isFinite(v);
+      return Number.isFinite(v);
     case "integer":
-      return typeof v === "number" && Number.isInteger(v);
+      return Number.isInteger(v);
     case "boolean":
       return typeof v === "boolean";
     case "array":
@@ -260,14 +262,14 @@ function topLevelProblems(output: JSONSchema, data: Record<string, unknown>): Co
       problems.push({ field: k, path: k, kind: "missing", problem: "required but missing", fallback: true });
     }
   }
-  const props = output.properties;
-  if (!props || typeof props !== "object") return problems;
-  for (const [k, raw] of Object.entries(props as Record<string, unknown>)) {
-    if (!hasOwn(data, k) || !raw || typeof raw !== "object") continue;
-    const p = raw as { type?: unknown; enum?: unknown };
-    const types = [p.type ?? []].flat();
+  // This schema did not compile, so any part of it may be malformed: read it defensively.
+  for (const [k, raw] of Object.entries(output.properties ?? {})) {
+    if (!hasOwn(data, k)) continue;
+    const p = (raw ?? {}) as { type?: unknown; enum?: unknown };
+    // An absent or unknown type matches anything, as before #573.
+    const types = [p.type].flat();
     let problem: string | undefined;
-    if (types.length > 0 && !types.some((t) => typeMatches(t, data[k]))) problem = `expected ${types.join(" or ")}`;
+    if (!types.some((t) => typeMatches(t, data[k]))) problem = `expected ${types.join(" or ")}`;
     else if (Array.isArray(p.enum) && !p.enum.some((e) => e === data[k]))
       problem = `expected one of ${preview(p.enum)}`;
     if (problem) problems.push({ field: k, path: renderPath([k], data), kind: "invalid", problem, fallback: true });
@@ -310,10 +312,8 @@ function countProblems(
   alreadyBroken: Set<string>,
   fallback: boolean,
 ): ContractProblem[] {
-  const props = output.properties;
-  if (!props || typeof props !== "object") return [];
   const problems: ContractProblem[] = [];
-  for (const [k, raw] of Object.entries(props as Record<string, unknown>)) {
+  for (const [k, raw] of Object.entries(output.properties ?? {})) {
     if (!hasOwn(data, k) || alreadyBroken.has(k)) continue;
     const spec = (raw as Record<string, unknown> | null)?.[COUNT_OF_KEYWORD] as CountOf | undefined;
     if (typeof spec?.array !== "string") continue;
@@ -341,9 +341,8 @@ function countProblems(
 
 /** The data the schema is checked against: the harness's `summary` prose left out unless the schema names it. */
 function structuredView(output: JSONSchema, data: Record<string, unknown>): Record<string, unknown> {
-  const props = output.properties;
   const declared =
-    (props !== null && typeof props === "object" && hasOwn(props, HARNESS_SUMMARY_KEY)) ||
+    hasOwn(Object(output.properties), HARNESS_SUMMARY_KEY) ||
     (Array.isArray(output.required) && output.required.includes(HARNESS_SUMMARY_KEY));
   if (declared) return data;
   const { [HARNESS_SUMMARY_KEY]: _summary, ...rest } = data;

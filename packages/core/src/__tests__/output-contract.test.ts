@@ -203,12 +203,23 @@ describe("outputContractProblems: every depth (#573)", () => {
     ]);
   });
 
-  it("two schemas with the same $id do not collide", () => {
-    const a: JSONSchema = { $id: "https://example.com/out", type: "object", properties: { n: { type: "number" } } };
-    const b: JSONSchema = { $id: "https://example.com/out", type: "object", properties: { n: { type: "string" } } };
-    expect(check({ n: 1 }, a)).toEqual([]);
-    expect(check({ n: 1 }, b)).toEqual([expect.objectContaining({ path: "n" })]);
-    expect(check({ n: 1 }, a)).toEqual([]);
+  it("two schemas with the same $id do not collide: both compile and check at depth", () => {
+    // A nested rule, so the top-level fallback could not produce this problem.
+    const nested = (t: string): JSONSchema => ({
+      $id: "https://example.com/out",
+      type: "object",
+      properties: { n: { type: "object", properties: { v: { type: t } } } },
+    });
+    const a = nested("number");
+    const b = nested("string");
+    expect(outputContractProblems({ n: { v: 1 } }, a)).toEqual([]);
+    expect(outputSchemaError(b)).toBeUndefined();
+    expect(outputContractProblems({ n: { v: 1 } }, b)).toEqual([
+      { field: "n", path: "n.v", kind: "invalid", problem: "expected string" },
+    ]);
+    expect(outputContractProblems({ n: { v: "1" } }, a)).toEqual([
+      { field: "n", path: "n.v", kind: "invalid", problem: "expected number" },
+    ]);
   });
 
   it("a schema that cannot be compiled keeps the pre-#573 top-level check (an unknown type is not checked)", () => {
@@ -229,7 +240,8 @@ describe("outputContractProblems: every depth (#573)", () => {
     };
     const items = [{ state: "open" }, { state: "closed" }];
     expect(check({ items, open: 1 }, schema)).toEqual([]);
-    expect(check({ items, open: 2 }, schema)).toEqual([
+    // On a schema that compiles the count problem is not a fallback one: it fails the node.
+    expect(outputContractProblems({ items, open: 2 }, schema)).toEqual([
       {
         field: "open",
         path: "open",
@@ -953,6 +965,35 @@ describe("output-contract: inputs", () => {
     expect(outputSchemaError([] as unknown as JSONSchema)).toBe("schema is invalid: data must be object,boolean");
   });
 
+  it.each<[string, unknown[], unknown[]]>([
+    ["number", [0, 1.5, -2], [Infinity, NaN, "1", null]],
+    ["integer", [0, 3, -4], [1.5, "1", null]],
+    ["string", ["", "s"], [1, null, ["s"]]],
+    ["boolean", [true, false], ["true", 0, null]],
+    ["array", [[], [1]], [{}, "[]", null]],
+    ["object", [{}, { a: 1 }], [[], null, "s", 1]],
+    ["null", [null], [0, "", {}]],
+    ["mystery", [1, "s", null, {}], []],
+  ])("the fallback's type %s: accepts %j, rejects %j", (type, good, bad) => {
+    // The `$ref` to nowhere keeps the schema from compiling, so the fallback runs.
+    const schema = { type: "object", properties: { bad: { $ref: "#/$defs/nope" }, v: { type } } };
+    for (const v of good) expect(rows({ v }, schema), JSON.stringify(v)).toEqual([]);
+    for (const v of bad)
+      expect(rows({ v }, schema), JSON.stringify(v)).toEqual([["v", "v", "invalid", `expected ${type}`]]);
+  });
+
+  it("the fallback reads malformed property schemas without failing, and skips absent fields", () => {
+    const schema = {
+      type: "object",
+      properties: { bad: { $ref: "#/$defs/nope" }, gone: { type: "string" }, nil: null, word: "string", yes: true },
+    };
+    expect(rows({ nil: 1, word: 1, yes: 1 }, schema)).toEqual([]);
+    expect(rows({ summary: "s" }, { properties: null, required: ["a"] })).toEqual([
+      ["a", "a", "missing", "required but missing"],
+    ]);
+    expect(rows({ a: 1 }, { properties: "ab", required: "a" })).toEqual([]);
+  });
+
   it("the fallback: required, top-level type (number finite, integer, null, object, union) and enum only", () => {
     // `$ref` to nowhere: the schema does not compile, so only the top level is read.
     const schema = {
@@ -1104,6 +1145,8 @@ describe("output-contract: inputs", () => {
 
   it("outputSchemaError: undefined for none or a valid schema, the deduplicated message otherwise", () => {
     expect(outputSchemaError(undefined)).toBeUndefined();
+    expect(outputSchemaError("x" as unknown as JSONSchema)).toBeUndefined();
+    expect(outputSchemaError(5 as unknown as JSONSchema)).toBeUndefined();
     expect(outputSchemaError({ type: "object" })).toBeUndefined();
     expect(outputSchemaError({ type: "str" })).toBe(
       "schema is invalid: data/type must be equal to one of the allowed values, data/type must be array, " +
