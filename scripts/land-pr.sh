@@ -11,7 +11,8 @@
 # Env:
 #   SWENY_REPO       repo to land in (default swenyai/sweny)
 #   ADVISORY_CHECKS  comma-separated exact check names that only warn when they
-#                    fail (default "review", the AI review bot, which is not a
+#                    fail (default "review" and "risk", the AI review bot and the dogfood
+#                    pr-risk-review job, which are not a
 #                    gate). Every other failing check exits 3, whatever
 #                    mergeable_state says. Set empty to make all checks gate.
 #   POLL_SEC         seconds between polls (default 20)
@@ -25,7 +26,7 @@ PR=${1:?usage: land-pr.sh <pr-number> [--timeout-min N]}
 TIMEOUT_MIN=30
 [ "${2:-}" = "--timeout-min" ] && TIMEOUT_MIN=${3:?}
 REPO=${SWENY_REPO:-swenyai/sweny}
-ADVISORY_CHECKS=${ADVISORY_CHECKS-review}
+ADVISORY_CHECKS=${ADVISORY_CHECKS-review,risk}
 POLL_SEC=${POLL_SEC:-20}
 MERGE_ATTEMPTS=3
 MERGE_WAIT_POLLS=60

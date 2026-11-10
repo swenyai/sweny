@@ -259,6 +259,15 @@ Not read: package-lock.json (no patch from GitHub)
 Read-only risk triage. No code was changed.
 ```
 
+## Running on swenyai/sweny
+
+Two of these packs run on the SWEny repo itself, so the claims here are exercised on every pull request and every Monday:
+
+- [`sweny-pr-risk-review.yml`](https://github.com/swenyai/sweny/blob/main/.github/workflows/sweny-pr-risk-review.yml): `pr-risk-review` on pull requests opened from this repo (no forks, no dependabot). `max-cost: "0.50"` per run, `SWENY_SANDBOX: strict`, `contents: read` and `pull-requests: write`.
+- [`sweny-weekly-digest.yml`](https://github.com/swenyai/sweny/blob/main/.github/workflows/sweny-weekly-digest.yml): `weekly-digest` on Mondays 14:00 UTC. `max-cost: "1.00"` per run, `SWENY_SANDBOX: strict`, `contents: read` and `issues: write`, one run at a time.
+
+Both are the generated trigger from above plus the spend cap, the strict sandbox and, for the digest, a concurrency group. The workflow files they run live in [`.sweny/workflows/`](https://github.com/swenyai/sweny/tree/main/.sweny/workflows) and are copies of the packs.
+
 ## Failure alerts
 
 The two scheduled packs set `notify-on-failure: issue`. When a run fails or is refused, the Action opens one issue titled `SWEny run failed: <workflow>` labelled `sweny-failure`, and comments on it for later failures instead of opening more. Nothing is sent on success. It needs `issues: write`, which both triggers already request.
