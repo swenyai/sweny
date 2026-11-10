@@ -57,14 +57,28 @@ The coding agent you picked (`--agent` or `coding-agent-provider`) gets its own 
 | `acp:<command>` | The command resolves on `PATH`. The agent is not started, so its version and login are reported when a run starts. |
 
 ```text
-✓  Agent CLI (codex)
-     0.166.0 (/usr/local/bin/codex) (newer than 0.159.2, the version sweny is tested against)
-✓  Agent auth (codex)
-     via codex login
-✓  Agent login (codex)
-     logged in with ChatGPT (codex login status)
-−  OpenAI API (codex agent)
-     auth via codex login, skipping upstream API check
+  Checking provider connectivity…
+
+  ╭──────────────────────────────────────────────────╮
+  │                                                  │
+  │  Provider Connectivity Check                     │
+  │                                                  │
+  ├──────────────────────────────────────────────────┤
+  │                                                  │
+  │  ✓  Agent CLI (codex)                            │
+  │       0.159.2                                    │
+  │       (/path/to/bin/codex)                       │
+  │  ✗  Agent auth (codex)                           │
+  │       Missing: OPENAI_API_KEY or CODEX_API_KEY,  │
+  │       or a Codex login (`codex login`), for      │
+  │       --agent codex                              │
+  │                                                  │
+  ├──────────────────────────────────────────────────┤
+  │                                                  │
+  │  One or more checks failed. Fix the issues       │
+  │  above before running a workflow.                │
+  │                                                  │
+  ╰──────────────────────────────────────────────────╯
 ```
 
 Run this after initial setup or when rotating credentials.

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { Command } from "commander";
 import { registerTriageCommand, registerImplementCommand, parseCliInputs } from "./config.js";
-import { DEPRECATED_FLAGS, deprecatedFlagName } from "./deprecated-flags.js";
+import { DEPRECATED_FLAGS, deprecatedFlagName, deprecationWarning } from "./deprecated-flags.js";
 
 // The 12 flags #528 removed and swenyai/triage still passes.
 const REMOVED_BY_528 = [
@@ -138,6 +138,20 @@ describe("flags that were never deprecated stay rejected", () => {
     const { program } = build("implement");
     await expect(program.parseAsync(["node", "sweny", "implement", "ENG-1", "--cache-dir", "x"])).rejects.toThrow(
       /unknown option/,
+    );
+  });
+});
+
+describe("deprecationWarning grammar", () => {
+  it("one flag: is deprecated and has no effect", () => {
+    expect(deprecationWarning(["--a"])).toBe(
+      "warning: --a is deprecated and has no effect and will be removed in a future minor version.\n",
+    );
+  });
+
+  it("several flags: are deprecated and have no effect", () => {
+    expect(deprecationWarning(["--a", "--b"])).toBe(
+      "warning: --a, --b are deprecated and have no effect and will be removed in a future minor version.\n",
     );
   });
 });

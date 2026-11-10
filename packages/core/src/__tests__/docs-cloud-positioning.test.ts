@@ -384,6 +384,44 @@ describe("action inputs page matches action.yml", () => {
   });
 });
 
+/**
+ * Every `with:` key in an Action example that uses swenyai/sweny is a real
+ * action.yml input. `linear-team-id` once sat in examples and silently did nothing.
+ */
+describe("Action examples use real action.yml inputs", () => {
+  const actionInputs = new Set(
+    Object.keys((parseYaml(read("action.yml")) as { inputs: Record<string, unknown> }).inputs),
+  );
+
+  for (const file of docFiles("packages/web/src/content/docs/action")) {
+    it(`${file}: with: keys under swenyai/sweny@ are action.yml inputs`, () => {
+      const blocks = read(file).match(/```ya?ml[\s\S]*?```/g) ?? [];
+      const bad: string[] = [];
+      for (const block of blocks) {
+        const lines = block.split("\n");
+        lines.forEach((line, i) => {
+          if (!/uses:\s*swenyai\/sweny@/.test(line)) return;
+          let w = -1;
+          for (let j = i + 1; j < lines.length && !/^\s*- /.test(lines[j]); j++) {
+            if (/^\s*with:\s*$/.test(lines[j])) w = j;
+          }
+          if (w < 0) return;
+          const wIndent = lines[w].match(/^\s*/)![0].length;
+          for (let j = w + 1; j < lines.length; j++) {
+            const l = lines[j];
+            if (l.trim() === "" || l.trim().startsWith("#")) continue;
+            const ind = l.match(/^\s*/)![0].length;
+            if (ind <= wIndent) break;
+            const m = l.match(/^\s*([a-z][a-z0-9-]*):/);
+            if (m && ind === wIndent + 2 && !actionInputs.has(m[1])) bad.push(m[1]);
+          }
+        });
+      }
+      expect(bad, "not inputs in action.yml").toEqual([]);
+    });
+  }
+});
+
 // ── Entry pages: one clean path (#534) ──────────────────────────
 
 const DOCS = "packages/web/src/content/docs";
