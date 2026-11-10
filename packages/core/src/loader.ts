@@ -16,7 +16,13 @@ import { parse as parseYaml } from "yaml";
 import { ZodError } from "zod";
 
 import type { Workflow } from "./types.js";
-import { workflowZ, validateWorkflow, preflightLegacyVerify, type WorkflowError } from "./schema.js";
+import {
+  workflowZ,
+  validateWorkflow,
+  preflightLegacyVerify,
+  type WorkflowError,
+  type WorkflowWarning,
+} from "./schema.js";
 import {
   DEFAULT_MIGRATION_CONFIG,
   migrateWorkflow,
@@ -124,7 +130,8 @@ export function validateParsed(raw: unknown, options: LoaderOptions = {}): Loade
     return { ok: false, errors: [{ message: msg, code: "SCHEMA" }] };
   }
 
-  const structural = validateWorkflow(parsed, options.knownSkills);
+  const schemaWarnings: WorkflowWarning[] = [];
+  const structural = validateWorkflow(parsed, options.knownSkills, { warnings: schemaWarnings });
   if (structural.length > 0) {
     return {
       ok: false,
@@ -132,5 +139,6 @@ export function validateParsed(raw: unknown, options: LoaderOptions = {}): Loade
     };
   }
 
+  warnings.push(...schemaWarnings.map((w) => `${w.code}: ${w.message}`));
   return warnings.length > 0 ? { ok: true, workflow: parsed, warnings } : { ok: true, workflow: parsed };
 }

@@ -7,13 +7,22 @@
  * `oneOf` and the rest mean what JSON Schema says they mean. The check runs
  * in the executor on the data every harness returns, so a violation reads
  * the same whichever harness ran the node. Each problem carries the exact
- * path of the value that broke the schema (`findings[1].severity`).
+ * path of the value that broke the schema (`findings[1].severity`) and the
+ * rule it broke, never the value itself: output can carry secrets.
  *
  * Dialect: JSON Schema 2020-12, or the draft a schema names in `$schema`
- * (draft-07, 2019-09). `format` is an annotation, as 2020-12 defines it by
- * default, and is not asserted. Keywords ajv does not know (sweny's `x-`
- * keywords among them) are ignored by ajv; `x-sweny-count-of` is checked
- * here after the schema itself.
+ * (draft-04, draft-06, draft-07, 2019-09). `format` is an annotation, as
+ * 2020-12 defines it by default, and is not asserted. Keywords ajv does not
+ * know (sweny's `x-` keywords among them) are ignored by ajv;
+ * `x-sweny-count-of` is checked here after the schema itself.
+ *
+ * A schema ajv cannot compile (deprecated, see {@link outputSchemaError})
+ * keeps the check sweny ran before #573: top-level `required`, and the
+ * `type` and `enum` of each top-level property.
+ *
+ * Output nested deeper than {@link MAX_OUTPUT_DEPTH} levels, or holding more
+ * than {@link MAX_OUTPUT_VALUES} values, is not checked: it is a problem in
+ * itself.
  *
  * No harness or skill imports.
  */
@@ -21,7 +30,9 @@
 import { Ajv } from "ajv";
 import { Ajv2019 } from "ajv/dist/2019.js";
 import { Ajv2020 } from "ajv/dist/2020.js";
+import Ajv04Module from "ajv-draft-04";
 import type { ErrorObject, SchemaObject, ValidateFunction } from "ajv";
+import { DRAFT_06_META_SCHEMA } from "./output-contract-draft06.js";
 import type { JSONSchema } from "./types.js";
 
 /** One way a node's emitted data breaks its declared output contract. */
@@ -36,11 +47,16 @@ export interface ContractProblem {
   path: string;
   /**
    * `missing`: a top-level `required` field is absent. `invalid`: any other
-   * break, a `required` field missing at depth included. `schema`: the
-   * declared schema itself cannot be compiled, so no output can satisfy it.
+   * break, a `required` field missing at depth included.
    */
-  kind: "missing" | "invalid" | "schema";
+  kind: "missing" | "invalid";
+  /** The rule that broke and what it expects. Never the emitted value. */
   problem: string;
+  /**
+   * Found by the pre-#573 top-level check, because the schema does not
+   * compile. As before #573, only a missing field fails the node.
+   */
+  fallback?: true;
 }
 
 /** The path that names the output object itself. */
@@ -49,6 +65,12 @@ export const ROOT_PATH = "(output)";
 /** Keyword on an integer output property: the count sweny cross-checks against an array in the same output. */
 export const COUNT_OF_KEYWORD = "x-sweny-count-of";
 
+/** Deepest nesting checked: the output object is level 0. */
+export const MAX_OUTPUT_DEPTH = 64;
+
+/** Most values (objects, arrays and scalars together) checked in one output. */
+export const MAX_OUTPUT_VALUES = 100_000;
+
 /**
  * Prose every harness puts in `data.summary` next to the parsed output. It is
  * not the agent's structured answer, so it is checked only when the schema
@@ -56,7 +78,7 @@ export const COUNT_OF_KEYWORD = "x-sweny-count-of";
  */
 const HARNESS_SUMMARY_KEY = "summary";
 
-/** Problems listed in one message before the rest are counted. */
+/** Problems listed in one message, log line or event before the rest are counted. */
 const MAX_LISTED = 20;
 
 const hasOwn = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
@@ -71,15 +93,21 @@ const hasOwn = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o,
  */
 const AJV_OPTIONS = { allErrors: true, strict: false, validateFormats: false, logger: false } as const;
 
+// ajv-draft-04 is CommonJS with only a default export; `.default` is the class under Node and bundlers alike.
+const Ajv04 = Ajv04Module.default;
+
 type Validator = Pick<Ajv, "compile" | "removeSchema">;
-const DRAFT_07: Validator = new Ajv(AJV_OPTIONS);
+const DRAFT_04: Validator = new Ajv04(AJV_OPTIONS);
+const DRAFT_07: Validator = new Ajv(AJV_OPTIONS).addMetaSchema(DRAFT_06_META_SCHEMA);
 const DRAFT_2019: Validator = new Ajv2019(AJV_OPTIONS);
 const DRAFT_2020: Validator = new Ajv2020(AJV_OPTIONS);
 
 /** The validator for the dialect the schema names in `$schema`; 2020-12 when it names none. */
 function validatorFor(schema: JSONSchema): Validator {
   const dialect = String(schema.$schema);
-  return /draft-07/.test(dialect) ? DRAFT_07 : /2019-09/.test(dialect) ? DRAFT_2019 : DRAFT_2020;
+  if (/draft-04/.test(dialect)) return DRAFT_04;
+  if (/draft-0[67]/.test(dialect)) return DRAFT_07;
+  return /2019-09/.test(dialect) ? DRAFT_2019 : DRAFT_2020;
 }
 
 /** ajv repeats a meta-schema complaint once per branch it tried: say each once. */
@@ -108,7 +136,11 @@ function compile(schema: JSONSchema): Compiled {
   return out;
 }
 
-/** Why a declared output schema cannot be used, or undefined when it compiles (or there is none). */
+/**
+ * Why a declared output schema cannot be compiled, or undefined when it
+ * compiles (or there is none). Such a schema is deprecated: the node keeps
+ * the pre-#573 top-level check, and a future minor will refuse to load it.
+ */
 export function outputSchemaError(output: JSONSchema | undefined): string | undefined {
   if (!output || typeof output !== "object") return undefined;
   const c = compile(output);
@@ -146,16 +178,14 @@ function renderPath(segments: string[], data: unknown): string {
   return out;
 }
 
-/** The value as JSON, cut to 80 characters. Output data is JSON, so it always serializes. */
+/** A schema value (an enum list, a const) as JSON, cut to 80 characters. Never used on output data. */
 function preview(v: unknown): string {
   const s = String(JSON.stringify(v));
   return s.length > 80 ? `${s.slice(0, 77)}...` : s;
 }
 
 function toProblem(e: ErrorObject, data: unknown): ContractProblem {
-  const at = pointerSegments(e.instancePath);
-  const value = at.reduce(step, data);
-  const segs = [...at];
+  const segs = pointerSegments(e.instancePath);
   const p = e.params as Record<string, unknown>;
   let problem: string;
   switch (e.keyword) {
@@ -176,19 +206,18 @@ function toProblem(e: ErrorObject, data: unknown): ContractProblem {
       segs.push(String(p.unevaluatedProperty));
       problem = "not allowed (unevaluatedProperties: false)";
       break;
-    case "type": {
-      problem = `expected ${[p.type].flat().join(" or ")}, got ${preview(value)}`;
+    case "type":
+      problem = `expected ${[p.type].flat().join(" or ")}`;
       break;
-    }
     case "enum":
-      problem = `expected one of ${preview(p.allowedValues)}, got ${preview(value)}`;
+      problem = `expected one of ${preview(p.allowedValues)}`;
       break;
     case "const":
-      problem = `expected ${preview(p.allowedValue)}, got ${preview(value)}`;
+      problem = `expected ${preview(p.allowedValue)}`;
       break;
     default:
-      // The validator's wording, plus the value when it is a scalar.
-      problem = value === null || typeof value !== "object" ? `${e.message}, got ${preview(value)}` : `${e.message}`;
+      // ajv's wording names the rule and its limit, never the value.
+      problem = `${e.message}`;
   }
   const missingTopLevel = e.keyword === "required" && segs.length === 1;
   return {
@@ -197,6 +226,53 @@ function toProblem(e: ErrorObject, data: unknown): ContractProblem {
     kind: missingTopLevel ? "missing" : "invalid",
     problem,
   };
+}
+
+// ─── The pre-#573 top-level check (schemas that do not compile) ──
+
+function typeMatches(t: unknown, v: unknown): boolean {
+  switch (t) {
+    case "string":
+      return typeof v === "string";
+    case "number":
+      return typeof v === "number" && Number.isFinite(v);
+    case "integer":
+      return typeof v === "number" && Number.isInteger(v);
+    case "boolean":
+      return typeof v === "boolean";
+    case "array":
+      return Array.isArray(v);
+    case "object":
+      return typeof v === "object" && v !== null && !Array.isArray(v);
+    case "null":
+      return v === null;
+    default:
+      return true; // unknown or absent type: not checked, as before
+  }
+}
+
+/** Every `required` field present; every present top-level property of its declared `type` and in its `enum`. */
+function topLevelProblems(output: JSONSchema, data: Record<string, unknown>): ContractProblem[] {
+  const problems: ContractProblem[] = [];
+  const required = Array.isArray(output.required) ? output.required : [];
+  for (const k of required) {
+    if (typeof k === "string" && !hasOwn(data, k)) {
+      problems.push({ field: k, path: k, kind: "missing", problem: "required but missing", fallback: true });
+    }
+  }
+  const props = output.properties;
+  if (!props || typeof props !== "object") return problems;
+  for (const [k, raw] of Object.entries(props as Record<string, unknown>)) {
+    if (!hasOwn(data, k) || !raw || typeof raw !== "object") continue;
+    const p = raw as { type?: unknown; enum?: unknown };
+    const types = [p.type ?? []].flat();
+    let problem: string | undefined;
+    if (types.length > 0 && !types.some((t) => typeMatches(t, data[k]))) problem = `expected ${types.join(" or ")}`;
+    else if (Array.isArray(p.enum) && !p.enum.some((e) => e === data[k]))
+      problem = `expected one of ${preview(p.enum)}`;
+    if (problem) problems.push({ field: k, path: renderPath([k], data), kind: "invalid", problem, fallback: true });
+  }
+  return problems;
 }
 
 // ─── x-sweny-count-of ────────────────────────────────────────────
@@ -232,29 +308,29 @@ function countProblems(
   output: JSONSchema,
   data: Record<string, unknown>,
   alreadyBroken: Set<string>,
+  fallback: boolean,
 ): ContractProblem[] {
-  // The schema compiled, so `properties` is an object when present.
-  const props = (output.properties ?? {}) as Record<string, unknown>;
+  const props = output.properties;
+  if (!props || typeof props !== "object") return [];
   const problems: ContractProblem[] = [];
-  for (const [k, raw] of Object.entries(props)) {
+  for (const [k, raw] of Object.entries(props as Record<string, unknown>)) {
     if (!hasOwn(data, k) || alreadyBroken.has(k)) continue;
     const spec = (raw as Record<string, unknown> | null)?.[COUNT_OF_KEYWORD] as CountOf | undefined;
     if (typeof spec?.array !== "string") continue;
     const want = countOf(spec, data);
-    const path = renderPath([k], data);
-    if (want === undefined) {
+    const problem =
+      want === undefined
+        ? `cannot be checked: '${spec.array}' is not a list`
+        : data[k] !== want
+          ? `does not match the count: '${spec.array}' has ${want} matching item(s)`
+          : undefined;
+    if (problem) {
       problems.push({
         field: k,
-        path,
+        path: renderPath([k], data),
         kind: "invalid",
-        problem: `cannot be checked: '${spec.array}' is not a list`,
-      });
-    } else if (data[k] !== want) {
-      problems.push({
-        field: k,
-        path,
-        kind: "invalid",
-        problem: `is ${preview(data[k])} but '${spec.array}' has ${want} matching item(s)`,
+        problem,
+        ...(fallback ? { fallback: true as const } : {}),
       });
     }
   }
@@ -265,35 +341,47 @@ function countProblems(
 
 /** The data the schema is checked against: the harness's `summary` prose left out unless the schema names it. */
 function structuredView(output: JSONSchema, data: Record<string, unknown>): Record<string, unknown> {
-  // The schema compiled, so `properties` is an object and `required` an array when present.
+  const props = output.properties;
   const declared =
-    hasOwn((output.properties ?? {}) as object, HARNESS_SUMMARY_KEY) ||
-    ((output.required ?? []) as unknown[]).includes(HARNESS_SUMMARY_KEY);
+    (props !== null && typeof props === "object" && hasOwn(props, HARNESS_SUMMARY_KEY)) ||
+    (Array.isArray(output.required) && output.required.includes(HARNESS_SUMMARY_KEY));
   if (declared) return data;
   const { [HARNESS_SUMMARY_KEY]: _summary, ...rest } = data;
   return rest;
+}
+
+/** Why the output is too big to check, without recursion, or undefined. */
+function tooBig(data: unknown): string | undefined {
+  const stack: Array<[unknown, number]> = [[data, 0]];
+  let values = 0;
+  while (stack.length > 0) {
+    const [v, depth] = stack.pop()!;
+    if (depth > MAX_OUTPUT_DEPTH) return `not checked: the output nests deeper than ${MAX_OUTPUT_DEPTH} levels`;
+    if (++values > MAX_OUTPUT_VALUES) return `not checked: the output holds more than ${MAX_OUTPUT_VALUES} values`;
+    if (v !== null && typeof v === "object") for (const c of Object.values(v)) stack.push([c, depth + 1]);
+  }
+  return undefined;
 }
 
 /**
  * Check emitted data against the declared output contract: the whole JSON
  * Schema at every depth, then every `x-sweny-count-of` integer against the
  * count it declares over its array. One problem per broken path, in schema
- * order. Empty when the node declares no schema or the data conforms.
+ * order. Empty when the node declares no schema or the data conforms. A
+ * schema that does not compile gets the pre-#573 top-level check instead.
+ * Can throw (a hostile getter, an ajv fault): callers use
+ * {@link checkOutputContract}.
  */
 export function outputContractProblems(data: unknown, output: JSONSchema | undefined): ContractProblem[] {
   if (!output || typeof output !== "object") return [];
+  const obj = structuredView(output, (data && typeof data === "object" ? data : {}) as Record<string, unknown>);
+  const big = tooBig(obj);
+  if (big) return [{ field: ROOT_PATH, path: ROOT_PATH, kind: "invalid", problem: big }];
   const c = compile(output);
   if ("error" in c) {
-    return [
-      {
-        field: ROOT_PATH,
-        path: ROOT_PATH,
-        kind: "schema",
-        problem: `the declared output schema cannot be used: ${c.error}`,
-      },
-    ];
+    const problems = topLevelProblems(output, obj);
+    return [...problems, ...countProblems(output, obj, new Set(problems.map((p) => p.field)), true)];
   }
-  const obj = structuredView(output, (data && typeof data === "object" ? data : {}) as Record<string, unknown>);
   const problems: ContractProblem[] = [];
   const seen = new Set<string>();
   c.validate(obj);
@@ -303,13 +391,29 @@ export function outputContractProblems(data: unknown, output: JSONSchema | undef
     seen.add(p.path);
     problems.push(p);
   }
-  const brokenFields = new Set(problems.map((p) => p.field));
-  return [...problems, ...countProblems(output, obj, brokenFields)];
+  return [...problems, ...countProblems(output, obj, new Set(problems.map((p) => p.field)), false)];
+}
+
+/** The contract check that never throws: its problems, or why it could not run. */
+export function checkOutputContract(
+  data: unknown,
+  output: JSONSchema | undefined,
+): { problems: ContractProblem[] } | { error: string } {
+  try {
+    return { problems: outputContractProblems(data, output) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 function capped(lines: string[]): string[] {
   if (lines.length <= MAX_LISTED) return lines;
   return [...lines.slice(0, MAX_LISTED), `and ${lines.length - MAX_LISTED} more`];
+}
+
+/** The problems' paths, at most {@link MAX_LISTED} of them, for log lines and events. */
+export function contractPaths(problems: ContractProblem[]): string[] {
+  return capped(problems.map((p) => p.path));
 }
 
 /** The problems as `path: problem` lines, at most {@link MAX_LISTED} of them. */
@@ -326,7 +430,7 @@ export function contractFailureMessage(problems: ContractProblem[]): string {
   const missing = problems.filter((p) => p.kind === "missing").map((p) => p.path);
   const rest = problems.filter((p) => p.kind !== "missing");
   const parts = [
-    ...(missing.length > 0 ? [`required field(s) missing from emitted data: ${missing.join(", ")}`] : []),
+    ...(missing.length > 0 ? [`required field(s) missing from emitted data: ${capped(missing).join(", ")}`] : []),
     ...listContractProblems(rest),
   ];
   return `output schema violation: ${parts.join("; ")}`;

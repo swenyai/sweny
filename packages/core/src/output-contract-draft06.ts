@@ -5,217 +5,206 @@
  * cannot import JSON files; a spec asserts it deep-equals ajv's copy.
  */
 export const DRAFT_06_META_SCHEMA: Record<string, unknown> = {
-  "$schema": "http://json-schema.org/draft-06/schema#",
-  "$id": "http://json-schema.org/draft-06/schema#",
-  "title": "Core schema meta-schema",
-  "definitions": {
-    "schemaArray": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "$ref": "#"
-      }
-    },
-    "nonNegativeInteger": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "nonNegativeIntegerDefault0": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/nonNegativeInteger"
-        },
-        {
-          "default": 0
-        }
-      ]
-    },
-    "simpleTypes": {
-      "enum": [
-        "array",
-        "boolean",
-        "integer",
-        "null",
-        "number",
-        "object",
-        "string"
-      ]
-    },
-    "stringArray": {
-      "type": "array",
-      "items": {
-        "type": "string"
+  $schema: "http://json-schema.org/draft-06/schema#",
+  $id: "http://json-schema.org/draft-06/schema#",
+  title: "Core schema meta-schema",
+  definitions: {
+    schemaArray: {
+      type: "array",
+      minItems: 1,
+      items: {
+        $ref: "#",
       },
-      "uniqueItems": true,
-      "default": []
-    }
-  },
-  "type": [
-    "object",
-    "boolean"
-  ],
-  "properties": {
-    "$id": {
-      "type": "string",
-      "format": "uri-reference"
     },
-    "$schema": {
-      "type": "string",
-      "format": "uri"
+    nonNegativeInteger: {
+      type: "integer",
+      minimum: 0,
     },
-    "$ref": {
-      "type": "string",
-      "format": "uri-reference"
-    },
-    "title": {
-      "type": "string"
-    },
-    "description": {
-      "type": "string"
-    },
-    "default": {},
-    "examples": {
-      "type": "array",
-      "items": {}
-    },
-    "multipleOf": {
-      "type": "number",
-      "exclusiveMinimum": 0
-    },
-    "maximum": {
-      "type": "number"
-    },
-    "exclusiveMaximum": {
-      "type": "number"
-    },
-    "minimum": {
-      "type": "number"
-    },
-    "exclusiveMinimum": {
-      "type": "number"
-    },
-    "maxLength": {
-      "$ref": "#/definitions/nonNegativeInteger"
-    },
-    "minLength": {
-      "$ref": "#/definitions/nonNegativeIntegerDefault0"
-    },
-    "pattern": {
-      "type": "string",
-      "format": "regex"
-    },
-    "additionalItems": {
-      "$ref": "#"
-    },
-    "items": {
-      "anyOf": [
+    nonNegativeIntegerDefault0: {
+      allOf: [
         {
-          "$ref": "#"
+          $ref: "#/definitions/nonNegativeInteger",
         },
         {
-          "$ref": "#/definitions/schemaArray"
-        }
+          default: 0,
+        },
       ],
-      "default": {}
     },
-    "maxItems": {
-      "$ref": "#/definitions/nonNegativeInteger"
+    simpleTypes: {
+      enum: ["array", "boolean", "integer", "null", "number", "object", "string"],
     },
-    "minItems": {
-      "$ref": "#/definitions/nonNegativeIntegerDefault0"
-    },
-    "uniqueItems": {
-      "type": "boolean",
-      "default": false
-    },
-    "contains": {
-      "$ref": "#"
-    },
-    "maxProperties": {
-      "$ref": "#/definitions/nonNegativeInteger"
-    },
-    "minProperties": {
-      "$ref": "#/definitions/nonNegativeIntegerDefault0"
-    },
-    "required": {
-      "$ref": "#/definitions/stringArray"
-    },
-    "additionalProperties": {
-      "$ref": "#"
-    },
-    "definitions": {
-      "type": "object",
-      "additionalProperties": {
-        "$ref": "#"
+    stringArray: {
+      type: "array",
+      items: {
+        type: "string",
       },
-      "default": {}
+      uniqueItems: true,
+      default: [],
     },
-    "properties": {
-      "type": "object",
-      "additionalProperties": {
-        "$ref": "#"
-      },
-      "default": {}
+  },
+  type: ["object", "boolean"],
+  properties: {
+    $id: {
+      type: "string",
+      format: "uri-reference",
     },
-    "patternProperties": {
-      "type": "object",
-      "additionalProperties": {
-        "$ref": "#"
-      },
-      "default": {}
+    $schema: {
+      type: "string",
+      format: "uri",
     },
-    "dependencies": {
-      "type": "object",
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "$ref": "#"
-          },
-          {
-            "$ref": "#/definitions/stringArray"
-          }
-        ]
-      }
+    $ref: {
+      type: "string",
+      format: "uri-reference",
     },
-    "propertyNames": {
-      "$ref": "#"
+    title: {
+      type: "string",
     },
-    "const": {},
-    "enum": {
-      "type": "array",
-      "minItems": 1,
-      "uniqueItems": true
+    description: {
+      type: "string",
     },
-    "type": {
-      "anyOf": [
+    default: {},
+    examples: {
+      type: "array",
+      items: {},
+    },
+    multipleOf: {
+      type: "number",
+      exclusiveMinimum: 0,
+    },
+    maximum: {
+      type: "number",
+    },
+    exclusiveMaximum: {
+      type: "number",
+    },
+    minimum: {
+      type: "number",
+    },
+    exclusiveMinimum: {
+      type: "number",
+    },
+    maxLength: {
+      $ref: "#/definitions/nonNegativeInteger",
+    },
+    minLength: {
+      $ref: "#/definitions/nonNegativeIntegerDefault0",
+    },
+    pattern: {
+      type: "string",
+      format: "regex",
+    },
+    additionalItems: {
+      $ref: "#",
+    },
+    items: {
+      anyOf: [
         {
-          "$ref": "#/definitions/simpleTypes"
+          $ref: "#",
         },
         {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/simpleTypes"
+          $ref: "#/definitions/schemaArray",
+        },
+      ],
+      default: {},
+    },
+    maxItems: {
+      $ref: "#/definitions/nonNegativeInteger",
+    },
+    minItems: {
+      $ref: "#/definitions/nonNegativeIntegerDefault0",
+    },
+    uniqueItems: {
+      type: "boolean",
+      default: false,
+    },
+    contains: {
+      $ref: "#",
+    },
+    maxProperties: {
+      $ref: "#/definitions/nonNegativeInteger",
+    },
+    minProperties: {
+      $ref: "#/definitions/nonNegativeIntegerDefault0",
+    },
+    required: {
+      $ref: "#/definitions/stringArray",
+    },
+    additionalProperties: {
+      $ref: "#",
+    },
+    definitions: {
+      type: "object",
+      additionalProperties: {
+        $ref: "#",
+      },
+      default: {},
+    },
+    properties: {
+      type: "object",
+      additionalProperties: {
+        $ref: "#",
+      },
+      default: {},
+    },
+    patternProperties: {
+      type: "object",
+      additionalProperties: {
+        $ref: "#",
+      },
+      default: {},
+    },
+    dependencies: {
+      type: "object",
+      additionalProperties: {
+        anyOf: [
+          {
+            $ref: "#",
           },
-          "minItems": 1,
-          "uniqueItems": true
-        }
-      ]
+          {
+            $ref: "#/definitions/stringArray",
+          },
+        ],
+      },
     },
-    "format": {
-      "type": "string"
+    propertyNames: {
+      $ref: "#",
     },
-    "allOf": {
-      "$ref": "#/definitions/schemaArray"
+    const: {},
+    enum: {
+      type: "array",
+      minItems: 1,
+      uniqueItems: true,
     },
-    "anyOf": {
-      "$ref": "#/definitions/schemaArray"
+    type: {
+      anyOf: [
+        {
+          $ref: "#/definitions/simpleTypes",
+        },
+        {
+          type: "array",
+          items: {
+            $ref: "#/definitions/simpleTypes",
+          },
+          minItems: 1,
+          uniqueItems: true,
+        },
+      ],
     },
-    "oneOf": {
-      "$ref": "#/definitions/schemaArray"
+    format: {
+      type: "string",
     },
-    "not": {
-      "$ref": "#"
-    }
+    allOf: {
+      $ref: "#/definitions/schemaArray",
+    },
+    anyOf: {
+      $ref: "#/definitions/schemaArray",
+    },
+    oneOf: {
+      $ref: "#/definitions/schemaArray",
+    },
+    not: {
+      $ref: "#",
+    },
   },
-  "default": {}
+  default: {},
 };

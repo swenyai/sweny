@@ -48,7 +48,7 @@ import type { ExpressionResult, ExpressionScope, ExprNode } from "./when.js";
 import { buildRetryPreamble } from "./retry.js";
 import { resolveExecutionModel } from "./model.js";
 import { buildToolAliases } from "./skills/index.js";
-import { validateWorkflow } from "./schema.js";
+import { validateWorkflow, type WorkflowWarning } from "./schema.js";
 import { grantedAgentEnv, resolveAgentAccess } from "./agent-env.js";
 import { gitCredentialWarning, scanGitCredentials } from "./git-credentials.js";
 // #473: the sweny-side branch push in `github_create_pr` (Node only; skills/ stays browser-safe).
@@ -81,7 +81,9 @@ import {
 import { JournalWriteError, type ExecutionJournal, type JournalReplay } from "./journal.js";
 import {
   COUNT_OF_KEYWORD,
+  checkOutputContract,
   contractFailureMessage,
+  contractPaths,
   listContractProblems,
   outputContractProblems,
 } from "./output-contract.js";
@@ -297,7 +299,7 @@ async function executeRun(
   const maxSteps = options.max_steps ?? DEFAULT_MAX_STEPS;
   let stepCount = 0; // total node executions across the run (loop iterations included)
 
-  validate(workflow, skills);
+  validate(workflow, skills, logger);
 
   // Safe outputs (#365): run-wide caps and dedupe, the staged switch and the
   // triggering actor, resolved once per run.
@@ -1010,6 +1012,8 @@ async function executeRun(
           context,
           tools: trackedTools,
           outputSchema: harnessSchema(node.output),
+          // The executor checks the output and asks for one repair itself, the same on every harness.
+          ...(node.output ? { callerRepairsOutput: true } : {}),
           maxTurns: node.max_turns,
           disallowedTools: node.disallowed_tools,
           ...(denyClasses.length > 0 ? { deny: denyClasses } : {}),
@@ -1099,19 +1103,20 @@ async function executeRun(
       // arrays of objects, enums, `required` at any depth,
       // additionalProperties), plus `x-sweny-count-of` counts. The check runs
       // here, on the data every harness returns, so a violation reads the same
-      // whichever harness ran the node, each problem with its exact path.
-      // One repair round trip first, for every harness: the agent is told
-      // exactly what is wrong. A schema that cannot be compiled is no agent's
-      // fault, so it gets no repair request.
-      const contract = outputContractProblems(result.data, node.output);
-      if (contract.some((p) => p.kind !== "schema") && !repaired) {
+      // whichever harness ran the node, each problem with its exact path and
+      // never the emitted value. One repair round trip first, for every
+      // harness: the agent is told exactly what is wrong. A check that cannot
+      // run (it threw) fails this node, never the run, and gets no repair.
+      const checked = checkOutputContract(result.data, node.output);
+      const contract = "problems" in checked ? checked.problems : [];
+      if (contract.length > 0 && !repaired) {
         // Part of this node visit, like a retry of the same call: no extra
         // max_steps slot. Its spend still counts (budget, journal usage).
         repaired = true;
         const listed = listContractProblems(contract)
           .map((line) => `- ${line}`)
           .join("\n");
-        logger.warn(`  output contract: ${contract.map((p) => p.path).join(", ")}; asking the agent once to fix it`, {
+        logger.warn(`  output contract: ${contractPaths(contract).join(", ")}; asking the agent once to fix it`, {
           node: currentId,
         });
         safeObserve(
@@ -1120,7 +1125,7 @@ async function executeRun(
             type: "node:warning",
             node: currentId,
             reason: "output contract violated; one repair attempt",
-            fields: contract.map((p) => p.path),
+            fields: contractPaths(contract),
           },
           logger,
         );
@@ -1135,11 +1140,13 @@ async function executeRun(
       // the next rung (decider or agent) at routing time. Every other problem
       // fails the node, on the same footing as an eval failure: with `retry`
       // configured, the reflection and retry path below gets another attempt.
+      // A schema that does not compile keeps the pre-#573 rule (deprecated):
+      // only a missing field fails the node.
       const routedOn = routingFieldsOf(workflow, currentId);
       const tolerated = contract.filter((p) => routedOn.has(p.field));
       if (tolerated.length > 0) {
         logger.warn(
-          `  output contract still violated for routing field(s) ${tolerated.map((p) => p.path).join(", ")}; ` +
+          `  output contract still violated for routing field(s) ${contractPaths(tolerated).join(", ")}; ` +
             `routes that read them fall through to the next rung`,
           { node: currentId },
         );
@@ -1149,19 +1156,24 @@ async function executeRun(
             type: "node:warning",
             node: currentId,
             reason: "routing fields missing or invalid after repair; their routes fall through",
-            fields: tolerated.map((p) => p.path),
+            fields: contractPaths(tolerated),
           },
           logger,
         );
       }
-      const broken = contract.filter((p) => !routedOn.has(p.field));
+      const broken = contract.filter((p) => !routedOn.has(p.field) && (p.kind === "missing" || !p.fallback));
+      const contractError =
+        "error" in checked
+          ? `output validation error: ${checked.error}`
+          : broken.length > 0
+            ? contractFailureMessage(broken)
+            : undefined;
 
       let outcome: AggregateOutcome;
-      if (broken.length > 0) {
-        const msg = contractFailureMessage(broken);
+      if (contractError !== undefined) {
         const name = broken.some((p) => p.kind === "missing") ? "output_required" : "output_schema";
-        const failure: EvalResult = { name, kind: "value", pass: false, reasoning: msg };
-        outcome = { pass: false, error: msg, failures: [failure] };
+        const failure: EvalResult = { name, kind: "value", pass: false, reasoning: contractError };
+        outcome = { pass: false, error: contractError, failures: [failure] };
         // Still record the synthesized failure as the node's eval result so
         // observers and downstream context see the contract violation.
         result.evals = [failure];
@@ -1678,8 +1690,12 @@ export function deciderRoutingState(
     const fields = fieldsOf(id);
     if (fields.size > 0 && r.status === "success") {
       const data = (r.data ?? {}) as Record<string, unknown>;
+      // A field that breaks the node's contract by any rule (#573) is sent as null, like a mistyped one.
+      const broken = invalidOutputFields(r, hasOwn(workflow.nodes, id) ? workflow.nodes[id] : undefined);
       const output: Record<string, unknown> = Object.create(null);
-      for (const [k, spec] of fields) output[k] = projectValue(spec, hasOwn(data, k) ? data[k] : undefined);
+      for (const [k, spec] of fields) {
+        output[k] = broken.has(k) ? null : projectValue(spec, hasOwn(data, k) ? data[k] : undefined);
+      }
       entry.output = output;
     }
     if (r.evals && r.evals.length > 0) {
@@ -1799,6 +1815,18 @@ export function buildBoundedContext(
 
 // The output contract (#357, #573) lives in output-contract.ts; re-exported for existing importers.
 export { COUNT_OF_KEYWORD, outputContractProblems };
+
+/**
+ * The top-level output fields of a node's result that are present but break
+ * its contract (#573), at any depth and by any rule. Routing reads them as
+ * unknown and the decider never sees their values. A check that cannot run
+ * (it threw) marks every declared field, so nothing unchecked routes.
+ */
+function invalidOutputFields(result: NodeResult, node: Node | undefined): Set<string> {
+  const checked = checkOutputContract(result.data, node?.output);
+  if ("error" in checked) return getDeclaredOutputProperties(node?.output) ?? new Set();
+  return new Set(checked.problems.filter((p) => p.kind === "invalid").map((p) => p.field));
+}
 export type { ContractProblem } from "./output-contract.js";
 
 /** The output fields of `nodeId` that some `{ expr }` in the workflow reads. */
@@ -2549,8 +2577,7 @@ function resolveByExpressions(
   for (const [id, r] of results.entries()) {
     if (r.status !== "success") continue;
     const node = hasOwn(workflow.nodes, id) ? workflow.nodes[id] : undefined;
-    for (const p of outputContractProblems(r.data, node?.output))
-      if (p.kind === "invalid") invalid.add(`${id}.${p.field}`);
+    for (const f of invalidOutputFields(r, node)) invalid.add(`${id}.${f}`);
     scope[id] = buildPriorNodeContext(r);
   }
 
@@ -2626,7 +2653,7 @@ function resolveByExpressions(
 /**
  * Validate a workflow definition before execution.
  */
-function validate(workflow: Workflow, skills: Map<string, Skill>): void {
+function validate(workflow: Workflow, skills: Map<string, Skill>, logger: Logger): void {
   for (const [id, def] of Object.entries(workflow.skills ?? {})) {
     if (!def.instruction?.trim()) {
       throw new Error(`Inline skill "${id}" must provide a non-empty instruction`);
@@ -2651,12 +2678,15 @@ function validate(workflow: Workflow, skills: Map<string, Skill>): void {
   // reach execute() without the loader, so without this they got none of it
   // (#326). Runs once per execute() call, before any node runs. Skill
   // availability stays a warning below, so no knownSkills here.
-  const structural = validateWorkflow(workflow);
+  const loadWarnings: WorkflowWarning[] = [];
+  const structural = validateWorkflow(workflow, undefined, { warnings: loadWarnings });
   if (structural.length > 0) {
     throw new Error(
       `Invalid workflow "${workflow.id}":\n${structural.map((e) => `  ${e.code}: ${e.message}`).join("\n")}`,
     );
   }
+  // Deprecated but still loading (#573): said once per run, never silently.
+  for (const w of loadWarnings) logger.warn(`  ${w.code}: ${w.message}`, { node: w.nodeId });
 
   // Check that each node has at least one available skill (if it lists any)
   for (const [nodeId, node] of Object.entries(workflow.nodes)) {

@@ -85,7 +85,7 @@ import { gitCredentialPolicy } from "../git-credentials.js";
 import { buildNodePrompt, reportCompletionUsage } from "./prompts.js";
 import { makeAbort } from "./abort.js";
 import { parseToolResultContent, summarizeToolError, tryParseJSON } from "./parse.js";
-import { listContractProblems, outputContractProblems } from "../output-contract.js";
+import { checkOutputContract, listContractProblems } from "../output-contract.js";
 import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
 import {
   defaultSandboxWrapper,
@@ -933,14 +933,15 @@ export class AcpHarness implements AgentHarness {
       const schema = req.outputSchema;
       const retry = { asked: false };
       // The same check, at every depth, that sweny's executor applies to every
-      // harness's output (output-contract.ts); a schema problem is not the agent's to fix.
-      const mismatches = (text: string): string[] =>
-        listContractProblems(
-          outputContractProblems(tryParseJSON(text, schema, { warn() {} }), schema).filter((p) => p.kind !== "schema"),
-        );
-      // One correction turn when the answer does not match the declared output.
+      // harness's output (output-contract.ts). A check that cannot run asks nothing.
+      const mismatches = (text: string): string[] => {
+        const checked = checkOutputContract(tryParseJSON(text, schema, { warn() {} }), schema);
+        return "problems" in checked ? listContractProblems(checked.problems) : [];
+      };
+      // One correction turn when the answer does not match the declared output,
+      // unless the caller (sweny's executor) runs the one repair itself: one repair loop on every harness.
       const followUp = (turn: Turn): string | undefined => {
-        if (!schema || retry.asked) return undefined;
+        if (!schema || retry.asked || req.callerRepairsOutput) return undefined;
         const problems = mismatches(turn.text);
         if (problems.length === 0) return undefined;
         retry.asked = true;

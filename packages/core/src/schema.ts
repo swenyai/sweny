@@ -544,10 +544,26 @@ export interface WorkflowError {
     | "UNSUPPORTED_OUTPUT"
     | "INVALID_WHEN_EXPRESSION"
     | "MIXED_EDGE_CONDITIONS"
-    | "DUPLICATE_EDGE"
-    | "INVALID_OUTPUT_SCHEMA";
+    | "DUPLICATE_EDGE";
   message: string;
   nodeId?: string;
+}
+
+/**
+ * A finding that does not stop the workflow loading (#573): something that
+ * works today and is deprecated. `OUTPUT_SCHEMA_FALLBACK`: a node's `output`
+ * schema does not compile, so its output keeps the pre-#573 top-level check;
+ * a future minor will refuse to load it.
+ */
+export interface WorkflowWarning {
+  code: "OUTPUT_SCHEMA_FALLBACK";
+  message: string;
+  nodeId: string;
+}
+
+export interface ValidateWorkflowOptions {
+  /** Receives warning-level findings. They never appear in the returned errors. */
+  warnings?: WorkflowWarning[];
 }
 
 /**
@@ -567,6 +583,7 @@ export interface WorkflowError {
 export function validateWorkflow(
   workflow: Workflow | z.infer<typeof workflowZ>,
   knownSkills?: Set<string>,
+  options: ValidateWorkflowOptions = {},
 ): WorkflowError[] {
   const errors: WorkflowError[] = [];
   const nodeIds = new Set(Object.keys(workflow.nodes));
@@ -809,14 +826,17 @@ export function validateWorkflow(
   }
 
   // Output schemas compile with the validator the executor checks outputs
-  // with (#573), so a schema no output can satisfy fails here, before any
-  // agent runs and spends, instead of on the node after it.
+  // with (#573). One that does not compile still loads, as it did before: a
+  // warning, and the node keeps the pre-#573 top-level check. Deprecated.
   for (const [nodeId, node] of Object.entries(workflow.nodes)) {
     const why = outputSchemaError(node.output);
     if (why !== undefined) {
-      errors.push({
-        code: "INVALID_OUTPUT_SCHEMA",
-        message: `Node "${nodeId}" declares an output schema that cannot be used: ${why}`,
+      options.warnings?.push({
+        code: "OUTPUT_SCHEMA_FALLBACK",
+        message:
+          `Node "${nodeId}" declares an output schema the validator cannot compile (${why}). ` +
+          `Its output gets only the old top-level check (required fields, top-level types and enums). ` +
+          `Deprecated: a future minor will refuse to load this workflow; fix the schema or name its draft in $schema.`,
         nodeId,
       });
     }
