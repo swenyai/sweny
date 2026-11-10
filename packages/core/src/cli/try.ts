@@ -24,7 +24,7 @@ import { validateParsed } from "../loader.js";
 import type { AgentHarness, HarnessCapabilities, HarnessRunResult } from "../harness/types.js";
 import type { ExecutionEvent, Logger, NodeResult, Observer, ToolCall, Workflow } from "../types.js";
 import { WORKFLOW_TEMPLATES } from "./templates.js";
-import { formatFinalOutput, resolveFinalOutput } from "./final-output.js";
+import { formatFinalOutput, resolveFinalOutput, type FinalOutput } from "./final-output.js";
 import { formatRunComment } from "./comment-output.js";
 import { formatReceiptDuration, summarizeRun } from "./run-output.js";
 import { DagRenderer } from "./renderer.js";
@@ -278,6 +278,12 @@ export interface TryOptions {
   rich?: boolean;
   /** Terminal width. Default: stdout's. */
   columns?: number;
+  /**
+   * Show at most this many items of each list in the answer, with the count in its heading
+   * ("How to run it (2 of 8):"). The recording uses it to stay README-sized; a real terminal run
+   * leaves it unset and shows the whole answer.
+   */
+  compactAnswer?: number;
   fixture?: TryFixture;
 }
 
@@ -291,6 +297,37 @@ export function scaledPace(fixture: TryFixture, targetMs: number = REPLAY_TARGET
   const total = Object.values(fixture.nodes).reduce((a, n) => a + n.duration_ms, 0);
   const scale = total > targetMs ? targetMs / total : 1;
   return (id) => Math.max(REPLAY_NODE_MIN_MS, Math.round((fixture.nodes[id]?.duration_ms ?? 0) * scale));
+}
+
+/**
+ * The answer with each list cut to its first `maxItems` items; the heading then says
+ * "<title> (<maxItems> of <total>):". Scalars, short lists and errors pass through. Pure.
+ */
+export function compactAnswer(out: FinalOutput, maxItems: number): FinalOutput {
+  if (out.kind !== "result" || !Number.isInteger(maxItems) || maxItems < 1) return out;
+  const src = out.lines;
+  const lines: string[] = [];
+  let i = 0;
+  while (i < src.length) {
+    const head = src[i];
+    // A list is a heading with no value ("Key files:") followed by "- " items and their indented continuations.
+    if (!/^[^\s-].*:$/.test(head) || !src[i + 1]?.startsWith("- ")) {
+      lines.push(head);
+      i++;
+      continue;
+    }
+    const items: string[][] = [];
+    let j = i + 1;
+    while (j < src.length && (src[j].startsWith("- ") || src[j].startsWith(" "))) {
+      if (src[j].startsWith("- ")) items.push([src[j]]);
+      else items[items.length - 1].push(src[j]);
+      j++;
+    }
+    if (items.length <= maxItems) lines.push(head, ...items.flat());
+    else lines.push(`${head.slice(0, -1)} (${maxItems} of ${items.length}):`, ...items.slice(0, maxItems).flat());
+    i = j;
+  }
+  return { ...out, lines };
 }
 
 const silentLogger: Logger = { info() {}, warn() {}, error() {}, debug() {} };
@@ -384,7 +421,10 @@ export async function runTry(opts: TryOptions = {}): Promise<number> {
   const receipt = summarizeRun(results, totalMs, false, trace);
 
   const answer = resolveFinalOutput(workflow, results);
-  if (answer) write(`${formatFinalOutput(answer)}\n\n`);
+  if (answer) {
+    const shown = opts.compactAnswer ? compactAnswer(answer, opts.compactAnswer) : answer;
+    write(`${formatFinalOutput(shown)}\n\n`);
+  }
 
   // Compact preview of CI's job summary: heading and DAG here, receipt below.
   const comment = formatRunComment(workflow, results as Map<string, NodeResult>, receipt, { trace, durationsMs });

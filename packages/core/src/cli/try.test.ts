@@ -9,6 +9,7 @@ import {
   TRY_BANNER_TITLE,
   TRY_HELP_NOTE,
   TRY_NEXT_COMMAND,
+  compactAnswer,
   createReplayHarness,
   loadTryFixture,
   loadTryWorkflow,
@@ -25,59 +26,93 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+// Behavior specs run on test-local fixtures, never on the shipped try-fixture.json, so replacing the
+// recording (a new capture, a new repo) cannot break them. The shipped file gets one invariants spec.
+const fixtureFile = (name: string) => path.join(here, "test-fixtures", name);
+const illustrativeFixture = (): TryFixture => loadTryFixture(fixtureFile("try-illustrative.json"));
+const realFixtureBase = (): TryFixture => loadTryFixture(fixtureFile("try-real.json"));
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 async function capture(opts: Parameters<typeof runTry>[0] = {}) {
   let out = "";
-  const code = await runTry({ fast: true, tty: false, unicode: true, write: (s) => (out += s), ...opts });
+  const code = await runTry({
+    fast: true,
+    tty: false,
+    unicode: true,
+    fixture: illustrativeFixture(),
+    write: (s) => (out += s),
+    ...opts,
+  });
   return { code, out };
 }
 
-describe("try fixture", () => {
-  it("is valid, labelled illustrative, and matches the explain-repo template", () => {
-    const fixture = loadTryFixture();
-    expect(fixture.illustrative).toBe(true);
-    expect(fixture.notice).toContain("ILLUSTRATIVE");
-    const wf = loadTryWorkflow(fixture.workflow);
-    for (const id of Object.keys(fixture.nodes)) expect(wf.nodes[id]).toBeDefined();
-    expect(Object.keys(fixture.nodes)).toEqual(["survey", "explain"]);
-  });
+// Secret-shaped strings that must never ship in the recording.
+const SECRET_SHAPES = [
+  /\bsk-[A-Za-z0-9_-]{16,}/,
+  /\bgh[pousr]_[A-Za-z0-9]{20,}/,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}/,
+  /\bAKIA[0-9A-Z]{16}\b/,
+  /\bxox[abprs]-[A-Za-z0-9-]{10,}/,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  /\bBearer\s+[A-Za-z0-9._-]{16,}/i,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\./,
+  /(password|secret|token|api[_-]?key)["']?\s*[:=]\s*["'][^"']{8,}/i,
+];
 
-  it("holds metadata plus the sample answer only", () => {
+describe("the shipped try-fixture.json (invariants only)", () => {
+  it("is a valid real capture of the explain-repo template, dated, and carries no secret-looking strings", () => {
     const raw = fs.readFileSync(path.join(here, "try-fixture.json"), "utf-8");
-    const fixture = JSON.parse(raw) as Record<string, any>;
-    for (const node of Object.values<any>(fixture.nodes)) {
+    const fixture = parseTryFixture(JSON.parse(raw));
+    expect(fixture.illustrative).toBe(false);
+    expect(fixture.captured_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(fixture.notice).not.toMatch(/ILLUSTRATIVE/);
+    const wf = loadTryWorkflow(fixture.workflow);
+    expect(Object.keys(fixture.nodes)).toEqual(["survey", "explain"]);
+    for (const id of Object.keys(fixture.nodes)) expect(wf.nodes[id]).toBeDefined();
+    // Metadata plus the answer only: no tool inputs or outputs.
+    for (const node of Object.values(fixture.nodes)) {
       expect(Object.keys(node).sort().join()).toMatch(
         /^(duration_ms,output,tool_calls,usage|duration_ms,tool_calls,usage)$/,
       );
+    }
+    for (const re of SECRET_SHAPES) expect(raw, String(re)).not.toMatch(re);
+  });
+});
+
+describe("test fixtures", () => {
+  it("are valid; one is illustrative, one is a dated real capture, both match the template", () => {
+    const ill = illustrativeFixture();
+    const real = realFixtureBase();
+    expect(ill.illustrative).toBe(true);
+    expect(ill.notice).toContain("ILLUSTRATIVE");
+    expect(real.illustrative).toBe(false);
+    expect(real.captured_at).toBeDefined();
+    for (const f of [ill, real]) {
+      const wf = loadTryWorkflow(f.workflow);
+      expect(Object.keys(f.nodes)).toEqual(["survey", "explain"]);
+      for (const id of Object.keys(f.nodes)) expect(wf.nodes[id]).toBeDefined();
     }
   });
 
   it("rejects a malformed fixture", () => {
     expect(() => parseTryFixture(null)).toThrow(/expected an object/);
-    expect(() => parseTryFixture({ ...loadTryFixture(), nodes: {} })).toThrow(/nodes/);
-    expect(() => parseTryFixture({ ...loadTryFixture(), illustrative: "yes" })).toThrow(/illustrative/);
+    expect(() => parseTryFixture({ ...illustrativeFixture(), nodes: {} })).toThrow(/nodes/);
+    expect(() => parseTryFixture({ ...illustrativeFixture(), illustrative: "yes" })).toThrow(/illustrative/);
   });
 
-  it("the shipped help note says illustrative", () => {
+  it("the illustrative help note says illustrative", () => {
     expect(TRY_HELP_NOTE).toContain("ILLUSTRATIVE");
   });
 });
 
-const realFixture = (over: Partial<TryFixture> = {}): TryFixture => ({
-  ...loadTryFixture(),
-  illustrative: false,
-  captured_at: "2026-11-12T14:00:00.000Z",
-  notice: "A replay of a real run.",
-  sample_repo: "swenyai/sweny",
-  ...over,
-});
+const realFixture = (over: Partial<TryFixture> = {}): TryFixture => ({ ...realFixtureBase(), ...over });
 
 describe("label follows `illustrative` (#537)", () => {
   it("illustrative: the sample-repo wording, no date", () => {
-    const f = loadTryFixture();
+    const f = illustrativeFixture();
     expect(tryLabel(f)).toContain("illustrative data");
     expect(tryLabel(f)).not.toContain("real run");
     expect(tryHelpNote(f)).toBe(TRY_HELP_NOTE);
@@ -86,9 +121,11 @@ describe("label follows `illustrative` (#537)", () => {
 
   it("real: says replay of a real run on <date>, names the repo, never says illustrative", () => {
     const f = realFixture();
-    expect(tryLabel(f)).toBe("of explain-repo on swenyai/sweny, a replay of a real run on 2026-11-12");
+    expect(tryLabel(f)).toBe("of explain-repo on acme/widget-service, a replay of a real run on 2026-11-12");
     const banner = formatTryBanner(f);
-    expect(banner).toContain("Recorded demo of explain-repo on swenyai/sweny, a replay of a real run on 2026-11-12.");
+    expect(banner).toContain(
+      "Recorded demo of explain-repo on acme/widget-service, a replay of a real run on 2026-11-12.",
+    );
     expect(banner).not.toMatch(/illustrative|sample repo/i);
     expect(tryHelpNote(f)).toContain("replay of a real run");
     expect(tryHelpNote(f)).not.toMatch(/ILLUSTRATIVE|made-up|hand-written/);
@@ -108,7 +145,7 @@ describe("label follows `illustrative` (#537)", () => {
     expect(() => parseTryFixture({ ...realFixture(), captured_at: "yesterday" })).toThrow(/captured_at/);
     expect(parseTryFixture(realFixture()).captured_at).toBe("2026-11-12T14:00:00.000Z");
     // an illustrative fixture needs no date
-    expect(() => parseTryFixture(loadTryFixture())).not.toThrow();
+    expect(() => parseTryFixture(illustrativeFixture())).not.toThrow();
   });
 });
 
@@ -163,7 +200,7 @@ describe("replay pacing (#537)", () => {
 
 describe("replay harness", () => {
   it("plays recordings in order and reports counts, usage and policy", async () => {
-    const fixture = loadTryFixture();
+    const fixture = illustrativeFixture();
     const h = createReplayHarness(fixture, { paceMs: 0 });
     const progress: string[] = [];
     const first = await h.run({
@@ -183,8 +220,27 @@ describe("replay harness", () => {
     expect(third.status).toBe("failed");
   });
 
+  it("replays a real fixture the same way: its own counts, usage and policy", async () => {
+    const h = createReplayHarness(realFixture(), { paceMs: 0 });
+    const progress: string[] = [];
+    const first = await h.run({
+      instruction: "x",
+      context: {},
+      tools: [],
+      onProgress: (m: string) => progress.push(m),
+    } as never);
+    expect(first.toolCalls.map((c) => c.tool)).toEqual(["Bash", "Bash", "Bash", "Bash", "Read", "Read"]);
+    expect(progress).toHaveLength(6);
+    expect(first.usage?.inputTokens).toBe(1000);
+    expect(first.policy).toEqual({ envScope: true, sandbox: "strict", sandboxStarted: true });
+    expect(first.harness).toEqual({ id: "claude-code", version: "0.0.0-test" });
+    const second = await h.run({ instruction: "y", context: {}, tools: [] } as never);
+    expect(second.toolCalls).toEqual([{ tool: "StructuredOutput", input: {} }]);
+    expect((second.data as Record<string, unknown>).how_to_run).toHaveLength(6);
+  });
+
   it("routing and judging fail closed", async () => {
-    const h = createReplayHarness(loadTryFixture(), { paceMs: 0 });
+    const h = createReplayHarness(illustrativeFixture(), { paceMs: 0 });
     expect(await h.complete({ prompt: "p" })).toBeNull();
   });
 });
@@ -221,6 +277,35 @@ describe("runTry", () => {
     // the answer comes above the receipt
     expect(out.indexOf("What it is:")).toBeLessThan(out.indexOf("2/2 nodes"));
     expect(out).not.toContain("\u2014");
+  });
+
+  it("a real fixture: its own counts and policy on the receipt, the full answer, no illustrative wording", async () => {
+    const { code, out } = await capture({ fixture: realFixture() });
+    expect(code).toBe(0);
+    expect(out).toContain("✓ 2/2 nodes · 7 tool calls · 18s · ");
+    expect(out).toContain("policy: env scoped, sandbox on");
+    expect(out).not.toMatch(/illustrative/i);
+    // the whole answer, every item of every list
+    expect(out).toContain("How to run it:");
+    expect(out).toContain("npm start (serves on port 8080)");
+    expect(out).toContain("Dockerfile: the production image");
+    expect(out).toContain("Migrations run on start, so two replicas can race.");
+    expect(out).not.toMatch(/\(\d+ of \d+\):/);
+  });
+
+  it("compactAnswer: a summary of the answer (first items, count in the heading); unset shows it all", async () => {
+    const { out } = await capture({ fixture: realFixture(), compactAnswer: 2 });
+    expect(out).toContain("What it is: Widget Service stores and serves widgets over HTTP.");
+    expect(out).toContain("How to run it (2 of 6):");
+    expect(out).toContain("Key files (2 of 7):");
+    expect(out).toContain("Watch out for (2 of 4):");
+    expect(out).toContain("- npm run build");
+    expect(out).not.toContain("npm run typecheck");
+    expect(out).not.toContain("Dockerfile");
+    expect(out).not.toContain("Migrations run on start");
+    // the receipt and the next command are untouched
+    expect(out).toContain("✓ 2/2 nodes · 7 tool calls");
+    expect(out.trimEnd().split("\n").pop()).toContain(TRY_NEXT_COMMAND);
   });
 
   it("on a TTY: spinner per node, then ends on the ticket with the stamp and one next command", async () => {
@@ -308,5 +393,51 @@ describe.skipIf(!fs.existsSync(CLI_BIN))("sweny try (built CLI)", () => {
       fs.rmSync(cwd, { recursive: true, force: true });
       fs.rmSync(home, { recursive: true, force: true });
     }
+  });
+});
+
+describe("compactAnswer", () => {
+  const out = (lines: string[], kind: "result" | "error" = "result") => ({ kind, node: "explain", lines });
+  const answer = out([
+    "What it is: A thing.",
+    "Steps:",
+    "- one",
+    "- two, which wraps",
+    "  onto a second line",
+    "- three",
+    "Files:",
+    "- a",
+    "- b",
+    "Notes:",
+    "  free text under a heading",
+  ]);
+
+  it("cuts each list to the first N items, keeps wrapped continuations, and counts in the heading", () => {
+    expect(compactAnswer(answer, 2).lines).toEqual([
+      "What it is: A thing.",
+      "Steps (2 of 3):",
+      "- one",
+      "- two, which wraps",
+      "  onto a second line",
+      "Files:",
+      "- a",
+      "- b",
+      "Notes:",
+      "  free text under a heading",
+    ]);
+    expect(compactAnswer(answer, 1).lines).toContain("Steps (1 of 3):");
+    expect(compactAnswer(answer, 1).lines).toContain("Files (1 of 2):");
+  });
+
+  it("leaves lists within the limit, scalars and headings with text alone; keeps the rest of the answer", () => {
+    expect(compactAnswer(answer, 3).lines).toEqual(answer.lines);
+    expect(compactAnswer({ ...answer, node: "x" }, 2).node).toBe("x");
+  });
+
+  it("never touches an error, and ignores a limit that is not a positive integer", () => {
+    const err = out(["Steps:", "- one", "- two", "- three"], "error");
+    expect(compactAnswer(err, 1)).toBe(err);
+    expect(compactAnswer(answer, 0)).toBe(answer);
+    expect(compactAnswer(answer, 1.5)).toBe(answer);
   });
 });

@@ -2,9 +2,27 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { SWENY_TAGLINE } from "../theme.js";
 import { SPINNER_FRAMES } from "../theme.js";
-import { CELL_W, TEXT_X, RECORD_WRAP, parseAnsiLine, recordTrySvg, recordTrySvgToFile, wrapCells } from "./record.js";
+import {
+  CELL_W,
+  TEXT_X,
+  RECORD_ANSWER_ITEMS,
+  RECORD_WRAP,
+  parseAnsiLine,
+  recordTrySvg,
+  recordTrySvgToFile,
+  wrapCells,
+} from "./record.js";
+import { loadTryFixture, type TryFixture } from "./try.js";
+
+// Behavior specs record test-local fixtures, never the shipped try-fixture.json (that has one spec at the end).
+const here = path.dirname(fileURLToPath(import.meta.url));
+const realFixture = (): TryFixture => loadTryFixture(path.join(here, "test-fixtures", "try-real.json"));
+const illustrativeFixture = (): TryFixture => loadTryFixture(path.join(here, "test-fixtures", "try-illustrative.json"));
+const recordReal = () => recordTrySvg(realFixture());
+const heightOf = (svg: string) => Number(/viewBox="0 0 \d+ (\d+)"/.exec(svg)![1]);
 
 const NBSP = String.fromCharCode(0xa0);
 const tmp: string[] = [];
@@ -37,11 +55,12 @@ describe("wrapCells", () => {
 
 describe("recordTrySvg", () => {
   it("is deterministic: two recordings are byte-identical", async () => {
-    expect(await recordTrySvg()).toBe(await recordTrySvg());
+    expect(await recordReal()).toBe(await recordReal());
+    expect(await recordTrySvg(illustrativeFixture())).toBe(await recordTrySvg(illustrativeFixture()));
   });
 
   it("is self-contained: no scripts, fonts, images, links or external references", async () => {
-    const svg = await recordTrySvg();
+    const svg = await recordReal();
     expect(svg.startsWith("<svg ")).toBe(true);
     for (const banned of ["<script", "@import", "<image", "href=", "font-face", "url(", "<foreignObject"]) {
       expect(svg).not.toContain(banned);
@@ -52,7 +71,7 @@ describe("recordTrySvg", () => {
   });
 
   it("animates with CSS keyframes, respects reduced motion, and stays small", async () => {
-    const svg = await recordTrySvg();
+    const svg = await recordReal();
     expect(svg).toContain("@keyframes");
     expect(svg).toContain("prefers-reduced-motion");
     expect(svg).toContain("monospace");
@@ -60,7 +79,7 @@ describe("recordTrySvg", () => {
   });
 
   it("shows the real demo: tagline, both nodes, the answer, the ticket and the stamp, in brand colors", async () => {
-    const svg = (await recordTrySvg()).replace(new RegExp(NBSP, "g"), " ");
+    const svg = (await recordReal()).replace(new RegExp(NBSP, "g"), " ");
     expect(svg).toContain(SWENY_TAGLINE);
     expect(svg).toContain("survey");
     expect(svg).toContain("explain");
@@ -72,7 +91,7 @@ describe("recordTrySvg", () => {
   });
 
   it("has no em dashes and nothing wider than the window wraps to", async () => {
-    const svg = await recordTrySvg();
+    const svg = await recordReal();
     expect(svg).not.toContain(String.fromCharCode(0x2014));
     for (const m of svg.matchAll(/<text class="r [^"]*"[^>]*>(.*?)<\/text>/g)) {
       const visible = m[1].replace(/<[^>]+>/g, "").replace(/&amp;|&lt;|&gt;/g, "x");
@@ -81,7 +100,7 @@ describe("recordTrySvg", () => {
   });
 
   it("defaults to the final frame: persistent lines visible, spinner frames hidden, keyframes start hidden", async () => {
-    const svg = await recordTrySvg();
+    const svg = await recordReal();
     const css = /<style>(.*?)<\/style>/s.exec(svg)![1];
     // Effective default opacity of a class list: the last rule that sets opacity wins.
     const opacityRules = [...css.matchAll(/\.([a-z0-9]+)\{opacity:([\d.]+)\}/g)].map(
@@ -111,16 +130,32 @@ describe("recordTrySvg", () => {
     expect(css).toMatch(/prefers-reduced-motion:reduce\)\{\.r\{animation:none!important\}\.sp\{display:none\}\}/);
   });
 
-  it("is README-sized: no job summary preview, under 900px tall", async () => {
-    const svg = await recordTrySvg();
+  it("is README-sized: no job summary preview, under 900px tall, even for a long answer", async () => {
+    const svg = await recordReal();
     expect(svg).not.toContain("job summary gets");
     expect(svg).toContain("passed");
-    const h = Number(/viewBox="0 0 \d+ (\d+)"/.exec(svg)![1]);
-    expect(h).toBeLessThan(900);
+    expect(heightOf(svg)).toBeLessThan(900);
+  });
+
+  it("shows a compact answer: purpose, then the first items of each list with the count in the heading", async () => {
+    const svg = (await recordReal()).replace(new RegExp(NBSP, "g"), " ");
+    expect(RECORD_ANSWER_ITEMS).toBe(2);
+    expect(svg).toContain("What it is:");
+    expect(svg).toContain("Widget Service stores and serves widgets over HTTP.");
+    expect(svg).toContain("How to run it (2 of 6):");
+    expect(svg).toContain("Key files (2 of 7):");
+    expect(svg).toContain("Watch out for (2 of 4):");
+    expect(svg).toContain("npm run build");
+    expect(svg).not.toContain("npm run typecheck");
+    expect(svg).not.toContain("Dockerfile");
+    // a short answer is shown whole
+    const short = (await recordTrySvg(illustrativeFixture())).replace(new RegExp(NBSP, "g"), " ");
+    expect(short).toContain("npm start (serves on http://localhost:3000)");
+    expect(short).not.toMatch(/\(\d+ of \d+\):/);
   });
 
   it("lays out by explicit columns: no reliance on whitespace handling", async () => {
-    const svg = await recordTrySvg();
+    const svg = await recordReal();
     expect(svg).toMatch(/^<svg [^>]*xml:space="preserve"/);
     type Seg = { x: number; text: string };
     const rows: { preserve: boolean; segs: Seg[] }[] = [];
@@ -162,8 +197,19 @@ describe("recordTrySvg", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-record-"));
     tmp.push(dir);
     const file = path.join(dir, "nested", "demo.svg");
-    const bytes = await recordTrySvgToFile(file);
-    expect(fs.readFileSync(file, "utf-8")).toBe(await recordTrySvg());
+    const bytes = await recordTrySvgToFile(file, realFixture());
+    expect(fs.readFileSync(file, "utf-8")).toBe(await recordReal());
     expect(fs.statSync(file).size).toBe(bytes);
+  });
+});
+
+describe("the shipped recording", () => {
+  // The README's first screen has a 900px budget (never raised): whatever the shipped fixture says,
+  // its recording has to fit.
+  it("fits the README budget, under 900px tall, and ends on the receipt", async () => {
+    const svg = await recordTrySvg();
+    expect(heightOf(svg)).toBeLessThan(900);
+    expect(svg).toContain("passed");
+    expect(svg).not.toContain("job summary gets");
   });
 });
