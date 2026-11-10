@@ -2093,8 +2093,8 @@ describe("journal: receipts and refusals", () => {
     expect(await retry({ items: [{}, {}] })).toBe(true);
     // Too deep to tell counts as naming something: at depth 9, not at depth 8.
     const nest = (n: number): Record<string, unknown> => (n === 0 ? {} : { a: nest(n - 1) });
-    expect(await retry(nest(7))).toBe(true);
-    expect(await retry(nest(8))).toBe(false);
+    expect(await retry(nest(8))).toBe(true);
+    expect(await retry(nest(9))).toBe(false);
     const arrays = (n: number): unknown => (n === 0 ? [] : [arrays(n - 1)]);
     expect(await retry({ a: arrays(7) })).toBe(true);
     expect(await retry({ a: arrays(8) })).toBe(false);
