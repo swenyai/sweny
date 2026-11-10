@@ -42,6 +42,7 @@ import { sourceZ } from "./sources.js";
 import { resolveNodePermissions } from "./node-policy.js";
 import { workflowInputsZ, WORKFLOW_INPUT_TYPES } from "./inputs.js";
 import { checkExpression, isWhenExpression, WHEN_EXPR_MAX_LENGTH } from "./when.js";
+import { outputSchemaError } from "./output-contract.js";
 
 // Studio and other schema-only consumers label edges without importing the root entry.
 export { isWhenExpression, whenLabel } from "./when.js";
@@ -543,7 +544,8 @@ export interface WorkflowError {
     | "UNSUPPORTED_OUTPUT"
     | "INVALID_WHEN_EXPRESSION"
     | "MIXED_EDGE_CONDITIONS"
-    | "DUPLICATE_EDGE";
+    | "DUPLICATE_EDGE"
+    | "INVALID_OUTPUT_SCHEMA";
   message: string;
   nodeId?: string;
 }
@@ -801,6 +803,20 @@ export function validateWorkflow(
       errors.push({
         code: "RETRY_MAX_EXCEEDED",
         message: `Node "${nodeId}" declares retry.max ${max}, above the ceiling of ${NODE_RETRY_MAX_CEILING}`,
+        nodeId,
+      });
+    }
+  }
+
+  // Output schemas compile with the validator the executor checks outputs
+  // with (#573), so a schema no output can satisfy fails here, before any
+  // agent runs and spends, instead of on the node after it.
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    const why = outputSchemaError(node.output);
+    if (why !== undefined) {
+      errors.push({
+        code: "INVALID_OUTPUT_SCHEMA",
+        message: `Node "${nodeId}" declares an output schema that cannot be used: ${why}`,
         nodeId,
       });
     }

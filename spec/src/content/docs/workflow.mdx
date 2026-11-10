@@ -259,6 +259,7 @@ A conforming validator MUST enforce the following rules:
 | `INVALID_WHEN_EXPRESSION`  | An edge's `when` expression does not parse or names an undeclared field or a node that cannot run first (see [Expressions](/edges#expressions)). |
 | `MIXED_EDGE_CONDITIONS`    | A node's conditional out-edges mix expressions and natural language.                                                                             |
 | `DUPLICATE_EDGE`           | Two edges share the same `from` and `to`. Merge them into one edge whose condition covers both (OR).                                             |
+| `INVALID_OUTPUT_SCHEMA`    | A node's `output` is not a JSON Schema the validator can compile (an unknown `type`, an unresolvable `$ref`, a dialect it does not support).     |
 
 ## Safe Outputs Policy
 

@@ -21,6 +21,7 @@ export default defineConfig({
       "src/__tests__/eval-policy.test.ts",
       "src/__tests__/workflow-yaml.test.ts",
       "src/harness/policy.test.ts",
+      "src/__tests__/output-contract.test.ts",
     ],
   },
 });

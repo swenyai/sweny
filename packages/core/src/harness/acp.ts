@@ -84,7 +84,8 @@ import { policyGate, resolveHarnessPolicy, TOOL_CLASSES, type HarnessPolicyMode 
 import { gitCredentialPolicy } from "../git-credentials.js";
 import { buildNodePrompt, reportCompletionUsage } from "./prompts.js";
 import { makeAbort } from "./abort.js";
-import { parseToolResultContent, schemaMismatches, summarizeToolError, tryParseJSON } from "./parse.js";
+import { parseToolResultContent, summarizeToolError, tryParseJSON } from "./parse.js";
+import { listContractProblems, outputContractProblems } from "../output-contract.js";
 import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
 import {
   defaultSandboxWrapper,
@@ -931,18 +932,24 @@ export class AcpHarness implements AgentHarness {
       const basePrompt = buildNodePrompt(req.instruction, req.context, req.outputSchema);
       const schema = req.outputSchema;
       const retry = { asked: false };
+      // The same check, at every depth, that sweny's executor applies to every
+      // harness's output (output-contract.ts); a schema problem is not the agent's to fix.
+      const mismatches = (text: string): string[] =>
+        listContractProblems(
+          outputContractProblems(tryParseJSON(text, schema, { warn() {} }), schema).filter((p) => p.kind !== "schema"),
+        );
       // One correction turn when the answer does not match the declared output.
       const followUp = (turn: Turn): string | undefined => {
         if (!schema || retry.asked) return undefined;
-        const parsed = tryParseJSON(turn.text, schema, { warn() {} });
-        const problems = schemaMismatches(parsed, schema);
+        const problems = mismatches(turn.text);
         if (problems.length === 0) return undefined;
         retry.asked = true;
         this.logger.info(
           `  acp: the answer does not match the output shape (${problems.join("; ")}); asking once more`,
         );
         return [
-          `Your last reply did not match the required output: ${problems.join("; ")}.`,
+          "Your last reply did not match the required output:",
+          ...problems.map((line) => `- ${line}`),
           "Reply again, ending with ONLY a JSON object that matches this schema:",
           "```json",
           JSON.stringify(schema, null, 2),
@@ -994,8 +1001,7 @@ export class AcpHarness implements AgentHarness {
       const result = this.toResult(conv, schema, req.timeoutMs);
       if (result.status === "success" && schema && retry.asked) {
         const last = conv.turns.at(-1)?.text ?? "";
-        const left = schemaMismatches(tryParseJSON(last, schema, { warn() {} }), schema);
-        if (left.length > 0) {
+        if (mismatches(last).length > 0) {
           extraDegraded.push(`structured_output: the answer still did not match the declared output after one retry`);
         }
       }

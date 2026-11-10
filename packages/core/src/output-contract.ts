@@ -72,22 +72,20 @@ const hasOwn = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o,
 const AJV_OPTIONS = { allErrors: true, strict: false, validateFormats: false, logger: false } as const;
 
 type Validator = Pick<Ajv, "compile" | "removeSchema">;
-const validators = new Map<string, Validator>();
+const DRAFT_07: Validator = new Ajv(AJV_OPTIONS);
+const DRAFT_2019: Validator = new Ajv2019(AJV_OPTIONS);
+const DRAFT_2020: Validator = new Ajv2020(AJV_OPTIONS);
 
+/** The validator for the dialect the schema names in `$schema`; 2020-12 when it names none. */
 function validatorFor(schema: JSONSchema): Validator {
-  const dialect = typeof schema.$schema === "string" ? schema.$schema : "";
-  const key = /draft-07/.test(dialect) ? "draft-07" : /2019-09/.test(dialect) ? "2019-09" : "2020-12";
-  let v = validators.get(key);
-  if (!v) {
-    v =
-      key === "draft-07"
-        ? new Ajv(AJV_OPTIONS)
-        : key === "2019-09"
-          ? new Ajv2019(AJV_OPTIONS)
-          : new Ajv2020(AJV_OPTIONS);
-    validators.set(key, v);
-  }
-  return v;
+  const dialect = String(schema.$schema);
+  return /draft-07/.test(dialect) ? DRAFT_07 : /2019-09/.test(dialect) ? DRAFT_2019 : DRAFT_2020;
+}
+
+/** ajv repeats a meta-schema complaint once per branch it tried: say each once. */
+function oneEach(message: string): string {
+  const [, head, rest] = /^(schema is invalid: |)(.*)$/s.exec(message)!;
+  return head + [...new Set(rest.split(", "))].join(", ");
 }
 
 type Compiled = { validate: ValidateFunction } | { error: string };
@@ -102,21 +100,17 @@ function compile(schema: JSONSchema): Compiled {
   try {
     out = { validate: v.compile(schema as SchemaObject) };
   } catch (err) {
-    out = { error: err instanceof Error ? err.message : String(err) };
+    out = { error: oneEach((err as Error).message) };
   } finally {
-    try {
-      v.removeSchema(schema as SchemaObject);
-    } catch {
-      // never added
-    }
+    v.removeSchema(schema as SchemaObject);
   }
   compiled.set(schema, out);
   return out;
 }
 
-/** Why a declared output schema cannot be used, or undefined when it compiles. */
+/** Why a declared output schema cannot be used, or undefined when it compiles (or there is none). */
 export function outputSchemaError(output: JSONSchema | undefined): string | undefined {
-  if (!output || typeof output !== "object" || Array.isArray(output)) return undefined;
+  if (!output || typeof output !== "object") return undefined;
   const c = compile(output);
   return "error" in c ? c.error : undefined;
 }
@@ -131,47 +125,36 @@ function pointerSegments(pointer: string): string[] {
     .map((s) => s.replace(/~1/g, "/").replace(/~0/g, "~"));
 }
 
-/** `["findings", "1", "severity"]` over the data -> `findings[1].severity`. Array indexes only where the value is an array. */
+/** One step down the data. Every segment but a final missing or extra key exists, since ajv found it there. */
+const step = (cur: unknown, seg: string): unknown => (cur as Record<string, unknown> | undefined)?.[seg];
+
+/**
+ * `["findings", "1", "severity"]` over the data -> `findings[1].severity`.
+ * `[n]` only where the value is an array; a key that is not an identifier is
+ * quoted (`["odd key"]`, `byIndex["0"]`).
+ */
 function renderPath(segments: string[], data: unknown): string {
   if (segments.length === 0) return ROOT_PATH;
   let out = "";
   let cur: unknown = data;
   for (const seg of segments) {
-    if (Array.isArray(cur) && /^(0|[1-9]\d*)$/.test(seg)) {
-      out += `[${seg}]`;
-      cur = cur[Number(seg)];
-      continue;
-    }
-    out += /^[A-Za-z_$][\w$-]*$/.test(seg) ? (out === "" ? seg : `.${seg}`) : `[${JSON.stringify(seg)}]`;
-    cur = cur && typeof cur === "object" && hasOwn(cur, seg) ? (cur as Record<string, unknown>)[seg] : undefined;
+    if (Array.isArray(cur)) out += `[${seg}]`;
+    else if (/^[A-Za-z_$][\w$-]*$/.test(seg)) out += out === "" ? seg : `.${seg}`;
+    else out += `[${JSON.stringify(seg)}]`;
+    cur = step(cur, seg);
   }
   return out;
 }
 
-function valueAt(segments: string[], data: unknown): unknown {
-  let cur: unknown = data;
-  for (const seg of segments) {
-    if (!cur || typeof cur !== "object" || !hasOwn(cur, seg)) return undefined;
-    cur = (cur as Record<string, unknown>)[seg];
-  }
-  return cur;
-}
-
+/** The value as JSON, cut to 80 characters. Output data is JSON, so it always serializes. */
 function preview(v: unknown): string {
-  let s: string;
-  try {
-    s = JSON.stringify(v) ?? String(v);
-  } catch {
-    s = String(v);
-  }
+  const s = String(JSON.stringify(v));
   return s.length > 80 ? `${s.slice(0, 77)}...` : s;
 }
 
-const isScalar = (v: unknown) => v === null || (typeof v !== "object" && typeof v !== "undefined");
-
 function toProblem(e: ErrorObject, data: unknown): ContractProblem {
   const at = pointerSegments(e.instancePath);
-  const value = valueAt(at, data);
+  const value = at.reduce(step, data);
   const segs = [...at];
   const p = e.params as Record<string, unknown>;
   let problem: string;
@@ -194,8 +177,7 @@ function toProblem(e: ErrorObject, data: unknown): ContractProblem {
       problem = "not allowed (unevaluatedProperties: false)";
       break;
     case "type": {
-      const types = Array.isArray(p.type) ? p.type : String(p.type).split(",");
-      problem = `expected ${types.join(" or ")}, got ${preview(value)}`;
+      problem = `expected ${[p.type].flat().join(" or ")}, got ${preview(value)}`;
       break;
     }
     case "enum":
@@ -205,7 +187,8 @@ function toProblem(e: ErrorObject, data: unknown): ContractProblem {
       problem = `expected ${preview(p.allowedValue)}, got ${preview(value)}`;
       break;
     default:
-      problem = `${e.message ?? `fails '${e.keyword}'`}${isScalar(value) ? `, got ${preview(value)}` : ""}`;
+      // The validator's wording, plus the value when it is a scalar.
+      problem = value === null || typeof value !== "object" ? `${e.message}, got ${preview(value)}` : `${e.message}`;
   }
   const missingTopLevel = e.keyword === "required" && segs.length === 1;
   return {
@@ -228,17 +211,17 @@ interface CountOf {
 }
 
 function countOf(spec: CountOf, data: Record<string, unknown>): number | undefined {
-  const items = hasOwn(data, spec.array) ? data[spec.array] : undefined;
+  const items = data[spec.array];
   if (!Array.isArray(items)) return undefined;
   let n = 0;
   for (const item of items) {
     if (!item || typeof item !== "object") continue;
     const it = item as Record<string, unknown>;
     const whereOk = Object.entries(spec.where ?? {}).every(
-      ([k, allowed]) => hasOwn(it, k) && Array.isArray(allowed) && allowed.some((a) => a === it[k]),
+      ([k, allowed]) => Array.isArray(allowed) && allowed.some((a) => a === it[k]),
     );
     const nonEmptyOk = (spec.non_empty ?? []).every(
-      (k) => hasOwn(it, k) && typeof it[k] === "string" && (it[k] as string).trim() !== "",
+      (k) => typeof it[k] === "string" && (it[k] as string).trim() !== "",
     );
     if (whereOk && nonEmptyOk) n++;
   }
@@ -250,28 +233,28 @@ function countProblems(
   data: Record<string, unknown>,
   alreadyBroken: Set<string>,
 ): ContractProblem[] {
-  const props = output.properties;
-  if (!props || typeof props !== "object") return [];
+  // The schema compiled, so `properties` is an object when present.
+  const props = (output.properties ?? {}) as Record<string, unknown>;
   const problems: ContractProblem[] = [];
-  for (const [k, raw] of Object.entries(props as Record<string, unknown>)) {
-    if (!hasOwn(data, k) || alreadyBroken.has(k) || !raw || typeof raw !== "object") continue;
-    const spec = (raw as Record<string, unknown>)[COUNT_OF_KEYWORD];
-    if (!spec || typeof spec !== "object" || typeof (spec as CountOf).array !== "string") continue;
-    const want = countOf(spec as CountOf, data);
+  for (const [k, raw] of Object.entries(props)) {
+    if (!hasOwn(data, k) || alreadyBroken.has(k)) continue;
+    const spec = (raw as Record<string, unknown> | null)?.[COUNT_OF_KEYWORD] as CountOf | undefined;
+    if (typeof spec?.array !== "string") continue;
+    const want = countOf(spec, data);
     const path = renderPath([k], data);
     if (want === undefined) {
       problems.push({
         field: k,
         path,
         kind: "invalid",
-        problem: `cannot be checked: '${(spec as CountOf).array}' is not a list`,
+        problem: `cannot be checked: '${spec.array}' is not a list`,
       });
     } else if (data[k] !== want) {
       problems.push({
         field: k,
         path,
         kind: "invalid",
-        problem: `is ${preview(data[k])} but '${(spec as CountOf).array}' has ${want} matching item(s)`,
+        problem: `is ${preview(data[k])} but '${spec.array}' has ${want} matching item(s)`,
       });
     }
   }
@@ -282,11 +265,10 @@ function countProblems(
 
 /** The data the schema is checked against: the harness's `summary` prose left out unless the schema names it. */
 function structuredView(output: JSONSchema, data: Record<string, unknown>): Record<string, unknown> {
-  if (!hasOwn(data, HARNESS_SUMMARY_KEY)) return data;
-  const props = output.properties;
+  // The schema compiled, so `properties` is an object and `required` an array when present.
   const declared =
-    (props && typeof props === "object" && hasOwn(props, HARNESS_SUMMARY_KEY)) ||
-    (Array.isArray(output.required) && output.required.includes(HARNESS_SUMMARY_KEY));
+    hasOwn((output.properties ?? {}) as object, HARNESS_SUMMARY_KEY) ||
+    ((output.required ?? []) as unknown[]).includes(HARNESS_SUMMARY_KEY);
   if (declared) return data;
   const { [HARNESS_SUMMARY_KEY]: _summary, ...rest } = data;
   return rest;
@@ -299,7 +281,7 @@ function structuredView(output: JSONSchema, data: Record<string, unknown>): Reco
  * order. Empty when the node declares no schema or the data conforms.
  */
 export function outputContractProblems(data: unknown, output: JSONSchema | undefined): ContractProblem[] {
-  if (!output || typeof output !== "object" || Array.isArray(output)) return [];
+  if (!output || typeof output !== "object") return [];
   const c = compile(output);
   if ("error" in c) {
     return [
@@ -314,15 +296,14 @@ export function outputContractProblems(data: unknown, output: JSONSchema | undef
   const obj = structuredView(output, (data && typeof data === "object" ? data : {}) as Record<string, unknown>);
   const problems: ContractProblem[] = [];
   const seen = new Set<string>();
-  if (!c.validate(obj)) {
-    for (const e of c.validate.errors ?? []) {
-      const p = toProblem(e, obj);
-      if (seen.has(p.path)) continue;
-      seen.add(p.path);
-      problems.push(p);
-    }
+  c.validate(obj);
+  for (const e of c.validate.errors ?? []) {
+    const p = toProblem(e, obj);
+    if (seen.has(p.path)) continue;
+    seen.add(p.path);
+    problems.push(p);
   }
-  const brokenFields = new Set(problems.filter((p) => p.path === p.field).map((p) => p.field));
+  const brokenFields = new Set(problems.map((p) => p.field));
   return [...problems, ...countProblems(output, obj, brokenFields)];
 }
 
