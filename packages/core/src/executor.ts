@@ -79,6 +79,12 @@ import {
   type SafeOutputIntent,
 } from "./safe-outputs.js";
 import { JournalWriteError, type ExecutionJournal, type JournalReplay } from "./journal.js";
+import {
+  COUNT_OF_KEYWORD,
+  contractFailureMessage,
+  listContractProblems,
+  outputContractProblems,
+} from "./output-contract.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -1088,35 +1094,24 @@ async function executeRun(
         break;
       }
 
-      // Required-field gate: if the source node's declared output schema
-      // marks fields as `required`, those fields are the routing contract.
-      // An agent that omits a required field has violated the contract; we
-      // fail the node loudly rather than letting routing guess against a
-      // half-built data view. See the offload release-notes field bug:
-      // an optional quality_retry_count was declared in the schema but
-      // omitted by the agent, the route view silently dropped the key,
-      // and an "is 0 OR is undefined" condition ghost-matched.
-      //
-      // We only check declared `required` fields, not full JSON Schema
-      // validation. Type mismatches, formats, additionalProperties, etc.
-      // stay the workflow author's problem and don't have the same
-      // routing-correctness blast radius.
-      // A missing required field is a contract violation handled on the same
-      // footing as an eval failure: an otherwise-recoverable one-off omission
-      // should self-heal on a second attempt when the node has `retry`
-      // configured. We synthesize an eval-shaped failure so the retry preamble
-      // and trace bookkeeping below treat it identically. When no retry is
-      // configured (or the budget is exhausted), it still hard-fails the node.
-      // Output contract (#357): required fields present, declared types and
-      // enums respected, declared counts consistent. One repair round trip
-      // first, for every harness: the agent is told exactly what is wrong.
+      // Output contract (#357, #573): the emitted data is checked against the
+      // node's declared `output` JSON Schema at every depth (nested objects,
+      // arrays of objects, enums, `required` at any depth,
+      // additionalProperties), plus `x-sweny-count-of` counts. The check runs
+      // here, on the data every harness returns, so a violation reads the same
+      // whichever harness ran the node, each problem with its exact path.
+      // One repair round trip first, for every harness: the agent is told
+      // exactly what is wrong. A schema that cannot be compiled is no agent's
+      // fault, so it gets no repair request.
       const contract = outputContractProblems(result.data, node.output);
-      if (contract.length > 0 && !repaired) {
+      if (contract.some((p) => p.kind !== "schema") && !repaired) {
         // Part of this node visit, like a retry of the same call: no extra
         // max_steps slot. Its spend still counts (budget, journal usage).
         repaired = true;
-        const listed = contract.map((p) => `- ${p.field}: ${p.problem}`).join("\n");
-        logger.warn(`  output contract: ${contract.map((p) => p.field).join(", ")}; asking the agent once to fix it`, {
+        const listed = listContractProblems(contract)
+          .map((line) => `- ${line}`)
+          .join("\n");
+        logger.warn(`  output contract: ${contract.map((p) => p.path).join(", ")}; asking the agent once to fix it`, {
           node: currentId,
         });
         safeObserve(
@@ -1125,25 +1120,26 @@ async function executeRun(
             type: "node:warning",
             node: currentId,
             reason: "output contract violated; one repair attempt",
-            fields: contract.map((p) => p.field),
+            fields: contract.map((p) => p.path),
           },
           logger,
         );
         currentInstruction =
           `Your previous output did not match this step's declared output schema:\n${listed}\n\n` +
-          `Do the step again and return the complete output with every listed field present and of the declared type.` +
+          `Do the step again and return the complete output, with every listed field present and matching the declared schema.` +
           `\n\n---\n\n${currentInstruction}`;
         continue;
       }
-      // Still wrong after the repair. A field an expression routes on is not a
-      // node failure: routes that read it fall through to the next rung
-      // (decider or agent) at routing time. Other missing required fields keep
-      // failing the node, as before.
+      // Still wrong after the repair. A problem under a field an expression
+      // routes on is not a node failure: routes that read it fall through to
+      // the next rung (decider or agent) at routing time. Every other problem
+      // fails the node, on the same footing as an eval failure: with `retry`
+      // configured, the reflection and retry path below gets another attempt.
       const routedOn = routingFieldsOf(workflow, currentId);
       const tolerated = contract.filter((p) => routedOn.has(p.field));
       if (tolerated.length > 0) {
         logger.warn(
-          `  output contract still violated for routing field(s) ${tolerated.map((p) => p.field).join(", ")}; ` +
+          `  output contract still violated for routing field(s) ${tolerated.map((p) => p.path).join(", ")}; ` +
             `routes that read them fall through to the next rung`,
           { node: currentId },
         );
@@ -1153,19 +1149,18 @@ async function executeRun(
             type: "node:warning",
             node: currentId,
             reason: "routing fields missing or invalid after repair; their routes fall through",
-            fields: tolerated.map((p) => p.field),
+            fields: tolerated.map((p) => p.path),
           },
           logger,
         );
       }
-      const missingRequired = contract
-        .filter((p) => p.kind === "missing" && !routedOn.has(p.field))
-        .map((p) => p.field);
+      const broken = contract.filter((p) => !routedOn.has(p.field));
 
       let outcome: AggregateOutcome;
-      if (missingRequired.length > 0) {
-        const msg = `output schema violation: required field(s) missing from emitted data: ${missingRequired.join(", ")}`;
-        const failure: EvalResult = { name: "output_required", kind: "value", pass: false, reasoning: msg };
+      if (broken.length > 0) {
+        const msg = contractFailureMessage(broken);
+        const name = broken.some((p) => p.kind === "missing") ? "output_required" : "output_schema";
+        const failure: EvalResult = { name, kind: "value", pass: false, reasoning: msg };
         outcome = { pass: false, error: msg, failures: [failure] };
         // Still record the synthesized failure as the node's eval result so
         // observers and downstream context see the contract violation.
@@ -1802,129 +1797,9 @@ export function buildBoundedContext(
   };
 }
 
-/**
- * Return the declared `required` field names for a node's output schema,
- * or an empty array when no required block is declared. Tolerant of
- * malformed schemas (mirrors getDeclaredOutputProperties).
- */
-function getDeclaredRequiredFields(output: JSONSchema | undefined): string[] {
-  if (!output || typeof output !== "object") return [];
-  const required = (output as Record<string, unknown>).required;
-  if (!Array.isArray(required)) return [];
-  return required.filter((r): r is string => typeof r === "string");
-}
-
-/** One way a node's emitted data breaks its declared output contract. */
-export interface ContractProblem {
-  field: string;
-  kind: "missing" | "invalid";
-  problem: string;
-}
-
-/** Keyword on an integer output property: the count sweny cross-checks against an array in the same output. */
-export const COUNT_OF_KEYWORD = "x-sweny-count-of";
-
-interface CountOf {
-  /** Top-level array property whose items are counted. */
-  array: string;
-  /** Item field -> allowed values; an item counts only when every listed field has one of them. */
-  where?: Record<string, unknown[]>;
-  /** Item fields that must be non-empty strings for the item to count. */
-  non_empty?: string[];
-}
-
-function typeMatches(t: unknown, v: unknown): boolean {
-  switch (t) {
-    case "string":
-      return typeof v === "string";
-    case "number":
-      return typeof v === "number" && Number.isFinite(v);
-    case "integer":
-      return typeof v === "number" && Number.isInteger(v);
-    case "boolean":
-      return typeof v === "boolean";
-    case "array":
-      return Array.isArray(v);
-    case "object":
-      return typeof v === "object" && v !== null && !Array.isArray(v);
-    case "null":
-      return v === null;
-    default:
-      return true; // unknown or absent type: not checked
-  }
-}
-
-function countOf(spec: CountOf, data: Record<string, unknown>): number | undefined {
-  const items = hasOwn(data, spec.array) ? data[spec.array] : undefined;
-  if (!Array.isArray(items)) return undefined;
-  let n = 0;
-  for (const item of items) {
-    if (!item || typeof item !== "object") continue;
-    const it = item as Record<string, unknown>;
-    const whereOk = Object.entries(spec.where ?? {}).every(
-      ([k, allowed]) => hasOwn(it, k) && Array.isArray(allowed) && allowed.some((a) => a === it[k]),
-    );
-    const nonEmptyOk = (spec.non_empty ?? []).every(
-      (k) => hasOwn(it, k) && typeof it[k] === "string" && (it[k] as string).trim() !== "",
-    );
-    if (whereOk && nonEmptyOk) n++;
-  }
-  return n;
-}
-
-/**
- * Check emitted data against the declared output contract (#357): every
- * `required` field present; every present top-level property of its declared
- * `type` and inside its `enum`; and every `x-sweny-count-of` integer equal to
- * the count it declares over its array. Not full JSON Schema: formats,
- * nested shapes and additionalProperties stay the author's concern.
- */
-export function outputContractProblems(data: unknown, output: JSONSchema | undefined): ContractProblem[] {
-  if (!output || typeof output !== "object") return [];
-  const obj = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
-  const problems: ContractProblem[] = [];
-  for (const k of getDeclaredRequiredFields(output)) {
-    if (!hasOwn(obj, k)) problems.push({ field: k, kind: "missing", problem: "required but missing" });
-  }
-  const props = (output as { properties?: unknown }).properties;
-  if (!props || typeof props !== "object") return problems;
-  for (const [k, raw] of Object.entries(props as Record<string, unknown>)) {
-    if (!hasOwn(obj, k) || !raw || typeof raw !== "object") continue;
-    const p = raw as { type?: unknown; enum?: unknown; [COUNT_OF_KEYWORD]?: unknown };
-    const v = obj[k];
-    const types = Array.isArray(p.type) ? p.type : p.type === undefined ? [] : [p.type];
-    if (types.length > 0 && !types.some((t) => typeMatches(t, v))) {
-      problems.push({ field: k, kind: "invalid", problem: `expected ${types.join(" or ")}, got ${JSON.stringify(v)}` });
-      continue;
-    }
-    if (Array.isArray(p.enum) && !p.enum.some((e) => e === v)) {
-      problems.push({
-        field: k,
-        kind: "invalid",
-        problem: `expected one of ${JSON.stringify(p.enum)}, got ${JSON.stringify(v)}`,
-      });
-      continue;
-    }
-    const spec = p[COUNT_OF_KEYWORD];
-    if (spec && typeof spec === "object" && typeof (spec as CountOf).array === "string") {
-      const want = countOf(spec as CountOf, obj);
-      if (want === undefined) {
-        problems.push({
-          field: k,
-          kind: "invalid",
-          problem: `cannot be checked: '${(spec as CountOf).array}' is not a list`,
-        });
-      } else if (v !== want) {
-        problems.push({
-          field: k,
-          kind: "invalid",
-          problem: `is ${JSON.stringify(v)} but '${(spec as CountOf).array}' has ${want} matching item(s)`,
-        });
-      }
-    }
-  }
-  return problems;
-}
+// The output contract (#357, #573) lives in output-contract.ts; re-exported for existing importers.
+export { COUNT_OF_KEYWORD, outputContractProblems };
+export type { ContractProblem } from "./output-contract.js";
 
 /** The output fields of `nodeId` that some `{ expr }` in the workflow reads. */
 function routingFieldsOf(workflow: Workflow, nodeId: string): Set<string> {

@@ -12,7 +12,7 @@ import { createSkillMap } from "../skills/index.js";
 import { WORKFLOW_TEMPLATES } from "../cli/templates.js";
 import { PACK_TEMPLATES } from "../cli/packs.js";
 import { implementWorkflow, seedContentWorkflow, triageWorkflow } from "../workflows/index.js";
-import type { Claude, ExecutionEvent, JSONSchema, Logger, NodeResult, Workflow } from "../types.js";
+import type { Claude, ExecutionEvent, JSONSchema, Logger, Node, NodeResult, Workflow } from "../types.js";
 
 const silent: Logger = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -227,7 +227,7 @@ describe("outputContractProblems: every depth (#573)", () => {
 
 // ─── In the executor: repair, failure, retry, routing ───────────
 
-function oneNode(output: JSONSchema, extra: Record<string, unknown> = {}): Workflow {
+function oneNode(output: JSONSchema, extra: Partial<Node> = {}): Workflow {
   return {
     id: "contract",
     name: "Contract",
@@ -446,7 +446,7 @@ describe("bundled workflows still pass their own contract (#573)", () => {
   const schemas = bundled.flatMap(([wid, wf]) =>
     Object.entries(wf.nodes)
       .filter(([, n]) => n.output)
-      .map(([nid, n]) => [`${wid}.${nid}`, n.output!] as const),
+      .map(([nid, n]): [string, JSONSchema] => [`${wid}.${nid}`, n.output!]),
   );
 
   it("covers every bundled workflow and template", () => {

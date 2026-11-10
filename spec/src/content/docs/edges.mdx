@@ -116,7 +116,7 @@ There are no function calls, no arithmetic, no assignment, and no list indexing.
 
 ### Routing outcome
 
-Before routing, a node whose output breaks its declared contract (a `required` field missing, a property outside its declared `type` or `enum`, or an `x-sweny-count-of` count that disagrees with its array) gets one repair request: the executor SHOULD run the node's agent once more, naming each broken field. A required field that is still missing fails the node as before, unless an expression in the workflow reads it.
+Before routing, a node whose output breaks its declared contract (anything its `output` schema rejects, at any depth, or an `x-sweny-count-of` count that disagrees with its array) gets one repair request: the executor SHOULD run the node's agent once more, naming each broken path. A problem still there afterwards fails the node, unless it sits under a top-level field an expression in the workflow reads; then the expressions that read that field are unknown and the route falls through.
 
 When every conditional out-edge of a node is an expression, the executor evaluates them all and:
 

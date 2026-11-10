@@ -156,6 +156,14 @@ Any valid JSON Schema is accepted. Common patterns:
 - `required` to ensure key fields are always present
 - `type: array` with `items` for lists
 
+SWEny validates the output against the whole schema, at every depth, the same way on every harness: nested objects, arrays of objects, `enum`, `required` at any depth, `additionalProperties: false`. The dialect is JSON Schema 2020-12 unless `$schema` names draft-07 or 2019-09; `format` is not asserted. When the output breaks the schema, the agent is asked once to fix it, with each problem named by its path. If it is still broken, the node fails with an error like:
+
+```
+output schema violation: findings[1].title: required but missing; findings[1].severity: expected one of ["low","medium","high"], got "urgent"
+```
+
+With `retry` configured, that failure takes the normal retry path. A problem under a field a `when` expression reads does not fail the node; the routes that read it fall through to the next rung. A schema that cannot be compiled fails the node without asking the agent.
+
 ## Edge definition
 
 Each entry in the `edges` array is an edge object:
