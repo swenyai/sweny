@@ -32,10 +32,16 @@ First add the SWEny marketplace, then install the plugin:
 
 ## MCP tools
 
-The plugin also registers an MCP server that gives Claude two tools for autonomous use — Claude can list and run workflows without you typing a slash command:
+The plugin also registers an MCP server that gives Claude tools for autonomous use: Claude can list, run, check and inspect workflows without you typing a slash command:
 
 - `sweny_list_workflows` — list available workflows
 - `sweny_run_workflow` — execute triage or implement programmatically
+- `sweny_validate`: check a workflow file without running it (same checks as `sweny workflow validate`)
+- `sweny_diagram`: render a workflow as a Mermaid diagram
+- `sweny_runs`: list recorded runs from `.sweny/runs/`
+- `sweny_runs_diff`: compare two recorded runs (same JSON as `sweny runs diff --json`)
+
+The last four are read-only. They only read files inside the project the server was started in (traversal and symlinks that leave it are refused), and text read back from run history is stripped of control sequences.
 
 ## Hooks
 
