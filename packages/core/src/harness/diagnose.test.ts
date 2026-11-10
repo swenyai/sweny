@@ -324,7 +324,7 @@ describe("ClaudeCodeHarness.diagnose", () => {
     const checks = await claude().diagnose({ env: {}, hasLogin: () => false });
     expect(checks[0].name).toBe("Agent CLI (claude)");
     expect(checks[0].status).toBe("ok");
-    expect(checks[0].detail).toMatch(/^Claude Agent SDK \S+ \(installed with sweny\)$/);
+    expect(checks[0].detail).toMatch(/^Claude Agent SDK \d+\.\d+\.\d+ \(installed with sweny\)$/);
   });
 
   it("missing auth: no credential and no login is a skip, as before #532", async () => {

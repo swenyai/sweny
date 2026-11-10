@@ -65,8 +65,9 @@ describe("formatCheckResults", () => {
   });
 
   it("summary: failure, all skipped, all passed", () => {
-    expect(formatCheckResults(RESULTS)).toMatch(/One or more checks failed/);
-    expect(formatCheckResults([RESULTS[2]])).toMatch(/no network checks performed/);
-    expect(formatCheckResults([RESULTS[0]])).toMatch(/All checks passed/);
+    const words = (r: CheckResult[]) => formatCheckResults(r).replace(/[│\s]+/g, " ");
+    expect(words(RESULTS)).toMatch(/One or more checks failed/);
+    expect(words([RESULTS[2]])).toMatch(/no network checks performed/);
+    expect(words([RESULTS[0]])).toMatch(/All checks passed/);
   });
 });

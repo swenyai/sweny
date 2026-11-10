@@ -11,7 +11,8 @@
 
 import { query, createSdkMcpServer, tool as sdkTool, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { createRequire } from "node:module";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import * as path from "node:path";
 import type {
   Claude,
   Tool,
@@ -82,9 +83,14 @@ let cachedSdkVersion: string | undefined;
 function claudeSdkVersion(): string {
   if (cachedSdkVersion !== undefined) return cachedSdkVersion;
   try {
-    const req = createRequire(import.meta.url);
-    const pkg = req("@anthropic-ai/claude-agent-sdk/package.json") as { version?: unknown };
-    cachedSdkVersion = typeof pkg.version === "string" ? pkg.version : "unknown";
+    // The SDK's `exports` map has no "./package.json", so read it next to the entry file (the package root).
+    const entry = createRequire(import.meta.url).resolve("@anthropic-ai/claude-agent-sdk");
+    const pkg = JSON.parse(readFileSync(path.join(path.dirname(entry), "package.json"), "utf-8")) as {
+      name?: unknown;
+      version?: unknown;
+    };
+    cachedSdkVersion =
+      pkg.name === "@anthropic-ai/claude-agent-sdk" && typeof pkg.version === "string" ? pkg.version : "unknown";
   } catch {
     cachedSdkVersion = "unknown";
   }
