@@ -81,7 +81,9 @@ import {
   type ActorInfo,
   type SafeOutputIntent,
 } from "./safe-outputs.js";
-import { JournalWriteError, type ExecutionJournal, type JournalReplay } from "./journal.js";
+import { JournalMismatchError, JournalWriteError, type ExecutionJournal, type JournalReplay } from "./journal.js";
+import { childWorkflowOf, isMapNode, mapLimits, withMapOutputs } from "./map-spec.js";
+import { prepareMap, runMap, type ChildRunHost, type PreparedMap } from "./map.js";
 import {
   COUNT_OF_KEYWORD,
   checkOutputContract,
@@ -182,6 +184,12 @@ export interface ExecuteOptions {
    */
   harnessPolicy?: HarnessPolicyMode;
   /**
+   * Map nodes (#575): the host that opens each child run (its journal, its
+   * generation, a fresh harness). Required for a workflow with a map node;
+   * `createJournalChildHost` / `createMemoryChildHost` in `child-host.ts`.
+   */
+  children?: ChildRunHost;
+  /**
    * Operator config for the decision model (#357): where it lives and its
    * key. Only nodes with `route_by: decider` consult it. `false` turns it off
    * for this run (CLI `--no-decider`). Undefined: no decider (those nodes are
@@ -271,7 +279,7 @@ interface VisitCursor {
 }
 
 async function executeRun(
-  workflow: Workflow,
+  declared: Workflow,
   input: unknown,
   options: ExecuteOptions,
   results: Map<string, NodeResult>,
@@ -279,6 +287,9 @@ async function executeRun(
   at: VisitCursor,
 ): Promise<ExecutionResult> {
   const { observer, signal, timeoutMs, journal } = options;
+  // Map nodes (#575) declare a derived output, so routing and context read it
+  // like any schema'd node. The journal binds to the workflow as written.
+  const workflow = withMapOutputs(declared);
   // `harness` is the seam; a legacy `claude` object is used as-is (what `asClaude(claudeCompat(claude))` yields).
   const claude: Claude = options.harness ? asClaude(options.harness) : (options.claude as Claude);
   if (!claude) {
@@ -501,8 +512,9 @@ async function executeRun(
   // fetches file/URL content so the execution path is pure-compute.
   const sourceMap: Record<string, Source> = {};
 
-  // Node instructions
+  // Node instructions (a map node has none, #575)
   for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    if (isMapNode(node)) continue;
     sourceMap[`nodes.${nodeId}.instruction`] = node.instruction;
   }
 
@@ -544,7 +556,7 @@ async function executeRun(
   });
   trace.sources = resolvedSources;
   journal?.begin({
-    workflow,
+    workflow: declared,
     input,
     sources: resolvedSources,
     skills,
@@ -589,7 +601,7 @@ async function executeRun(
     at.node = currentId;
     at.iteration = iteration;
 
-    const resolvedInstruction = resolvedSources[`nodes.${currentId}.instruction`].content;
+    const resolvedInstruction = resolvedSources[`nodes.${currentId}.instruction`]?.content ?? "";
     safeObserve(observer, { type: "node:enter", node: currentId, instruction: resolvedInstruction }, logger);
     logger.info(`→ ${node.name}`, { node: currentId });
 
@@ -627,7 +639,30 @@ async function executeRun(
       }
       continue;
     }
-    journal?.nodeStart(currentId, iteration);
+    // Map nodes (#575): derive and register the items before any child launches.
+    let mapPrep: PreparedMap | undefined;
+    let mapFresh = false;
+    const mapChild = isMapNode(node) ? childWorkflowOf(workflow, currentId) : undefined;
+    if (isMapNode(node)) {
+      if (!options.children) {
+        throw new Error(
+          `Map node "${currentId}" needs a child-run host (ExecuteOptions.children): createJournalChildHost or createMemoryChildHost`,
+        );
+      }
+      if (!mapChild) throw new Error(`Map node "${currentId}" names a workflow file that was not loaded`);
+      mapPrep = prepareMap(node, mapChild, input, results);
+      const earlier = mapPrep.ok ? journal?.registration?.(currentId, iteration) : undefined;
+      if (mapPrep.ok && earlier) {
+        const changed =
+          earlier.items_hash !== mapPrep.registration.items_hash ||
+          earlier.workflow_hash !== mapPrep.registration.workflow_hash;
+        if (changed && journal?.forced?.() !== true) {
+          throw new JournalMismatchError([`the items of map node "${currentId}"`]);
+        }
+        mapFresh = changed;
+      }
+    }
+    journal?.nodeStart(currentId, iteration, mapPrep?.ok ? mapPrep.registration : undefined);
 
     // The run budget is already spent (by a route call, or by the node before
     // a skipped one): this node neither starts nor routes on, whatever its
@@ -653,6 +688,57 @@ async function executeRun(
         logger,
       );
       break;
+    }
+
+    if (mapPrep) {
+      // A map visit (#575): every item as a complete, read-only child run.
+      const result: NodeResult = mapPrep.ok
+        ? await runMap({
+            nodeId: currentId,
+            node,
+            iteration,
+            child: mapChild!,
+            prepared: mapPrep,
+            host: options.children!,
+            fresh: mapFresh,
+            runChild: (childInput, exec) =>
+              execute(mapChild!, childInput, {
+                ...options,
+                skills,
+                ...(exec.harness ? { harness: exec.harness } : {}),
+                journal: exec.journal,
+                observer: exec.observer,
+                signal: exec.signal,
+                budget: node.item_budget,
+                children: undefined,
+              }),
+            concurrency: mapLimits(node).concurrency,
+            ...(signal ? { signal } : {}),
+            logger,
+          })
+        : {
+            status: "failed",
+            data: { error: `map node "${currentId}" ${mapPrep.error}` },
+            toolCalls: [],
+          };
+      // The run itself was aborted: stop like any other node would.
+      throwIfAborted(signal);
+      results.set(currentId, result);
+      journal?.nodeEnd(currentId, iteration, result, writeState);
+      trace.steps.push({ node: currentId, status: result.status, iteration });
+      safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
+      logger.info(`  ${result.status === "success" ? "✓" : "✗"} map ${result.status}`, { node: currentId });
+      if (result.status === "failed" && ((node.on_fail ?? "halt") === "halt" || result.budget)) {
+        const why = result.budget ? "budget exceeded" : "on_fail: halt";
+        logger.warn(`  map failed; halting workflow (${why})`, { node: currentId });
+        safeObserve(observer, { type: "route", from: currentId, to: "(end)", reason: `node failed (${why})` }, logger);
+        break;
+      }
+      const mapFrom: string = currentId;
+      const routed = await advance(mapFrom);
+      if (!routed.budgetStop) journal?.route(mapFrom, routed.next, routed.rung, decider?.counters);
+      currentId = routed.next;
+      continue;
     }
 
     // Gather tools from the node's skills, then apply the node's optional
