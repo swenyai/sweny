@@ -23,6 +23,15 @@ import { openNoFollow } from "../safe-file.js";
 export const RUN_HISTORY_SCHEMA_VERSION = 1;
 export const RUN_HISTORY_DIR = path.join(".sweny", "runs");
 export const RUN_HISTORY_KEEP = 200;
+/**
+ * Version of the optional detail fields (per-node `tool_counts`, `tokens_in`, `tokens_out`,
+ * `num_turns`, and the record's `policy`), stamped as `detail_version` on records that carry them.
+ * `schema_version` stays 1: older records have no detail and read as such, and older readers ignore it.
+ */
+export const RUN_DETAIL_VERSION = 1;
+/** At most this many distinct tool names are kept per node, each cut to {@link TOOL_NAME_MAX} characters. */
+export const TOOL_COUNTS_MAX = 64;
+export const TOOL_NAME_MAX = 80;
 const RECORD_READ_MAX_BYTES = 1024 * 1024;
 
 export type RunStatus = "success" | "failed" | "crashed";
@@ -37,6 +46,26 @@ export interface RunNodeRecord {
   /** SDK-reported cost; null when none was reported (never estimated). */
   cost_usd: number | null;
   retries: number;
+  /**
+   * Calls per tool name (names and counts only, never inputs or outputs). Optional: absent on records
+   * written before `detail_version` 1, and when the node made no tool call.
+   */
+  tool_counts?: Record<string, number>;
+  /** Input tokens, when the node reported usage. Optional (detail_version 1). */
+  tokens_in?: number;
+  /** Output tokens, when the node reported usage. Optional (detail_version 1). */
+  tokens_out?: number;
+  /** Model turns, when the node reported them. Optional (detail_version 1). */
+  num_turns?: number;
+}
+
+/** The agent floor the run ran under: booleans and a mode only. Optional (detail_version 1). */
+export interface RunPolicyRecord {
+  /** The agent subprocess env was narrowed to the allowlist on every node. */
+  scoped: boolean;
+  sandbox: "off" | "auto" | "strict";
+  /** The sandbox was enabled for every node that reported it. */
+  sandboxed: boolean;
 }
 
 export interface RunTotals {
@@ -70,6 +99,10 @@ export interface RunRecord {
    * jump in `totals` that no node explains shows here.
    */
   spend?: Partial<Record<SpendKind, RunKindSpend>>;
+  /** 1 when the optional detail fields below and on nodes are recorded. Absent on older records. */
+  detail_version?: number;
+  /** Absent when no node reported its floor. */
+  policy?: RunPolicyRecord;
 }
 
 export interface RunKindSpend {
@@ -152,6 +185,26 @@ export function createNodeTimer(now: () => number = Date.now): NodeTimer {
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
+/** Calls per tool name, in first-seen order. Names are cut and capped; undefined when there are none. */
+export function countTools(calls: ReadonlyArray<{ tool: string }> | undefined): Record<string, number> | undefined {
+  const counts = new Map<string, number>();
+  for (const c of calls ?? []) {
+    if (typeof c?.tool !== "string") continue;
+    // eslint-disable-next-line no-control-regex
+    const name = c.tool.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, TOOL_NAME_MAX);
+    if (name === "") continue;
+    if (!counts.has(name) && counts.size >= TOOL_COUNTS_MAX) continue;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  if (counts.size === 0) return undefined;
+  const out: Record<string, number> = {};
+  // defineProperty: a tool named `__proto__` stays a plain key.
+  for (const [k, v] of counts) {
+    Object.defineProperty(out, k, { value: v, enumerable: true, writable: true, configurable: true });
+  }
+  return out;
+}
+
 export interface BuildRunRecordInput {
   runId: string;
   workflow: Workflow;
@@ -176,6 +229,7 @@ export function buildRunRecord(i: BuildRunRecordInput): RunRecord {
     const tokens = hasTokens
       ? (isNum(u!.inputTokens) ? u!.inputTokens : 0) + (isNum(u!.outputTokens) ? u!.outputTokens : 0)
       : null;
+    const toolCounts = countTools(r.toolCalls);
     return {
       id,
       status: r.status,
@@ -184,6 +238,10 @@ export function buildRunRecord(i: BuildRunRecordInput): RunRecord {
       tokens,
       cost_usd: u && isNum(u.costUsd) ? u.costUsd : null,
       retries: retries.get(id) ?? 0,
+      ...(toolCounts ? { tool_counts: toolCounts } : {}),
+      ...(u && isNum(u.inputTokens) ? { tokens_in: u.inputTokens } : {}),
+      ...(u && isNum(u.outputTokens) ? { tokens_out: u.outputTokens } : {}),
+      ...(u && isNum(u.numTurns) ? { num_turns: u.numTurns } : {}),
     };
   });
 
@@ -211,6 +269,16 @@ export function buildRunRecord(i: BuildRunRecordInput): RunRecord {
     ...(harness ? { harness: { id: harness.id, version: harness.version } } : {}),
     ...(degraded.length > 0 ? { degraded } : {}),
     ...(summary.spend ? { spend: recordSpend(summary.spend) } : {}),
+    detail_version: RUN_DETAIL_VERSION,
+    ...(summary.policy?.envScope !== undefined && summary.policy.sandbox
+      ? {
+          policy: {
+            scoped: summary.policy.envScope,
+            sandbox: summary.policy.sandbox.mode,
+            sandboxed: summary.policy.sandbox.started,
+          },
+        }
+      : {}),
   };
 }
 

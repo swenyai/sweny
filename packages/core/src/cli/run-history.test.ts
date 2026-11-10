@@ -5,6 +5,7 @@ import path from "node:path";
 import type { ExecutionTrace, NodeResult, Workflow } from "../types.js";
 import {
   buildRunRecord,
+  countTools,
   createNodeTimer,
   findRun,
   hashWorkflow,
@@ -15,6 +16,8 @@ import {
   recordRun,
   writeRunRecord,
   RUN_HISTORY_DIR,
+  TOOL_COUNTS_MAX,
+  TOOL_NAME_MAX,
   type RunRecord,
 } from "./run-history.js";
 import { ensureGitignoreRuns } from "./new.js";
@@ -91,7 +94,18 @@ describe("record contents", () => {
     expect(r.duration_ms).toBe(4200);
     expect(r.status).toBe("failed");
     expect(r.nodes).toEqual([
-      { id: "a", status: "success", duration_ms: 1500, tool_calls: 1, tokens: 150, cost_usd: 0.05, retries: 0 },
+      {
+        id: "a",
+        status: "success",
+        duration_ms: 1500,
+        tool_calls: 1,
+        tokens: 150,
+        cost_usd: 0.05,
+        retries: 0,
+        tool_counts: { github_get: 1 },
+        tokens_in: 100,
+        tokens_out: 50,
+      },
       { id: "b", status: "failed", duration_ms: 2500, tool_calls: 0, tokens: null, cost_usd: null, retries: 2 },
     ]);
     expect(r.routes).toEqual([{ from: "a", to: "b" }]);
@@ -109,6 +123,7 @@ describe("record contents", () => {
     const r = record();
     expect(Object.keys(r).sort()).toEqual(
       [
+        "detail_version",
         "duration_ms",
         "nodes",
         "routes",
@@ -122,9 +137,11 @@ describe("record contents", () => {
       ].sort(),
     );
     for (const n of r.nodes) {
-      expect(Object.keys(n).sort()).toEqual(
-        ["cost_usd", "duration_ms", "id", "retries", "status", "tokens", "tool_calls"].sort(),
-      );
+      const base = ["cost_usd", "duration_ms", "id", "retries", "status", "tokens", "tool_calls"];
+      const detail = ["tool_counts", "tokens_in", "tokens_out", "num_turns"];
+      const keys = Object.keys(n);
+      expect(base.every((k) => keys.includes(k))).toBe(true);
+      expect(keys.filter((k) => !base.includes(k)).every((k) => detail.includes(k))).toBe(true);
     }
     for (const e of r.routes) expect(Object.keys(e).sort()).toEqual(["from", "to"]);
     expect(Object.keys(r.totals).sort()).toEqual(
@@ -149,6 +166,80 @@ describe("record contents", () => {
       ["b", { status: "skipped", data: {}, toolCalls: [] }],
     ]);
     expect(record({ results: ok }).status).toBe("success");
+  });
+});
+
+describe("detail fields (#537): optional, versioned, old records still read", () => {
+  const rich = new Map<string, NodeResult>([
+    [
+      "a",
+      {
+        status: "success",
+        data: { secret: "SECRET-OUTPUT" },
+        toolCalls: [
+          { tool: "Read", input: { path: "SECRET-INPUT" } },
+          { tool: "Grep", input: {} },
+          { tool: "Read", input: {} },
+          { tool: "Evil\nname", input: {} },
+        ],
+        usage: { inputTokens: 100, outputTokens: 50, costUsd: 0.05, numTurns: 3 },
+        policy: { envScope: true, sandbox: "strict", sandboxStarted: true },
+      },
+    ],
+  ]);
+
+  it("stamps detail_version and records per-tool counts, token split, turns and the policy floor", () => {
+    const r = record({ results: rich, trace: undefined, nodeDurations: new Map([["a", 10]]) });
+    expect(r.detail_version).toBe(1);
+    expect(r.schema_version).toBe(1);
+    expect(r.nodes[0].tool_counts).toEqual({ Read: 2, Grep: 1, Evilname: 1 });
+    expect(Object.keys(r.nodes[0].tool_counts!)).toEqual(["Read", "Grep", "Evilname"]);
+    expect(r.nodes[0]).toMatchObject({ tokens_in: 100, tokens_out: 50, num_turns: 3 });
+    expect(r.policy).toEqual({ scoped: true, sandbox: "strict", sandboxed: true });
+  });
+
+  it("keeps only names and counts: no tool input, no output text", () => {
+    const json = JSON.stringify(record({ results: rich, trace: undefined }));
+    expect(json).not.toContain("SECRET");
+  });
+
+  it("caps distinct names and name length", () => {
+    const many = Array.from({ length: 200 }, (_, i) => ({ tool: `t${i}`, input: {} }));
+    const counts = countTools(many)!;
+    expect(Object.keys(counts)).toHaveLength(TOOL_COUNTS_MAX);
+    expect(Object.keys(countTools([{ tool: "x".repeat(500) }])!)[0]).toHaveLength(TOOL_NAME_MAX);
+    expect(countTools([])).toBeUndefined();
+  });
+
+  it("omits the optional fields when a node reported none", () => {
+    const r = record({ results: new Map([["b", results.get("b")!]]), trace: undefined });
+    expect(r.nodes[0]).not.toHaveProperty("tool_counts");
+    expect(r.nodes[0]).not.toHaveProperty("tokens_in");
+    expect(r).not.toHaveProperty("policy");
+  });
+
+  it("a record written before detail_version reads back unchanged, with the fields undefined", () => {
+    const d = tmp();
+    const legacy = {
+      schema_version: 1,
+      run_id: "20260101-000000-aaaaaa",
+      workflow_id: "demo",
+      workflow_hash: "0".repeat(64),
+      started_at: "2026-01-01T00:00:00.000Z",
+      duration_ms: 10,
+      status: "success",
+      nodes: [{ id: "a", status: "success", duration_ms: 5, tool_calls: 2, tokens: 10, cost_usd: 0.01, retries: 0 }],
+      routes: [],
+      totals: { nodes_total: 1, nodes_ok: 1, nodes_skipped: 0, tool_calls: 2, tokens: 10, cost_usd: 0.01 },
+    };
+    fs.mkdirSync(path.join(d, RUN_HISTORY_DIR), { recursive: true });
+    fs.writeFileSync(path.join(d, RUN_HISTORY_DIR, "20260101-000000-aaaaaa.json"), JSON.stringify(legacy));
+    const [r] = listRuns(d);
+    expect(r.run_id).toBe("20260101-000000-aaaaaa");
+    expect(r.detail_version).toBeUndefined();
+    expect(r.policy).toBeUndefined();
+    expect(r.nodes[0].tool_counts).toBeUndefined();
+    expect(r.nodes[0].tool_calls).toBe(2);
   });
 });
 

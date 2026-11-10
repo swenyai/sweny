@@ -12,8 +12,15 @@ import {
   createReplayHarness,
   loadTryFixture,
   loadTryWorkflow,
+  formatTryBanner,
   parseTryFixture,
+  REPLAY_NODE_MIN_MS,
+  REPLAY_TARGET_MS,
   runTry,
+  scaledPace,
+  tryHelpNote,
+  tryLabel,
+  type TryFixture,
 } from "./try.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -56,6 +63,101 @@ describe("try fixture", () => {
 
   it("the shipped help note says illustrative", () => {
     expect(TRY_HELP_NOTE).toContain("ILLUSTRATIVE");
+  });
+});
+
+const realFixture = (over: Partial<TryFixture> = {}): TryFixture => ({
+  ...loadTryFixture(),
+  illustrative: false,
+  captured_at: "2026-11-12T14:00:00.000Z",
+  notice: "A replay of a real run.",
+  sample_repo: "swenyai/sweny",
+  ...over,
+});
+
+describe("label follows `illustrative` (#537)", () => {
+  it("illustrative: the sample-repo wording, no date", () => {
+    const f = loadTryFixture();
+    expect(tryLabel(f)).toContain("illustrative data");
+    expect(tryLabel(f)).not.toContain("real run");
+    expect(tryHelpNote(f)).toBe(TRY_HELP_NOTE);
+    expect(formatTryBanner(f)).toContain("on a sample repo (acme-notes-api), illustrative data");
+  });
+
+  it("real: says replay of a real run on <date>, names the repo, never says illustrative", () => {
+    const f = realFixture();
+    expect(tryLabel(f)).toBe("of explain-repo on swenyai/sweny, a replay of a real run on 2026-11-12");
+    const banner = formatTryBanner(f);
+    expect(banner).toContain("Recorded demo of explain-repo on swenyai/sweny, a replay of a real run on 2026-11-12.");
+    expect(banner).not.toMatch(/illustrative|sample repo/i);
+    expect(tryHelpNote(f)).toContain("replay of a real run");
+    expect(tryHelpNote(f)).not.toMatch(/ILLUSTRATIVE|made-up|hand-written/);
+  });
+
+  it("runTry prints the real label on the second line", async () => {
+    const { out } = await capture({ fixture: realFixture() });
+    const lines = out.split("\n");
+    expect(lines[2]).toContain("a replay of a real run on 2026-11-12");
+    expect(out).not.toContain("illustrative");
+  });
+
+  it("a real fixture must carry captured_at; a bad one is rejected", () => {
+    const noDate: Partial<TryFixture> = realFixture();
+    delete noDate.captured_at;
+    expect(() => parseTryFixture(noDate)).toThrow(/captured_at/);
+    expect(() => parseTryFixture({ ...realFixture(), captured_at: "yesterday" })).toThrow(/captured_at/);
+    expect(parseTryFixture(realFixture()).captured_at).toBe("2026-11-12T14:00:00.000Z");
+    // an illustrative fixture needs no date
+    expect(() => parseTryFixture(loadTryFixture())).not.toThrow();
+  });
+});
+
+describe("replay pacing (#537)", () => {
+  it("scales recorded timings to the target total, proportionally, and never slows a short run", () => {
+    const long = realFixture({
+      nodes: {
+        survey: { duration_ms: 90_000, tool_calls: {} },
+        explain: { duration_ms: 30_000, tool_calls: {} },
+      },
+    });
+    const pace = scaledPace(long);
+    expect(pace("survey") + pace("explain")).toBe(REPLAY_TARGET_MS);
+    expect(pace("survey")).toBe(pace("explain") * 3);
+    const short = realFixture({
+      nodes: { survey: { duration_ms: 2000, tool_calls: {} }, explain: { duration_ms: 10, tool_calls: {} } },
+    });
+    expect(scaledPace(short)("survey")).toBe(2000);
+    expect(scaledPace(short)("explain")).toBe(REPLAY_NODE_MIN_MS);
+  });
+
+  it("default replay is instant off a live terminal (non-TTY) and under CI; an explicit pace still applies", async () => {
+    const t0 = Date.now();
+    await capture({ fast: false });
+    expect(Date.now() - t0).toBeLessThan(2000);
+    const prev = { CI: process.env.CI, TERM: process.env.TERM };
+    process.env.CI = "true";
+    try {
+      const t1 = Date.now();
+      await capture({ fast: false, tty: true, columns: 80 });
+      expect(Date.now() - t1).toBeLessThan(2000);
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  it("honors NO_COLOR: no ANSI escapes in a non-TTY replay of a real fixture", async () => {
+    const prev = process.env.NO_COLOR;
+    process.env.NO_COLOR = "1";
+    try {
+      const { out } = await capture({ fixture: realFixture() });
+      expect(out).not.toMatch(/\x1B\[[0-9;]*m/);
+    } finally {
+      if (prev === undefined) delete process.env.NO_COLOR;
+      else process.env.NO_COLOR = prev;
+    }
   });
 });
 
