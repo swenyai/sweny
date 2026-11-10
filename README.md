@@ -97,8 +97,10 @@ credentials it can't infer:
 ```bash
 $EDITOR .env                # fill in GITHUB_TOKEN etc. for the skills your workflow uses
 sweny check                 # verify only the credentials your workflows need
-sweny workflow run .sweny/workflows/pr-review.yml
+sweny workflow run .sweny/workflows/pr-review.yml --input '{"pr_number": 42}'
 ```
+
+Templates are safe by default: every node is read-only unless it declares a write, and pr-review posts one comment and never approves.
 
 Already have a `.sweny.yml`? `sweny new` adds additional workflows to it non-destructively.
 

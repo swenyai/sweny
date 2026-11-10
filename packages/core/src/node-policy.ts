@@ -21,20 +21,49 @@ function spec(p: NodePermissions | undefined): NodePermissionsSpec {
 }
 
 /**
+ * The access a node gets when neither it nor the workflow declares one (#598).
+ * Spec v2 and later: `read`, safe by default. Spec v1, or no `spec_version` (a
+ * workflow built in code, or one the loader did not migrate): `write`, the v1
+ * behavior. The loader migrates v1 files to v2 with that `write` made explicit.
+ */
+export function defaultNodeAccess(workflow: Pick<Workflow, "spec_version"> = {}): NodeAccess {
+  return Number(workflow.spec_version ?? "1") >= 2 ? "read" : "write";
+}
+
+/**
+ * True when the node runs under a declared policy: its own or the workflow's
+ * `permissions`, its `outputs`, or the spec v2 `read` default. A node that runs
+ * under none keeps each harness's own defaults (spec v1 only).
+ */
+export function hasNodePolicy(
+  node: Pick<Node, "permissions" | "outputs">,
+  workflow: Pick<Workflow, "permissions" | "spec_version"> = {},
+): boolean {
+  return (
+    node.permissions !== undefined ||
+    workflow.permissions !== undefined ||
+    (node.outputs?.length ?? 0) > 0 ||
+    defaultNodeAccess(workflow) === "read"
+  );
+}
+
+/**
  * Effective permissions for a node.
  *
  * access: the node's own, else `read` when it declares `outputs`, else the
- * workflow's, else `write` (today's behavior). A workflow `read` ceiling wins
- * over a node `write` (the loader rejects that combination; this is the
- * runtime backstop). deny: union. strict: either. native: `none` if either says so.
+ * workflow's, else {@link defaultNodeAccess} (`read` from spec v2, `write` in
+ * v1). A workflow `read` ceiling wins over a node `write` (the loader rejects
+ * that combination; this is the runtime backstop). deny: union. strict:
+ * either. native: `none` if either says so.
  */
 export function resolveNodePermissions(
   node: Pick<Node, "permissions" | "outputs">,
-  workflow: Pick<Workflow, "permissions"> = {},
+  workflow: Pick<Workflow, "permissions" | "spec_version"> = {},
 ): ResolvedPermissions {
   const wf = spec(workflow.permissions);
   const own = spec(node.permissions);
-  let access: NodeAccess = own.access ?? (node.outputs && node.outputs.length > 0 ? "read" : (wf.access ?? "write"));
+  let access: NodeAccess =
+    own.access ?? (node.outputs && node.outputs.length > 0 ? "read" : (wf.access ?? defaultNodeAccess(workflow)));
   if (wf.access === "read") access = "read";
   const deny = [...new Set<ToolClass>([...(wf.deny ?? []), ...(own.deny ?? [])])];
   const none = wf.native === "none" || own.native === "none";

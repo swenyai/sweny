@@ -561,7 +561,7 @@ export interface Node {
    * only `access: "read"` skill tools, no external skill MCP servers, no
    * shell / file-write / edit / fetch / subagent built-ins. Absent: `read`
    * when the node declares `outputs`, else the workflow's `permissions`,
-   * else `write` (today's behavior).
+   * else `read` from spec_version 2, `write` in spec_version 1 (#598).
    */
   permissions?: NodePermissions;
   /**
@@ -838,7 +838,10 @@ export interface Workflow {
    * See `src/inputs.ts` for the field shape and validation rules.
    */
   inputs?: import("./inputs.js").WorkflowInputs;
-  /** Default and ceiling for every node's `permissions` (#365). Absent: `write`. */
+  /**
+   * Default and ceiling for every node's `permissions` (#365). Absent: `read`
+   * from spec_version 2, `write` in spec_version 1 (#598).
+   */
   permissions?: NodePermissions;
   /** Workflow-level safe-output policy (#365). */
   safe_outputs?: SafeOutputsPolicy;

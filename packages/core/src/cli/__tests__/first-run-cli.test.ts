@@ -147,7 +147,12 @@ describe.runIf(HAS_BUILD)("missing skill credentials (#381)", () => {
     expect(r.status).toBe(0);
     const parsed = JSON.parse(r.stdout);
     expect(parsed.valid).toBe(true);
-    expect(parsed.warnings).toEqual(['skill "github" needs GITHUB_TOKEN (set it in .env)']);
+    const needs = (parsed.warnings as string[]).filter((w) => w.includes("needs"));
+    expect(needs).toEqual(['skill "github" needs GITHUB_TOKEN (set it in .env)']);
+    // #598: a v1 file also says, once per node, that the node writes only because nothing limits it.
+    for (const id of ["a", "b", "c"]) {
+      expect((parsed.warnings as string[]).filter((w) => w.startsWith(`Node "${id}" can write`))).toHaveLength(1);
+    }
   });
 });
 

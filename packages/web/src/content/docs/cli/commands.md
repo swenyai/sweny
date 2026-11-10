@@ -275,7 +275,7 @@ sweny workflow upgrade <file> [--dry-run]
 |--------|-------------|---------|
 | `--dry-run` | Report what would change without writing the file | `false` |
 
-Workflows carry an optional `spec_version` (absent means `"1"`). Older files still load: the CLI migrates them in memory and prints one warning pointing here. `upgrade` applies the same migrations and writes the file back. YAML comments, blank lines and key order are kept for everything a migration does not touch; comments on values a migration replaces or removes are not. A file newer than your CLI is refused with a prompt to run `sweny upgrade`.
+Workflows carry an optional `spec_version` (absent means `"1"`; the current version is `"2"`). Older files still load: the CLI migrates them in memory and prints one warning pointing here, plus one per node that can write only because nothing limits it. Upgrading to `"2"` writes `permissions: write` on those nodes, with a comment on each, so the file runs as before; see [Permissions and defaults](/workflows/yaml-reference/#permissions-and-defaults). `upgrade` applies the same migrations and writes the file back. YAML comments, blank lines and key order are kept for everything a migration does not touch; comments on values a migration replaces or removes are not. A file newer than your CLI is refused with a prompt to run `sweny upgrade`.
 
 ### sweny workflow run
 

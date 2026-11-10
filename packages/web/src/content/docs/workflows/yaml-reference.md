@@ -97,9 +97,29 @@ safe_outputs:
 - The next nodes see what was written as `context.<node>.safe_outputs`: one receipt per request with `type`, `status` (`applied`, `staged`, `skipped`, `refused`, ...), and for an applied write its `ref` (issue number or identifier) and `url`. That is how a later step uses the identifier of an issue it did not create itself. An agent cannot fake this field.
 - `permissions: read` makes any node read-only without outputs. `permissions: { deny: [shell, net] }` removes those built-in tool classes on any agent runtime. `strict: true` loads only the MCP servers sweny injects; on an agent runtime that cannot keep the user's own MCP servers out, `strict` refuses the node before it starts.
 - Preview with `sweny workflow run <file> --stage` (or `safe_outputs.staged: true`): sweny prints each write it would make and makes none. `--dry-run` also stages.
-- Nodes without `permissions` or `outputs` keep today's behavior.
+- Who decides a node's access is covered in [Permissions and defaults](#permissions-and-defaults).
 
 Full field reference: [spec.sweny.ai/nodes/#safe-outputs](https://spec.sweny.ai/nodes/#safe-outputs).
+
+### Permissions and defaults
+
+A node's access is the first of these that applies:
+
+1. the node's own `permissions` (`read` or `write`, or `access` in the object form)
+2. `read`, when the node declares `outputs`
+3. the workflow's `permissions`
+4. the default for the file's `spec_version`
+
+| `spec_version`  | Default for a node that declares nothing | What happens on load                                                                                     |
+| --------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `"2"`           | `read`                                   | Nothing extra.                                                                                           |
+| `"1"` or absent | `write`                                  | Still `write`, plus one warning per such node: it can write because nothing limits it. |
+
+A workflow `permissions: read` is a ceiling: no node under it can write. A `read` node gets read tools only, no external skill MCP servers, and no shell, file-write, edit, fetch or subagent built-ins.
+
+To move a `"1"` file to `"2"`, run `sweny workflow upgrade <file>`. It sets `spec_version: "2"` and writes `permissions: write` on each node that was relying on the old default, with a comment saying why, so the file runs exactly as before. It never grants more than the node had. The one exception is a node with no skills and `native: none`: it has no tools, so it gets `read`. Then narrow each node: `read` if it only reads, `outputs` if it only posts.
+
+Every workflow `sweny new` writes is `spec_version: "2"`. Each node is `read` unless its job needs a write, and GitHub writes are safe outputs.
 
 ### Instructions
 

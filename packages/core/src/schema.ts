@@ -1237,7 +1237,7 @@ export const workflowJsonSchema = {
       type: "string",
       pattern: "^[1-9][0-9]*$",
       description:
-        "Workflow spec version as a positive integer string. Absent means 1. Older versions are migrated in memory on load; newer than the CLI supports is refused. Run `sweny workflow upgrade <file>` to rewrite a file at the current version.",
+        "Workflow spec version as a positive integer string. Absent means 1. Version 2 is safe by default: a node that declares no permissions and no outputs, in a workflow that declares no permissions, is read-only. Version 1 files are migrated in memory on load, keeping write on such nodes with one warning each; newer than the CLI supports is refused. Run `sweny workflow upgrade <file>` to rewrite a file at the current version.",
     },
     entry: { type: "string", minLength: 1, description: "ID of the entry node" },
     rules: {
@@ -1272,7 +1272,8 @@ export const workflowJsonSchema = {
     },
     permissions: {
       $ref: "#/$defs/Permissions",
-      description: "Default and ceiling for every node's permissions. Absent: write.",
+      description:
+        "Default and ceiling for every node's permissions. Absent: read (spec_version 2), write (spec_version 1).",
     },
     safe_outputs: {
       type: "object",
@@ -1506,7 +1507,7 @@ export const workflowJsonSchema = {
           permissions: {
             $ref: "#/$defs/Permissions",
             description:
-              "What this node's agent may do. Absent: read when the node declares outputs, else the workflow's permissions, else write.",
+              "What this node's agent may do. Absent: read when the node declares outputs, else the workflow's permissions, else read (spec_version 2) or write (spec_version 1).",
           },
           outputs: {
             type: "array",

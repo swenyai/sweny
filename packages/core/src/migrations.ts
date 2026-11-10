@@ -12,6 +12,11 @@
  *
  * Adding a migration: see `__tests__/migrations.test.ts` for the harness
  * (registry validity check plus a chain test to copy).
+ *
+ * A migration must keep behavior: a file migrated in memory runs exactly as it
+ * did. Where a new version changes a default, the migration writes the old
+ * default out explicitly, and reports each spot as a {@link MigrationNote}: the
+ * loader turns notes into warnings, `sweny workflow upgrade` into comments.
  */
 
 /** A raw, not-yet-validated workflow object as parsed from YAML or JSON. */
@@ -26,16 +31,132 @@ export interface Migration {
   description: string;
   /** Pure: must not mutate its input. Returns the next-version object. */
   migrate: (raw: RawWorkflow) => RawWorkflow;
+  /** Optional, pure: what the author should know about this step's changes to `raw` (its input). */
+  notes?: (raw: RawWorkflow) => MigrationNote[];
+}
+
+/** One spot a migration made explicit that the author should review. */
+export interface MigrationNote {
+  /** Path of the key the migration set, in the migrated object (e.g. `["nodes", "post", "permissions"]`). */
+  path: (string | number)[];
+  /** The node it is about, when there is one. */
+  nodeId?: string;
+  /** One line `sweny workflow upgrade` writes as a comment above `path`. */
+  comment: string;
+  /** One line the loader emits when it migrates in memory. Absent: nothing to warn about. */
+  warning?: string;
 }
 
 /** The spec version this build of sweny reads natively. */
-export const CURRENT_SPEC_VERSION = 1;
+export const CURRENT_SPEC_VERSION = 2;
+
+// ─── v1 -> v2: safe by default (#598) ────────────────────────────
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/** The `access` a raw `permissions` value declares, if any. */
+function declaredAccess(p: unknown): unknown {
+  if (typeof p === "string") return p;
+  return isRecord(p) ? p.access : undefined;
+}
+
+function declaresNativeNone(p: unknown): boolean {
+  return isRecord(p) && p.native === "none";
+}
+
+function skillList(node: Record<string, unknown>): string[] {
+  return Array.isArray(node.skills) ? node.skills.filter((s): s is string => typeof s === "string") : [];
+}
+
+interface ImplicitAccess {
+  id: string;
+  /** What v2 must declare for the node to behave as it did in v1. */
+  access: "read" | "write";
+  /** Path of the key the migration sets. */
+  path: (string | number)[];
+  skills: string[];
+}
 
 /**
- * Ordered registry, one entry per version step. Empty while v1 is current.
+ * Nodes whose access spec v1 left to its `write` fallback: no `access` of
+ * their own, no `outputs`, and no workflow `access`. Spec v2 reads those as
+ * `read`, so the migration declares what each one had.
+ *
+ * `read` only where it is provably the same: a node with no skills that runs
+ * with `native: none` (its own or the workflow's) has no tool at all, so
+ * nothing for `write` to unlock. Every other such node keeps `write`, the
+ * access it had; the migration never grants more than v1 did.
+ */
+function implicitAccessNodes(raw: RawWorkflow): ImplicitAccess[] {
+  if (declaredAccess(raw.permissions) !== undefined || !isRecord(raw.nodes)) return [];
+  const wfNone = declaresNativeNone(raw.permissions);
+  const found: ImplicitAccess[] = [];
+  for (const [id, node] of Object.entries(raw.nodes)) {
+    if (!isRecord(node)) continue;
+    if (declaredAccess(node.permissions) !== undefined) continue;
+    if (Array.isArray(node.outputs) && node.outputs.length > 0) continue;
+    const skills = skillList(node);
+    const noTools = skills.length === 0 && (wfNone || declaresNativeNone(node.permissions));
+    const path = isRecord(node.permissions) ? ["nodes", id, "permissions", "access"] : ["nodes", id, "permissions"];
+    found.push({ id, access: noTools ? "read" : "write", path, skills });
+  }
+  return found;
+}
+
+/** The warning for one node that can write only because nothing limits it. */
+export function implicitWriteWarning(nodeId: string): string {
+  return (
+    `Node "${nodeId}" can write because nothing limits it (spec_version "1" default). ` +
+    "Declare permissions or outputs on it, or run `sweny workflow upgrade`."
+  );
+}
+
+const v1ToV2: Migration = {
+  from: 1,
+  to: 2,
+  description: "safe by default: declare `permissions` on every node that relied on the v1 `write` default",
+  migrate: (raw) => {
+    const found = implicitAccessNodes(raw);
+    if (found.length === 0) return { ...raw };
+    const nodes = { ...(raw.nodes as Record<string, Record<string, unknown>>) };
+    for (const { id, access } of found) {
+      const node = nodes[id];
+      nodes[id] = {
+        ...node,
+        permissions: isRecord(node.permissions) ? { ...node.permissions, access } : access,
+      };
+    }
+    return { ...raw, nodes };
+  },
+  notes: (raw) =>
+    implicitAccessNodes(raw).map(({ id, access, path, skills }) =>
+      access === "read"
+        ? {
+            path,
+            nodeId: id,
+            comment: "sweny workflow upgrade: read, because this node has no skills and no built-in tools.",
+          }
+        : {
+            path,
+            nodeId: id,
+            comment:
+              `sweny workflow upgrade: write, kept from spec v1 (nothing limited this node; ` +
+              (skills.length > 0
+                ? `its skills [${skills.join(", ")}] may need their write tools). `
+                : "it can use built-in shell and file edit tools). ") +
+              "If it only reads, set permissions: read; if it only posts, declare outputs.",
+            warning: implicitWriteWarning(id),
+          },
+    ),
+};
+
+/**
+ * Ordered registry, one entry per version step.
  * Append only; never edit a shipped migration.
  */
-export const MIGRATIONS: readonly Migration[] = [];
+export const MIGRATIONS: readonly Migration[] = [v1ToV2];
 
 export interface MigrationConfig {
   current: number;
@@ -65,6 +186,8 @@ export type MigrateResult =
       declared: boolean;
       /** Migrations applied, in order. Empty when the file is already current. */
       applied: Migration[];
+      /** Notes from the applied migrations, in order. Empty when there are none. */
+      notes: MigrationNote[];
     }
   | ({ ok: false } & MigrateError);
 
@@ -110,12 +233,14 @@ export function migrateWorkflow(raw: RawWorkflow, config: MigrationConfig = DEFA
 
   let current: RawWorkflow = declared ? { ...raw, spec_version: String(from) } : raw;
   const applied: Migration[] = [];
+  const notes: MigrationNote[] = [];
   for (let v = from; v < config.current; v++) {
     const step = config.migrations.find((m) => m.from === v);
     if (!step) {
       return { ok: false, code: "MIGRATION_FAILED", message: `No migration registered from spec_version "${v}".` };
     }
     try {
+      if (step.notes) notes.push(...step.notes(current));
       current = { ...step.migrate(current), spec_version: String(step.to) };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -127,7 +252,7 @@ export function migrateWorkflow(raw: RawWorkflow, config: MigrationConfig = DEFA
     }
     applied.push(step);
   }
-  return { ok: true, workflow: current, from, to: config.current, declared, applied };
+  return { ok: true, workflow: current, from, to: config.current, declared, applied, notes };
 }
 
 /** The single warning the loader emits when it migrated in memory. */
