@@ -86,14 +86,35 @@ describe("Claude Code built-in tool allow-list", () => {
     return mockQuery.mock.calls.at(-1)![0].options;
   };
 
-  it("a read-only node gets exactly Read, Grep, Glob and WebSearch", async () => {
+  it("a read-only node gets exactly Read, Grep and Glob", async () => {
     const opts = await optionsFor({ policy: policy({ readOnly: true }) });
-    expect(opts.tools).toEqual(["Read", "Grep", "Glob", "WebSearch"]);
+    expect(opts.tools).toEqual(["Read", "Grep", "Glob"]);
   });
 
   it("the legacy readOnly flag gets the same read-only list", async () => {
     const opts = await optionsFor({ readOnly: true });
-    expect(opts.tools).toEqual(["Read", "Grep", "Glob", "WebSearch"]);
+    expect(opts.tools).toEqual(["Read", "Grep", "Glob"]);
+  });
+
+  // A web query is an egress channel that can carry repo data out.
+  it.each([
+    ["policy.readOnly", { policy: { readOnly: true, deny: [], egress: [], strict: false } }],
+    ["legacy readOnly", { readOnly: true }],
+    ["strict read-only", { policy: { readOnly: true, deny: [], egress: [], strict: true } }],
+    [
+      "read-only with egress hosts",
+      { policy: { readOnly: true, deny: [], egress: ["api.github.com"], strict: false } },
+    ],
+  ])("a %s node never gets WebSearch or WebFetch, and both are denied natively too", async (_n, req) => {
+    const opts = await optionsFor(req);
+    expect(opts.tools).not.toContain("WebSearch");
+    expect(opts.tools).not.toContain("WebFetch");
+    expect(opts.disallowedTools).toEqual(expect.arrayContaining(["WebSearch", "WebFetch"]));
+  });
+
+  it("the read-only default list itself has no web tool", () => {
+    expect(mod.CLAUDE_READ_ONLY_BUILTIN_TOOLS).toEqual(["Read", "Grep", "Glob"]);
+    expect(mod.READ_ONLY_DISALLOWED_TOOLS).toEqual(expect.arrayContaining(["WebSearch", "WebFetch"]));
   });
 
   it("a write node gets the file, shell, net and subagent built-ins, nothing else", async () => {
@@ -139,8 +160,8 @@ describe("Claude Code built-in tool allow-list", () => {
     expect(opts.disallowedTools).toEqual(expect.arrayContaining(["Bash", "WebFetch", "WebSearch", "Task"]));
   });
 
-  it("a read-only node with net denied keeps only Read, Grep and Glob", async () => {
-    const opts = await optionsFor({ policy: policy({ readOnly: true, deny: ["net"] }) });
+  it("a read-only node with shell and net denied keeps Read, Grep and Glob", async () => {
+    const opts = await optionsFor({ policy: policy({ readOnly: true, deny: ["shell", "net"] }) });
     expect(opts.tools).toEqual(["Read", "Grep", "Glob"]);
   });
 
@@ -200,6 +221,14 @@ describe("Claude Code built-in tool allow-list", () => {
   });
 
   describe("tool list logging", () => {
+    const local = () => {
+      vi.stubEnv("CI", "");
+      vi.stubEnv("GITHUB_ACTIONS", "");
+    };
+    const ci = () => {
+      vi.stubEnv("CI", "true");
+      vi.stubEnv("GITHUB_ACTIONS", "true");
+    };
     function initThenDone(tools: string[]) {
       return (async function* () {
         yield { type: "system", subtype: "init", tools, mcp_servers: [{ name: "sweny-core", status: "connected" }] };
@@ -207,7 +236,8 @@ describe("Claude Code built-in tool allow-list", () => {
       })();
     }
 
-    it("logs the agent's tool names at info, never their inputs", async () => {
+    it("logs the agent's tool names at info locally, never their inputs", async () => {
+      local();
       mockQuery.mockImplementationOnce(() => initThenDone(["Read", "StructuredOutput"]));
       const log = logger();
       await new mod.ClaudeCodeHarness({ logger: log, envScope: false }).run({
@@ -216,9 +246,50 @@ describe("Claude Code built-in tool allow-list", () => {
         tools: [],
       });
       expect(log.info).toHaveBeenCalledWith("  agent tools: Read, StructuredOutput");
+      expect(log.warn).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["GitHub Actions", { CI: "", GITHUB_ACTIONS: "true" }],
+      ["CI=true", { CI: "true", GITHUB_ACTIONS: "" }],
+      ["CI=1", { CI: "1", GITHUB_ACTIONS: "" }],
+    ])("in CI (%s) the tool names reach the default, non-verbose run log as one line", async (_n, env) => {
+      for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v);
+      mockQuery.mockImplementationOnce(() =>
+        initThenDone(["Read", "StructuredOutput", "mcp__sweny-core__github_list_pr_files"]),
+      );
+      const { createRunLogger } = await import("../cli/run-output.js");
+      const lines: string[] = [];
+      const log = createRunLogger({ verbose: false, tty: false, color: false, write: (s) => void lines.push(s) });
+      await new mod.ClaudeCodeHarness({ logger: log, envScope: false }).run({
+        instruction: "x",
+        context: { secret_input: "do-not-log-me" },
+        tools: [],
+      });
+      log.flush();
+      const shown = lines.filter((l) => l.includes("agent tools:"));
+      expect(shown).toHaveLength(1);
+      expect(shown[0]).toContain("agent tools: Read, StructuredOutput, mcp__sweny-core__github_list_pr_files");
+      expect(lines.join("")).not.toContain("do-not-log-me");
+    });
+
+    it("outside CI the non-verbose run log stays quiet about tool names", async () => {
+      local();
+      mockQuery.mockImplementationOnce(() => initThenDone(["Read", "StructuredOutput"]));
+      const { createRunLogger } = await import("../cli/run-output.js");
+      const lines: string[] = [];
+      const log = createRunLogger({ verbose: false, tty: false, color: false, write: (s) => void lines.push(s) });
+      await new mod.ClaudeCodeHarness({ logger: log, envScope: false }).run({
+        instruction: "x",
+        context: {},
+        tools: [],
+      });
+      log.flush();
+      expect(lines.join("")).not.toContain("agent tools:");
     });
 
     it("warns, naming them, when a node tool is missing from the agent's tool list", async () => {
+      ci();
       mockQuery.mockImplementationOnce(() => initThenDone(["Read", "StructuredOutput", "mcp__sweny-core__get_issue"]));
       const log = logger();
       const t = (name: string) => ({

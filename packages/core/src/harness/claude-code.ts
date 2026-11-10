@@ -123,9 +123,10 @@ export const CLASSIFICATION_DISALLOWED_TOOLS = [
 /**
  * Built-in tools disallowed for a node run with `readOnly: true` (dry run,
  * #380): everything that can edit the workspace, shell out (and so reach
- * `gh`, `curl`, `git push`), spawn a subagent that could, or fetch an
- * arbitrary URL (a GET can still trigger a webhook or exfiltrate data).
- * Read, Grep, Glob and WebSearch stay available for analysis.
+ * `gh`, `curl`, `git push`), spawn a subagent that could, fetch an arbitrary
+ * URL (a GET can still trigger a webhook or exfiltrate data) or search the web
+ * (a query is an egress channel that can carry repo data out). Read, Grep and
+ * Glob stay available for analysis.
  */
 export const READ_ONLY_DISALLOWED_TOOLS = [
   "Bash",
@@ -136,6 +137,7 @@ export const READ_ONLY_DISALLOWED_TOOLS = [
   "Task",
   "Agent",
   "WebFetch",
+  "WebSearch",
 ] as const;
 
 /**
@@ -207,10 +209,10 @@ export function compileClaudeCodeDeny(policy: NodePolicy, legacy: readonly strin
 
 /**
  * The only Claude Code built-in tools a node may get, by policy. Every node
- * reads and searches the checkout; a read-only node may also search the web
- * (no arbitrary URL fetch); a write node adds the shell, file-edit, URL-fetch
- * and subagent built-ins (its `tools.deny` classes and `disallowed_tools`
- * names then leave the list).
+ * reads and searches the checkout, and a read-only node gets nothing else: no
+ * web search or fetch, since either can carry repo data out. A write node adds
+ * the shell, file-edit, web and subagent built-ins (its `tools.deny` classes
+ * and `disallowed_tools` names then leave the list).
  *
  * Passed as the SDK's `tools` option, which "Specif[ies] the base set of
  * available built-in tools" (sdk.d.ts); `allowedTools` only auto-approves
@@ -222,7 +224,7 @@ export function compileClaudeCodeDeny(policy: NodePolicy, legacy: readonly strin
  * {@link runQuery}). Dogfood run 42890468912 listed 23 tools for a read-only
  * node that needed two.
  */
-export const CLAUDE_READ_ONLY_BUILTIN_TOOLS = ["Read", "Grep", "Glob", "WebSearch"] as const;
+export const CLAUDE_READ_ONLY_BUILTIN_TOOLS = ["Read", "Grep", "Glob"] as const;
 export const CLAUDE_WRITE_BUILTIN_TOOLS = [
   "Read",
   "Grep",
@@ -250,6 +252,12 @@ export function claudeCodeBuiltinTools(policy: { readOnly: boolean }, deny: read
  * parent): `ENABLE_TOOL_SEARCH`, see {@link ClaudeCodeHarness} runQuery.
  */
 export const CLAUDE_CODE_HARNESS_VARS = ["ENABLE_TOOL_SEARCH"] as const;
+
+/** CI: a truthy `CI` (not "", "0", "false", "no", "off"), or GitHub Actions itself. */
+function runningInCi(env: Record<string, string | undefined> = process.env): boolean {
+  const ci = (env.CI ?? "").trim().toLowerCase();
+  return env.GITHUB_ACTIONS === "true" || !["", "0", "false", "no", "off"].includes(ci);
+}
 
 /** How sweny resolves which credentials reach the Claude Code subprocess. */
 export type SwenyAuthMode = "auto" | "api-key" | "oauth";
@@ -902,12 +910,16 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
 
       for await (const message of stream) {
         if (message.type === "system" && (message as any).subtype === "init") {
-          // What the agent was actually given: the tool names at info (never
-          // inputs) and, as warnings that reach a non-verbose log, a node tool
-          // or tool server that did not make it onto the list.
+          // What the agent was actually given: the tool names (never inputs)
+          // and, loudly, a node tool or tool server that did not make it onto
+          // the list. In CI the names go out as one warning-level line, the
+          // level the default (non-verbose) run log shows, so a failed node is
+          // diagnosable without a verbose rerun; locally they stay at info.
           const init = message as any;
           if (Array.isArray(init.tools)) {
-            this.logger.info(`  agent tools: ${init.tools.join(", ")}`);
+            const line = `  agent tools: ${init.tools.join(", ")}`;
+            if (runningInCi()) this.logger.warn(line);
+            else this.logger.info(line);
             const listed = new Set<string>(init.tools);
             const absent = allMcpServers["sweny-core"]
               ? tools.map((t) => t.name).filter((n) => !listed.has(`mcp__sweny-core__${n}`))

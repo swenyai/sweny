@@ -143,7 +143,7 @@ describe("pr-risk-review scope node on Claude Code: an agent that skips its requ
     const sdk: any = await import("@anthropic-ai/claude-agent-sdk");
     await runScope();
     for (const [{ options }] of sdk.query.mock.calls) {
-      expect(options.tools).toEqual(["Read", "Grep", "Glob", "WebSearch"]);
+      expect(options.tools).toEqual(["Read", "Grep", "Glob"]);
       expect(options.env.ENABLE_TOOL_SEARCH).toBe("false");
     }
   });

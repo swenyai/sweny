@@ -347,14 +347,15 @@ describe("ClaudeClient readOnly (#380)", () => {
 
     const opts = mockQuery.mock.calls[0][0].options;
     expect(Object.keys(opts.mcpServers)).toEqual(["sweny-core"]);
-    for (const t of ["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "Task", "Agent", "WebFetch"]) {
+    for (const t of ["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "Task", "Agent", "WebFetch", "WebSearch"]) {
       expect(opts.disallowedTools).toContain(t);
     }
-    // The node's own disallow list is kept; analysis reads stay available.
+    // The node's own disallow list is kept; analysis reads stay available, and no web tool.
     expect(opts.disallowedTools).toContain("Glob");
-    for (const t of ["Read", "Grep", "WebSearch"]) {
+    for (const t of ["Read", "Grep"]) {
       expect(opts.disallowedTools).not.toContain(t);
     }
+    expect(opts.tools).toEqual(["Read", "Grep"]);
     expect(READ_ONLY_DISALLOWED_TOOLS).toContain("Bash");
   });
 
