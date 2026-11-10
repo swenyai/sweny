@@ -41,7 +41,7 @@ Most users start with **triage**. See [Action Setup](/action/) for configuration
 | Tracker | Configuration |
 |---------|--------------|
 | **GitHub Issues** | Default — no extra credentials needed |
-| **Linear** | Set `issue-tracker-provider: linear` + `linear-api-key` + `linear-team-id` |
+| **Linear** | Set `issue-tracker-provider: linear` + `linear-api-key` |
 | **Jira** | Set `issue-tracker-provider: jira` + `jira-base-url` + `jira-email` + `jira-api-token` |
 
 ## Can I create custom workflows?
