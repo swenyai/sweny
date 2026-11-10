@@ -726,6 +726,39 @@ describe("expressions come first", () => {
 });
 
 describe("routable state", () => {
+  it("a routed field of the wrong declared type is sent as null, and its expressions fall through to the decider (#573)", async () => {
+    // The one way a mistyped value survives the output contract: an expression
+    // routes on it, so the node is not failed. The expressions are unknown,
+    // the decider decides, and the value never reaches it as sent.
+    const srv = await fakeServer({ json: confident("handle_low") });
+    const workflow = wf();
+    workflow.edges.splice(
+      0,
+      2,
+      { from: "check", to: "handle_high", when: { expr: "check.count > 2" }, description: "many alerts" },
+      { from: "check", to: "handle_low", when: { expr: "check.count <= 2" }, description: "few alerts" },
+    );
+    const claude = new MockClaude({
+      workflow,
+      responses: { check: { data: { severity: "high", count: 2.5 } }, handle_high: {}, handle_low: {}, done: {} },
+    });
+    const evaluate = vi.spyOn(claude, "evaluate");
+    const { results, trace } = await execute(
+      workflow,
+      {},
+      { skills: createSkillMap([]), claude, config: {}, env: {}, logger: silent, decider: op(srv.baseUrl) },
+    );
+    expect(results.get("check")?.status).toBe("success");
+    expect(srv.seen).toHaveLength(1);
+    const state: string = srv.seen[0].body.state;
+    expect(state).toContain('"count": null');
+    expect(state).not.toContain("2.5");
+    expect(state).toContain('"severity": "high"');
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(results.has("handle_low")).toBe(true);
+    expect(trace.edges[0]).toMatchObject({ from: "check", to: "handle_low", rung: "decider" });
+  });
+
   it("sends only declared typed fields, fenced and redacted; never free text, input, env or instructions", async () => {
     const srv = await fakeServer({ json: confident("handle_high") });
     const { logger, lines } = capture();

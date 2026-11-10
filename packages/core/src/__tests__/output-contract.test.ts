@@ -7,7 +7,16 @@ import * as fs from "node:fs";
 import { describe, it, expect } from "vitest";
 import { parse } from "yaml";
 import { execute, outputContractProblems } from "../executor.js";
-import { parseWorkflow } from "../schema.js";
+import { parseWorkflow, validateWorkflow } from "../schema.js";
+import {
+  COUNT_OF_KEYWORD,
+  ROOT_PATH,
+  contractFailureMessage,
+  listContractProblems,
+  outputContractProblems as contractProblems,
+  outputSchemaError,
+  type ContractProblem,
+} from "../output-contract.js";
 import { createSkillMap } from "../skills/index.js";
 import { WORKFLOW_TEMPLATES } from "../cli/templates.js";
 import { PACK_TEMPLATES } from "../cli/packs.js";
@@ -359,23 +368,21 @@ describe("executor: nested violations fail the node, through the repair and retr
     expect(results.get("review")?.data).not.toHaveProperty("fail_soft");
   });
 
-  it("a schema that cannot be compiled fails the node with no repair request", async () => {
+  it("a schema that cannot be compiled stops the run at load, before any agent runs", async () => {
     const { claude, instructions } = scripted([{ n: 1 }]);
-    const { results } = await execute(
-      oneNode({ type: "object", properties: { n: { type: "str" } } }),
-      {},
-      {
-        skills: createSkillMap([]),
-        claude,
-        config: {},
-        logger: silent,
-      },
-    );
-    expect(instructions).toHaveLength(1);
-    expect(results.get("review")?.status).toBe("failed");
-    expect(String(results.get("review")?.data.error)).toMatch(
-      /^output schema violation: \(output\): the declared output schema cannot be used: /,
-    );
+    await expect(
+      execute(
+        oneNode({ type: "object", properties: { n: { type: "str" } } }),
+        {},
+        {
+          skills: createSkillMap([]),
+          claude,
+          config: {},
+          logger: silent,
+        },
+      ),
+    ).rejects.toThrow(/INVALID_OUTPUT_SCHEMA: Node "review" declares an output schema that cannot be used: /);
+    expect(instructions).toHaveLength(0);
   });
 
   it("a nested problem under a field an expression routes on falls through instead of failing the node", async () => {
@@ -494,5 +501,316 @@ describe("bundled workflows still pass their own contract (#573)", () => {
         triageWorkflow.nodes.investigate.output,
       ),
     ).toEqual([expect.objectContaining({ path: "findings[0].severity", kind: "invalid" })]);
+  });
+});
+
+// ─── Load time: validateWorkflow ─────────────────────────────────
+
+describe("validateWorkflow compiles every output schema with the same validator (#573)", () => {
+  it("reports a schema that cannot be compiled with the node id and the validator's message", () => {
+    const errors = validateWorkflow(oneNode({ type: "object", properties: { n: { type: "str" } } }));
+    expect(errors).toEqual([
+      {
+        code: "INVALID_OUTPUT_SCHEMA",
+        nodeId: "review",
+        message:
+          'Node "review" declares an output schema that cannot be used: schema is invalid: ' +
+          "data/properties/n/type must be equal to one of the allowed values, " +
+          "data/properties/n/type must be array, data/properties/n/type must match a schema in anyOf",
+      },
+    ]);
+  });
+
+  it("an unresolvable $ref is reported too", () => {
+    const errors = validateWorkflow(oneNode({ type: "object", properties: { n: { $ref: "#/$defs/missing" } } }));
+    expect(errors.map((e) => [e.code, e.nodeId])).toEqual([["INVALID_OUTPUT_SCHEMA", "review"]]);
+    expect(errors[0].message).toMatch(/can't resolve reference #\/\$defs\/missing/);
+  });
+
+  it("a valid schema, or none, is not an error", () => {
+    expect(validateWorkflow(oneNode(FINDINGS))).toEqual([]);
+    const none = oneNode(FINDINGS);
+    delete none.nodes.review.output;
+    expect(validateWorkflow(none)).toEqual([]);
+  });
+});
+
+// ─── The module itself: exact paths and messages ─────────────────
+
+const rows = (data: unknown, schema: unknown) =>
+  contractProblems(data, schema as JSONSchema).map((p) => [p.field, p.path, p.kind, p.problem]);
+const DRAFT_07 = "http://json-schema.org/draft-07/schema#";
+const DRAFT_2019 = "https://json-schema.org/draft/2019-09/schema";
+const TUPLE = {
+  type: "object",
+  properties: { pair: { type: "array", items: [{ type: "string" }, { type: "number" }] } },
+};
+
+describe("output-contract: dialects", () => {
+  it("draft-07 reads array-form items as a tuple", () => {
+    expect(rows({ pair: ["a", "b"] }, { $schema: DRAFT_07, ...TUPLE })).toEqual([
+      ["pair", "pair[1]", "invalid", 'expected number, got "b"'],
+    ]);
+  });
+
+  it("2020-12, the default, rejects array-form items as a schema problem, each complaint once", () => {
+    expect(rows({ pair: ["a", "b"] }, TUPLE)).toEqual([
+      [
+        ROOT_PATH,
+        ROOT_PATH,
+        "schema",
+        "the declared output schema cannot be used: schema is invalid: data/properties/pair/items must be object,boolean",
+      ],
+    ]);
+  });
+
+  it("2019-09 reads tuples and dependentRequired; draft-07 does not know dependentRequired", () => {
+    const schema = { ...TUPLE, $schema: DRAFT_2019, dependentRequired: { pair: ["why"] } };
+    expect(rows({ pair: ["a", "b"] }, schema)).toEqual([
+      ["pair", "pair[1]", "invalid", 'expected number, got "b"'],
+      ["why", "why", "invalid", "required when 'pair' is present, but missing"],
+    ]);
+    expect(rows({ pair: ["a", "b"] }, { ...schema, $schema: DRAFT_07 })).toEqual([
+      ["pair", "pair[1]", "invalid", 'expected number, got "b"'],
+    ]);
+  });
+
+  it("draft-07 dependencies read like dependentRequired", () => {
+    expect(rows({ pr: 1 }, { $schema: DRAFT_07, type: "object", dependencies: { pr: ["branch"] } })).toEqual([
+      ["branch", "branch", "invalid", "required when 'pr' is present, but missing"],
+    ]);
+  });
+});
+
+describe("output-contract: messages per keyword", () => {
+  it.each<[string, unknown, unknown, unknown[]]>([
+    [
+      "unevaluatedProperties",
+      { a: 1, b: 2 },
+      { type: "object", properties: { a: { type: "number" } }, unevaluatedProperties: false },
+      ["b", "b", "invalid", "not allowed (unevaluatedProperties: false)"],
+    ],
+    [
+      "a union type",
+      { n: true },
+      { type: "object", properties: { n: { type: ["string", "number"] } } },
+      ["n", "n", "invalid", "expected string or number, got true"],
+    ],
+    [
+      "a null scalar keeps its value",
+      { n: null },
+      { type: "object", properties: { n: { not: { type: "null" } } } },
+      ["n", "n", "invalid", "must NOT be valid, got null"],
+    ],
+    [
+      "an array keeps only the wording",
+      { l: [] },
+      { type: "object", properties: { l: { type: "array", minItems: 1 } } },
+      ["l", "l", "invalid", "must NOT have fewer than 1 items"],
+    ],
+    [
+      "an object keeps only the wording",
+      { m: {} },
+      { type: "object", properties: { m: { type: "object", minProperties: 1 } } },
+      ["m", "m", "invalid", "must NOT have fewer than 1 properties"],
+    ],
+    [
+      "the output object itself",
+      {},
+      { type: "object", minProperties: 1 },
+      [ROOT_PATH, ROOT_PATH, "invalid", "must NOT have fewer than 1 properties"],
+    ],
+    [
+      "a value of exactly 80 characters is shown whole",
+      { s: 1 },
+      { type: "object", properties: { s: { const: "x".repeat(78) } } },
+      ["s", "s", "invalid", `expected "${"x".repeat(78)}", got 1`],
+    ],
+    [
+      "a longer value is cut to 77 characters and an ellipsis",
+      { s: 1 },
+      { type: "object", properties: { s: { const: "x".repeat(79) } } },
+      ["s", "s", "invalid", `expected "${"x".repeat(76)}..., got 1`],
+    ],
+  ])("%s", (_label, data, schema, row) => {
+    expect(rows(data, schema)).toEqual([row]);
+  });
+
+  it("the root path reads (output)", () => {
+    expect(ROOT_PATH).toBe("(output)");
+  });
+});
+
+describe("output-contract: paths", () => {
+  it("quotes keys that are not identifiers, and unescapes / and ~ from the pointer", () => {
+    const data = { "a/b": 1, "t~x": 1, "fix-plan": 1, "2fa": 1, _a1: 1, $v: 1 };
+    expect(rows(data, { type: "object", additionalProperties: { type: "string" } }).map((r) => r[1])).toEqual([
+      '["a/b"]',
+      '["t~x"]',
+      "fix-plan",
+      '["2fa"]',
+      "_a1",
+      "$v",
+    ]);
+  });
+
+  it("indexes nested arrays and multi-digit positions", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        m: { type: "array", items: { type: "array", items: { type: "number" } } },
+        l: { type: "array", items: { type: "number" } },
+        o: { type: "object", properties: { deep: { type: "object", properties: { v: { type: "string" } } } } },
+      },
+    };
+    const data = {
+      m: [
+        [1, 2],
+        [3, "x"],
+      ],
+      l: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, "x"],
+      o: { deep: { v: 1 } },
+    };
+    expect(rows(data, schema)).toEqual([
+      ["m", "m[1][1]", "invalid", 'expected number, got "x"'],
+      ["l", "l[10]", "invalid", 'expected number, got "x"'],
+      ["o", "o.deep.v", "invalid", "expected string, got 1"],
+    ]);
+  });
+});
+
+describe("output-contract: inputs", () => {
+  const required = { type: "object", required: ["a"] };
+
+  it("data that is not an object is checked as an empty object", () => {
+    for (const data of [null, undefined, "str", 3]) {
+      expect(rows(data, required)).toEqual([["a", "a", "missing", "required but missing"]]);
+    }
+  });
+
+  it("no schema (or one that is not an object) checks nothing; an array schema is a schema problem", () => {
+    expect(contractProblems({ a: 1 }, undefined)).toEqual([]);
+    expect(rows({ a: 1 }, "x")).toEqual([]);
+    expect(rows({}, [])).toEqual([
+      [
+        ROOT_PATH,
+        ROOT_PATH,
+        "schema",
+        "the declared output schema cannot be used: schema is invalid: data must be object,boolean",
+      ],
+    ]);
+  });
+
+  it("a summary the schema only requires is kept; one it does not name is dropped", () => {
+    expect(rows({ summary: "s" }, { type: "object", required: ["summary"] })).toEqual([]);
+    expect(rows({ summary: "s" }, { type: "object", additionalProperties: false })).toEqual([]);
+    expect(rows({ summary: 1 }, { type: "object", properties: { summary: { type: "string" } } })).toEqual([
+      ["summary", "summary", "invalid", "expected string, got 1"],
+    ]);
+  });
+
+  it("the same schema object gives the same answer every time", () => {
+    const schema = { type: "object", properties: { n: { type: "number" } } };
+    expect(rows({ n: "1" }, schema)).toEqual(rows({ n: "1" }, schema));
+    expect(rows({ n: 1 }, schema)).toEqual([]);
+  });
+
+  it("outputSchemaError: undefined for none or a valid schema, the deduplicated message otherwise", () => {
+    expect(outputSchemaError(undefined)).toBeUndefined();
+    expect(outputSchemaError({ type: "object" })).toBeUndefined();
+    expect(outputSchemaError({ type: "str" })).toBe(
+      "schema is invalid: data/type must be equal to one of the allowed values, data/type must be array, " +
+        "data/type must match a schema in anyOf",
+    );
+  });
+});
+
+describe("output-contract: x-sweny-count-of", () => {
+  const counted = (spec: unknown, extra: Record<string, unknown> = {}) => ({
+    type: "object",
+    properties: { items: { type: "array" }, n: { type: "integer", [COUNT_OF_KEYWORD]: spec }, ...extra },
+  });
+
+  it("is the keyword sweny documents", () => {
+    expect(COUNT_OF_KEYWORD).toBe("x-sweny-count-of");
+  });
+
+  it("counts every object item when nothing narrows it (arrays are objects; null and scalars are not)", () => {
+    const items = [{}, "x", null, 3, []];
+    expect(rows({ items, n: 2 }, counted({ array: "items" }))).toEqual([]);
+    expect(rows({ items, n: 3 }, counted({ array: "items" }))).toEqual([
+      ["n", "n", "invalid", "is 3 but 'items' has 2 matching item(s)"],
+    ]);
+  });
+
+  it("where and non_empty both narrow it", () => {
+    const spec = { array: "items", where: { s: ["open"] }, non_empty: ["t"] };
+    const items = [
+      { s: "open", t: "a" },
+      { s: "open", t: "  " },
+      { s: "open", t: 3 },
+      { s: "open" },
+      { s: "closed", t: "a" },
+    ];
+    expect(rows({ items, n: 1 }, counted(spec))).toEqual([]);
+    expect(rows({ items, n: 0 }, counted(spec))).toEqual([
+      ["n", "n", "invalid", "is 0 but 'items' has 1 matching item(s)"],
+    ]);
+  });
+
+  it("a where whose allowed values are not a list matches nothing", () => {
+    expect(rows({ items: [{ s: "open" }], n: 0 }, counted({ array: "items", where: { s: "open" } }))).toEqual([]);
+  });
+
+  it("an array that is absent or not a list cannot be checked", () => {
+    const loose = { type: "object", properties: { items: {}, n: { [COUNT_OF_KEYWORD]: { array: "items" } } } };
+    expect(rows({ items: 3, n: 0 }, loose)).toEqual([
+      ["n", "n", "invalid", "cannot be checked: 'items' is not a list"],
+    ]);
+    expect(rows({ n: 0 }, loose)).toEqual([["n", "n", "invalid", "cannot be checked: 'items' is not a list"]]);
+  });
+
+  it("an absent count, or a spec without a string array, is not checked", () => {
+    expect(rows({ items: [{}] }, counted({ array: "items" }))).toEqual([]);
+    for (const spec of [{ where: {} }, { array: 3 }, "items", null]) {
+      expect(rows({ items: [{}], n: 5 }, counted(spec))).toEqual([]);
+    }
+  });
+
+  it("boolean property schemas next to it are fine", () => {
+    expect(rows({ items: [{}], n: 5, b: 1 }, counted({ array: "items" }, { b: true }))).toEqual([
+      ["n", "n", "invalid", "is 5 but 'items' has 1 matching item(s)"],
+    ]);
+  });
+});
+
+describe("output-contract: listing and the node error", () => {
+  const p = (path: string, kind: ContractProblem["kind"] = "invalid", problem = "bad"): ContractProblem => ({
+    field: path,
+    path,
+    kind,
+    problem,
+  });
+
+  it("lists up to 20 problems, then counts the rest", () => {
+    const twenty = Array.from({ length: 20 }, (_, i) => p(`k${i}`));
+    expect(listContractProblems(twenty)).toEqual(twenty.map((x) => `${x.path}: bad`));
+    const many = [...twenty, p("k20"), p("k21")];
+    expect(listContractProblems(many)).toEqual([...twenty.map((x) => `${x.path}: bad`), "and 2 more"]);
+  });
+
+  it("names missing top-level fields together, first, and the rest as path: problem", () => {
+    expect(contractFailureMessage([p("a", "missing"), p("b", "missing")])).toBe(
+      "output schema violation: required field(s) missing from emitted data: a, b",
+    );
+    expect(contractFailureMessage([p("x.y"), p("a", "missing"), p("(output)", "schema", "cannot")])).toBe(
+      "output schema violation: required field(s) missing from emitted data: a; x.y: bad; (output): cannot",
+    );
+    expect(contractFailureMessage([p("x[0]")])).toBe("output schema violation: x[0]: bad");
+  });
+
+  it("caps the node error the same way", () => {
+    const many = Array.from({ length: 21 }, (_, i) => p(`k${i}`));
+    expect(contractFailureMessage(many)).toMatch(/; k19: bad; and 1 more$/);
   });
 });

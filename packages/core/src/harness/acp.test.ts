@@ -509,9 +509,64 @@ describe("structured output by prompt, parse, validate and retry", () => {
     expect(prompts[0]).toContain("## Required Output");
     expect(prompts[0]).toContain('"required"');
     expect(prompts[1]).toMatch(/did not match the required output/);
-    expect(prompts[1]).toMatch(/missing required property "ok"/);
+    expect(prompts[1]).toContain("- ok: required but missing\n- count: required but missing\n");
     expect(r.degraded.some((d) => d.startsWith("structured_output"))).toBe(false);
     expect(log.warn.mock.calls.some((c) => /schema/i.test(String(c[0])))).toBe(false);
+  });
+
+  it("checks the answer at every depth with sweny's output contract, naming each path (#573)", async () => {
+    const nested = {
+      type: "object",
+      properties: {
+        findings: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: { title: { type: "string" }, severity: { type: "string", enum: ["low", "high"] } },
+            required: ["title", "severity"],
+          },
+        },
+      },
+      required: ["findings"],
+    };
+    const { h } = harness();
+    const bad = {
+      findings: [
+        { title: "t", severity: "high" },
+        { severity: "urgent", owner: "me" },
+      ],
+    };
+    const fixed = { findings: [{ title: "t", severity: "high" }] };
+    fakes.scriptWith({
+      turns: [[{ kind: "final", text: JSON.stringify(bad) }], [{ kind: "final", text: JSON.stringify(fixed) }]],
+    });
+    const r = await h.run(req({ outputSchema: nested }));
+    expect(r.status).toBe("success");
+    expect(r.data).toMatchObject(fixed);
+    const prompts = cap().prompts;
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain(
+      "Your last reply did not match the required output:\n" +
+        "- findings[1].title: required but missing\n" +
+        "- findings[1].owner: not allowed (additionalProperties: false)\n" +
+        '- findings[1].severity: expected one of ["low","high"], got "urgent"\n',
+    );
+    expect(r.degraded.some((d) => d.startsWith("structured_output"))).toBe(false);
+  });
+
+  it("a nested answer still wrong after the one retry is reported", async () => {
+    const nested = {
+      type: "object",
+      properties: { items: { type: "array", items: { type: "integer" } } },
+      required: ["items"],
+    };
+    const { h } = harness();
+    fakes.scriptWith({ steps: [{ kind: "final", text: JSON.stringify({ items: [1, "two"] }) }] });
+    const r = await h.run(req({ outputSchema: nested }));
+    expect(cap().prompts).toHaveLength(2);
+    expect(cap().prompts[1]).toContain('- items[1]: expected integer, got "two"\n');
+    expect(r.degraded.some((d) => d.startsWith("structured_output"))).toBe(true);
   });
 
   it("asks only once, then reports what it could not get", async () => {
