@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 function loadBuiltinWorkflow(filename: string): Workflow {
   const filePath = path.join(__dirname, filename);
   const raw = parseYaml(fs.readFileSync(filePath, "utf-8"));
-  return workflowZ.parse(raw);
+  return workflowZ.parse(raw) as Workflow;
 }
 
 export const triageWorkflow: Workflow = loadBuiltinWorkflow("triage.yml");
