@@ -366,6 +366,7 @@ export interface OutputGroundedRule {
    * What counts as an id in scanned text: built-in names `url`, `github_ref`
    * (`owner/repo#123`), `issue_key` (`ENG-123`), or a JavaScript regex source
    * (its first capture group is the id when it has one). Default: all built-ins.
+   * `[]` turns the scan off (for a rule that only checks `ids` or `quotes`).
    */
   patterns?: string[];
   /** Constants that always pass (URLs compared normalized). */
@@ -382,6 +383,23 @@ export interface OutputGroundedRule {
    * repo, same URL collection) but not this one. Default `false`.
    */
   stale?: boolean;
+  /** Values that must appear verbatim in a tool's output (never in the input or context). */
+  quotes?: OutputGroundedQuote[];
+}
+
+/** One `output_grounded.quotes` entry: the values at `path` must be copied from a tool's output. */
+export interface OutputGroundedQuote {
+  /** Path into `result.data`; every string or number value under it is one quote. */
+  path: string;
+  /** Tools whose outputs the quote must come from (alias-expanded). Default: the rule's `tools`, else any successful tool. */
+  tools?: string[];
+  /**
+   * How whitespace compares. `exact`: byte for byte. `trim` (default): the
+   * quote's leading and trailing whitespace is ignored. `collapse`: every run
+   * of whitespace, in the quote and the tool output, counts as one space, and
+   * the quote is trimmed.
+   */
+  whitespace?: "exact" | "trim" | "collapse";
 }
 
 /**

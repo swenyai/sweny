@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { execute } from "../executor.js";
+import { evaluateAll } from "../eval/index.js";
 import { evaluatorRuleZ, evaluatorZ, parseWorkflow } from "../schema.js";
 import { createSkillMap } from "../skills/index.js";
 import type { Claude, Logger, NodeResult, Workflow } from "../types.js";
@@ -92,6 +93,38 @@ describe("output_grounded in the executor", () => {
   });
 });
 
+describe("output_grounded in evaluateAll", () => {
+  it("joins a tool-rule failure and a grounding failure on one function evaluator", async () => {
+    const [r] = await evaluateAll(
+      [{ name: "g", kind: "function", rule: { any_tool_called: ["fetch"], output_grounded: {} } }],
+      { status: "success", data: { s: "ENG-1" }, toolCalls: [] },
+      { context: { input: {} }, nodeId: "n" },
+    );
+    expect(r).toEqual({
+      name: "g",
+      kind: "function",
+      pass: false,
+      reasoning:
+        "any_tool_called: required one of [fetch] to succeed, called: [none]; " +
+        'output_grounded: 1 value(s) not grounded (evidence: tool outputs, inputs, prior context): s "ENG-1"',
+    });
+  });
+
+  it("passes context and node id through as evidence", async () => {
+    const rule = { output_grounded: {} };
+    const result: NodeResult = { status: "success", data: { s: "ENG-1" }, toolCalls: [] };
+    const seen = await evaluateAll([{ name: "g", kind: "function", rule }], result, {
+      context: { input: {}, prior: { s: "ENG-1" } },
+    });
+    expect(seen[0]!.pass).toBe(true);
+    const self = await evaluateAll([{ name: "g", kind: "function", rule }], result, {
+      context: { input: {}, me: { s: "ENG-1" } },
+      nodeId: "me",
+    });
+    expect(self[0]!.pass).toBe(false);
+  });
+});
+
 describe("output_grounded in the schema", () => {
   it("accepts an empty rule (all defaults)", () => {
     expect(evaluatorRuleZ.parse({ output_grounded: {} })).toEqual({ output_grounded: {} });
@@ -108,9 +141,26 @@ describe("output_grounded in the schema", () => {
         inputs: false,
         context: true,
         stale: true,
+        quotes: [
+          { path: "notes[*].quote", tools: ["github_get_pr_patches"], whitespace: "exact" },
+          { path: "notes[*].hunk" },
+        ],
       },
     };
     expect(evaluatorRuleZ.parse(rule)).toEqual(rule);
+  });
+
+  it("accepts patterns: [] (scan off), for a quotes-only rule", () => {
+    const rule = { output_grounded: { patterns: [], quotes: [{ path: "q", whitespace: "collapse" }] } };
+    expect(evaluatorRuleZ.parse(rule)).toEqual(rule);
+  });
+
+  it("rejects a bad quotes entry", () => {
+    expect(() => evaluatorRuleZ.parse({ output_grounded: { quotes: [] } })).toThrow();
+    expect(() => evaluatorRuleZ.parse({ output_grounded: { quotes: [{ tools: ["t"] }] } })).toThrow();
+    expect(() => evaluatorRuleZ.parse({ output_grounded: { quotes: [{ path: "q", whitespace: "loose" }] } })).toThrow();
+    expect(() => evaluatorRuleZ.parse({ output_grounded: { quotes: [{ path: "q", tools: [] }] } })).toThrow();
+    expect(() => evaluatorRuleZ.parse({ output_grounded: { quotes: [{ path: "q", extra: 1 }] } })).toThrow();
   });
 
   it("rejects unknown keys and empty lists", () => {

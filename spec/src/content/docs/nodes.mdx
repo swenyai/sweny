@@ -636,19 +636,20 @@ eval:
 
 ```
 eval failed (policy: all_pass):
-  - cites_only_seen (function): output_grounded: 1 value(s) not grounded in tool outputs, inputs or prior context: items[2].body "https://github.com/acme/api/pull/918"
+  - cites_only_seen (function): output_grounded: 1 value(s) not grounded (evidence: tool outputs, inputs, prior context): items[2].body "https://github.com/acme/api/pull/918"
 ```
 
-| Field      | Type     | Default       | Meaning                                                                                                                                              |
-| ---------- | -------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `paths`    | string[] | whole output  | [Paths](#path-grammar) whose strings are scanned with `patterns`. A path that does not resolve has nothing to check; a malformed one fails the rule. |
-| `ids`      | string[] | none          | Paths whose string or number values are each one id, checked whole (for ids no pattern recognizes, like `4821`).                                     |
-| `patterns` | string[] | all built-ins | `url`, `github_ref` (`owner/repo#123`), `issue_key` (`ENG-123`), or a JavaScript regex source; its first capture group is the id when it has one.    |
-| `allow`    | string[] | none          | Constants that always pass. Exact match; URLs are compared normalized.                                                                               |
-| `tools`    | string[] | every tool    | Only these tools' outputs count as evidence (skill aliases apply).                                                                                   |
-| `inputs`   | boolean  | `true`        | The workflow input counts as evidence. `false` requires every id to come from a tool or a prior node.                                                |
-| `context`  | boolean  | `true`        | Prior nodes' context counts as evidence. The node's own earlier visit (in a loop) never does.                                                        |
-| `stale`    | boolean  | `false`       | Fail an id seen only in the input or prior context when this node's tools returned other ids of the same kind and not this one.                      |
+| Field      | Type     | Default       | Meaning                                                                                                                                                                    |
+| ---------- | -------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `paths`    | string[] | whole output  | [Paths](#path-grammar) whose strings are scanned with `patterns`. A path that does not resolve has nothing to check; a malformed one fails the rule.                       |
+| `ids`      | string[] | none          | Paths whose string or number values are each one id, checked whole (for ids no pattern recognizes, like `4821`).                                                           |
+| `patterns` | string[] | all built-ins | `url`, `github_ref` (`owner/repo#123`), `issue_key` (`ENG-123`), or a JavaScript regex source; its first capture group is the id when it has one. `[]` turns the scan off. |
+| `allow`    | string[] | none          | Constants that always pass. Exact match; URLs are compared normalized.                                                                                                     |
+| `tools`    | string[] | every tool    | Only these tools' outputs count as evidence (skill aliases apply).                                                                                                         |
+| `inputs`   | boolean  | `true`        | The workflow input counts as evidence. `false` requires every id to come from a tool or a prior node.                                                                      |
+| `context`  | boolean  | `true`        | Prior nodes' context counts as evidence. The node's own earlier visit (in a loop) never does.                                                                              |
+| `stale`    | boolean  | `false`       | Fail an id seen only in the input or prior context when this node's tools returned other ids of the same kind and not this one.                                            |
+| `quotes`   | object[] | none          | Values that must be copied verbatim from a tool's output. See [Quotes](#quotes-copied-verbatim-from-a-tool).                                                               |
 
 Matching rules:
 
@@ -657,6 +658,41 @@ Matching rules:
 - Other ids match as whole tokens: `ENG-12` is not grounded by `ENG-123`, and `48` is not grounded by `4821`.
 - An id inside a URL is checked once, as the URL.
 - Only successful tool calls count. A tool's input is never evidence, and neither is an error output.
+
+##### Quotes: copied verbatim from a tool
+
+A `quotes` entry checks that every value at its `path` appears, as one substring, in a single string of a named tool's output. Only successful calls count; the input and prior context never do. For example, a review node can require every quoted line to come from the patch the tool returned:
+
+```yaml
+eval:
+  - name: quotes_are_from_the_patch
+    kind: function
+    rule:
+      output_grounded:
+        patterns: [] # quotes only; no id scan
+        quotes:
+          - path: notes[*].quote
+            tools: [github_get_pr_patches]
+            whitespace: trim # default
+```
+
+| Field        | Type     | Default                           | Meaning                                                              |
+| ------------ | -------- | --------------------------------- | -------------------------------------------------------------------- |
+| `path`       | string   | required                          | [Path](#path-grammar); every string or number under it is one quote. |
+| `tools`      | string[] | the rule's `tools`, else any tool | The tools the quote must come from (skill aliases apply).            |
+| `whitespace` | string   | `trim`                            | `exact`, `trim` or `collapse`, below.                                |
+
+Whitespace rules:
+
+- `exact`: byte for byte. `"name: deploy "` is not found in `"name: deploy\n"`.
+- `trim`: the quote's leading and trailing whitespace is ignored; inside it, every character must match. The tool output is not changed.
+- `collapse`: every run of spaces, tabs and newlines, in the quote and in each tool output string, counts as one space, and the quote is trimmed. `"a b c"` is found in `"a\t\tb\n  c"`.
+
+A quote that is empty or only whitespace fails. A quote never spans two strings of the output (two array items, two fields). A short quote is weak: `x` is found almost anywhere, so pair `quotes` with a `matches` rule on the value's shape.
+
+```
+  - quotes_are_from_the_patch (function): output_grounded: 1 quote(s) not found verbatim in github_get_pr_patches output (whitespace: trim): notes[1].quote "uses: acme/deploy@v3"
+```
 
 Limits, stated plainly:
 

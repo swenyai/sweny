@@ -192,8 +192,7 @@
                   "items": {
                     "type": "string",
                     "minLength": 1
-                  },
-                  "minItems": 1
+                  }
                 },
                 "allow": {
                   "type": "array",
@@ -219,6 +218,34 @@
                 },
                 "stale": {
                   "type": "boolean"
+                },
+                "quotes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "description": "Values that must appear verbatim in a tool's output.",
+                  "items": {
+                    "type": "object",
+                    "required": ["path"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "tools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "minItems": 1
+                      },
+                      "whitespace": {
+                        "type": "string",
+                        "enum": ["exact", "trim", "collapse"]
+                      }
+                    }
+                  }
                 }
               }
             }

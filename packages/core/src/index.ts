@@ -60,6 +60,7 @@ export type {
   Evaluator,
   EvaluatorRule,
   OutputGroundedRule,
+  OutputGroundedQuote,
   EvalResult,
   EvaluatorKind,
   NodeRequires,

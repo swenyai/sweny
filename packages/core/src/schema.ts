@@ -179,12 +179,25 @@ export const outputGroundedZ = z
   .object({
     paths: z.array(z.string().min(1)).min(1).optional(),
     ids: z.array(z.string().min(1)).min(1).optional(),
-    patterns: z.array(z.string().min(1)).min(1).optional(),
+    // `[]` is allowed: it turns the pattern scan off.
+    patterns: z.array(z.string().min(1)).optional(),
     allow: z.array(z.string().min(1)).min(1).optional(),
     tools: z.array(z.string().min(1)).min(1).optional(),
     inputs: z.boolean().optional(),
     context: z.boolean().optional(),
     stale: z.boolean().optional(),
+    quotes: z
+      .array(
+        z
+          .object({
+            path: z.string().min(1),
+            tools: z.array(z.string().min(1)).min(1).optional(),
+            whitespace: z.enum(["exact", "trim", "collapse"]).optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .optional(),
   })
   .strict();
 
@@ -1145,12 +1158,27 @@ export const workflowJsonSchema = {
               properties: {
                 paths: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
                 ids: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
-                patterns: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+                patterns: { type: "array", items: { type: "string", minLength: 1 } },
                 allow: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
                 tools: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
                 inputs: { type: "boolean" },
                 context: { type: "boolean" },
                 stale: { type: "boolean" },
+                quotes: {
+                  type: "array",
+                  minItems: 1,
+                  description: "Values that must appear verbatim in a tool's output.",
+                  items: {
+                    type: "object",
+                    required: ["path"],
+                    additionalProperties: false,
+                    properties: {
+                      path: { type: "string", minLength: 1 },
+                      tools: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+                      whitespace: { type: "string", enum: ["exact", "trim", "collapse"] },
+                    },
+                  },
+                },
               },
             },
           },
