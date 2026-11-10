@@ -1,33 +1,73 @@
 {
   "schema_version": 1,
-  "illustrative": true,
-  "notice": "ILLUSTRATIVE SAMPLE DATA. This is not output from a real run and not about your code. The repo (acme-notes-api) is fictional; timings, tool-call counts, token usage and cost are plausible numbers for a small repo, written by hand. Replace this file with a recorded real run (metadata plus the sample answer only) and set illustrative to false.",
+  "illustrative": false,
+  "captured_at": "2026-11-10T20:09:47.380Z",
+  "notice": "A replay of a real run of explain-repo on swenyai/sweny, started 2026-11-10T20:09:47Z (2026-11-10). Durations, tool-call counts, token usage and cost are as recorded; the answer is redacted. Made by `sweny try --capture`; do not edit by hand.",
   "workflow": "explain-repo",
-  "sample_repo": "acme-notes-api",
-  "harness": { "id": "claude-code", "version": "sample" },
-  "policy": { "envScope": true, "sandbox": "auto", "sandboxStarted": true },
+  "sample_repo": "swenyai/sweny",
+  "harness": {
+    "id": "claude-code",
+    "version": "0.3.322"
+  },
+  "policy": {
+    "envScope": true,
+    "sandbox": "strict",
+    "sandboxStarted": true
+  },
   "nodes": {
     "survey": {
-      "duration_ms": 18400,
-      "tool_calls": { "Glob": 3, "Read": 7, "Grep": 2 },
-      "usage": { "inputTokens": 21300, "outputTokens": 1150, "costUsd": 0.09, "numTurns": 8 }
+      "duration_ms": 15711,
+      "tool_calls": {
+        "Bash": 2
+      },
+      "usage": {
+        "inputTokens": 6,
+        "outputTokens": 2006,
+        "costUsd": 0.1197956,
+        "numTurns": 3
+      }
     },
     "explain": {
-      "duration_ms": 9100,
-      "tool_calls": {},
-      "usage": { "inputTokens": 6800, "outputTokens": 640, "costUsd": 0.04, "numTurns": 1 },
+      "duration_ms": 7211,
+      "tool_calls": {
+        "StructuredOutput": 1
+      },
+      "usage": {
+        "inputTokens": 2,
+        "outputTokens": 877,
+        "costUsd": 0.0871939,
+        "numTurns": 2
+      },
       "output": {
-        "purpose": "A small REST API for storing and searching notes, built with Express and TypeScript on top of SQLite. Meant as the backend for a notes app.",
-        "how_to_run": ["npm install", "npm run build", "npm test", "npm start (serves on http://localhost:3000)"],
+        "purpose": "SWEny runs DAGs of coding-agent steps (Claude Code, Codex, pi, ACP agents) defined in YAML workflows, locally or in CI. It scopes each step's env and tools, validates output schemas, and records a receipt per run. For teams automating coding-agent work.",
+        "how_to_run": [
+          "Use Node >=22, then run: npm install (installs all workspaces)",
+          "npm run build",
+          "npm run typecheck",
+          "npm test (Vitest)",
+          "npm run lint",
+          "Run the CLI: node packages/core/dist/cli/main.js workflow run <file.yml> (the `sweny` bin)",
+          "Docs site: npm run dev:web",
+          "In CI: use the GitHub Action swenyai/sweny@v5 (action.yml)"
+        ],
         "key_files": [
-          "src/server.ts: the entry point, wires routes and the database",
-          "src/routes/notes.ts: the CRUD and search endpoints",
-          "src/db/schema.sql: the tables, applied on first start",
-          "test/notes.test.ts: the API tests, a good map of expected behavior"
+          "README.md, ARCHITECTURE.md, CONTRIBUTING.md, CLAUDE.md: start here for the concepts and the contributor rules",
+          "packages/core/src/executor.ts: runs the DAG",
+          "packages/core/src/cli/: CLI entry point (main.js is built from here)",
+          "packages/core/src/schema.ts, types.ts, loader.ts: workflow definition and validation",
+          "packages/core/src/node-policy.ts, agent-env.ts, safe-outputs.ts, untrusted.ts: security scoping and output checks",
+          "packages/core/src/journal.ts: run receipts",
+          "packages/core/src/workflows/, .sweny/workflows/, examples/: built-in and sample workflows",
+          "packages/mcp/src/index.ts: MCP server",
+          "packages/studio: visual workflow editor",
+          "action.yml and .github/workflows/ci.yml, release.yml: Action and CI/release"
         ],
         "risks": [
-          "No auth on any route: fine locally, not safe to expose as is.",
-          "The README does not mention the PORT or DB_PATH environment variables that src/server.ts reads."
+          "Only Claude Code is fully supported. Codex, pi and ACP agents are experimental.",
+          "Every push to main triggers release.yml, which publishes to npm, so merges ship straight away. There are no changesets.",
+          "The build, test and run commands above come from a survey of the root scripts, not from running them. Check them against package.json.",
+          "The repo has many moving parts: 5 packages, 2 Astro sites, the plugin and the Action. Run builds from the repo root so workspaces resolve.",
+          "Security-sensitive code (env scoping, input fencing, output checks) needs careful review. Read SECURITY.md first."
         ]
       }
     }
