@@ -198,3 +198,33 @@ describe("the documented --json shape is stable for a clean record", () => {
     expect(printableRun(clean as never)).toEqual(clean);
   });
 });
+
+describe("listRuns exposes allow-listed, typed records to every caller", () => {
+  it("a forged record read from disk carries no unknown keys and only valid sub-entries", () => {
+    const extra = { evil_key: "x", nested: { deep: 1 } };
+    const cwd = seed(
+      forged(A, "2026-11-06T10:00:00.000Z", {
+        ...extra,
+        nodes: [null, { id: 5, status: "success" }, { id: "n", status: "success", duration_ms: "x", ...extra }],
+        routes: [null, { from: "a" }, { from: "a", to: "b", rung: "bogus", ...extra }],
+        totals: { nodes_total: "9", ...extra },
+        harness: { id: "h", version: 1 },
+        degraded: ["ok", 3, null],
+        spend: { node: { tokens: 1, cost_usd: 2, calls: 3, ...extra }, bogus: { tokens: 1 }, judge: "no" },
+      }),
+      forged(B, "2026-11-06T11:00:00.000Z", { status: { x: 1 } }),
+    );
+    const runs = listRuns(cwd);
+    expect(runs.map((r) => r.run_id)).toEqual([A]); // B has a non-string status: skipped
+    const keys = allKeys(runs);
+    for (const k of ["evil_key", "nested", "deep", "bogus"]) expect(keys.has(k)).toBe(false);
+    expect(runs[0].nodes).toEqual([
+      { id: "n", status: "success", duration_ms: 0, tool_calls: 0, tokens: null, cost_usd: null, retries: 0 },
+    ]);
+    expect(runs[0].routes).toEqual([{ from: "a", to: "b" }]);
+    expect(runs[0].totals.nodes_total).toBe(0);
+    expect(runs[0].harness).toBeUndefined();
+    expect(runs[0].degraded).toEqual(["ok"]);
+    expect(runs[0].spend).toEqual({ node: { tokens: 1, cost_usd: 2, calls: 3 } });
+  });
+});

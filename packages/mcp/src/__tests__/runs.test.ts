@@ -301,4 +301,20 @@ describe("sweny_runs_diff", () => {
 
     expect(await refusedBySchema(client, "sweny_runs_diff", { a: "../../etc/passwd", b: RUN_B })).toBe(true);
   });
+
+  it("a forged record (routes: [null], unknown keys) does not crash either tool or leak its keys (#592)", async () => {
+    const root = makeWorkspace();
+    writeRun(root, runRecord(RUN_A, "2026-11-06T10:00:00.000Z", { routes: [null], evil_key: "leak" }));
+    writeRun(root, runRecord(RUN_B, "2026-11-06T11:00:00.000Z", { routes: [{ from: "a" }], harness: "x" }));
+    const client = await connect(root);
+
+    const list = await call(client, "sweny_runs");
+    expect(list.isError).toBe(false);
+    expect(list.data.runs).toHaveLength(2);
+    expect(JSON.stringify(list.data)).not.toContain("evil_key");
+
+    const diff = await call(client, "sweny_runs_diff");
+    expect(diff.isError).toBe(false);
+    expect(JSON.stringify(diff.data)).not.toContain("evil_key");
+  });
 });
