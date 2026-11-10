@@ -761,7 +761,9 @@ describe("validateWorkflow: a schema that does not compile still loads, with a d
     const wf = oneNode({ type: "object", properties: { n: { type: "str" } } });
     const r = validateParsed(JSON.parse(JSON.stringify(wf)));
     expect(r.ok).toBe(true);
-    expect(r.ok && r.warnings).toEqual([
+    // Other load notes (a spec_version migration) may sit beside it; exactly one is this one.
+    const fallback = (r.ok ? (r.warnings ?? []) : []).filter((w) => w.startsWith("OUTPUT_SCHEMA_FALLBACK"));
+    expect(fallback).toEqual([
       expect.stringMatching(
         /^OUTPUT_SCHEMA_FALLBACK: Node "review" declares an output schema the validator cannot compile/,
       ),
