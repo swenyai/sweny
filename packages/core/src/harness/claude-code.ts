@@ -245,6 +245,12 @@ export function claudeCodeBuiltinTools(policy: { readOnly: boolean }, deny: read
   return base.filter((t) => !denied.has(t));
 }
 
+/**
+ * Env vars the harness itself sets on the agent (not passed through from the
+ * parent): `ENABLE_TOOL_SEARCH`, see {@link ClaudeCodeHarness} runQuery.
+ */
+export const CLAUDE_CODE_HARNESS_VARS = ["ENABLE_TOOL_SEARCH"] as const;
+
 /** How sweny resolves which credentials reach the Claude Code subprocess. */
 export type SwenyAuthMode = "auto" | "api-key" | "oauth";
 
