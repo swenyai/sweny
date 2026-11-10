@@ -20,14 +20,17 @@ describe("MCP server integration", () => {
     return { client, server };
   }
 
-  it("registers both tools", async () => {
+  it("registers all six tools", async () => {
     const { client } = await createTestClient();
     const { tools } = await client.listTools();
 
     const names = tools.map((t) => t.name);
     expect(names).toContain("sweny_list_workflows");
     expect(names).toContain("sweny_run_workflow");
-    expect(tools).toHaveLength(2);
+    for (const name of ["sweny_validate", "sweny_diagram", "sweny_runs", "sweny_runs_diff"]) {
+      expect(names).toContain(name);
+    }
+    expect(tools).toHaveLength(6);
   });
 
   it("sweny_list_workflows has correct schema", async () => {
