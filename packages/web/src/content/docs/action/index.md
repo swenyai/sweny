@@ -159,7 +159,6 @@ Set `issue-tracker-provider` and add the relevant credentials:
           dd-app-key: ${{ secrets.DD_APP_KEY }}
           issue-tracker-provider: linear
           linear-api-key: ${{ secrets.LINEAR_API_KEY }}
-          linear-team-id: ${{ vars.LINEAR_TEAM_ID }}
 ```
 
 For Jira:
