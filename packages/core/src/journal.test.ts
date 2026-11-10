@@ -41,7 +41,6 @@ import {
   runStateRoot,
 } from "./journal.js";
 import { createWriteStageState } from "./safe-outputs.js";
-import { CURRENT_SPEC_VERSION } from "./migrations.js";
 import type { JournalRecord } from "./journal.js";
 import { toolsHash } from "./journal.js";
 import type { NodeResult, Skill, Tool, Workflow } from "./types.js";
@@ -201,9 +200,9 @@ describe("journal records", () => {
 
 describe("workflow hash", () => {
   it("binds the effective spec_version (#469)", () => {
-    // Absent hashes as the version this build reads natively (2 since #598).
-    expect(workflowHashOf({ ...wf, spec_version: String(CURRENT_SPEC_VERSION) })).toBe(workflowHashOf(wf));
-    expect(workflowHashOf({ ...wf, spec_version: "1" })).not.toBe(workflowHashOf(wf));
+    // Absent hashes as "1", the version such a workflow runs as (#598).
+    expect(workflowHashOf({ ...wf, spec_version: "1" })).toBe(workflowHashOf(wf));
+    expect(workflowHashOf({ ...wf, spec_version: "2" })).not.toBe(workflowHashOf(wf));
   });
 });
 

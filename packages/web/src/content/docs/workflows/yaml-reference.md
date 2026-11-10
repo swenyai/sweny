@@ -121,6 +121,8 @@ To move a `"1"` file to `"2"`, run `sweny workflow upgrade <file>`. It sets `spe
 
 Every workflow `sweny new` writes is `spec_version: "2"`. Each node is `read` unless its job needs a write, and GitHub writes are safe outputs.
 
+A `pr-review` workflow written by `sweny new` before this change tells its last node to approve the pull request, and `sweny workflow upgrade` keeps that line. sweny warns on load when a node that can write is told to approve in a review workflow. Regenerate it with `sweny new --template pr-review`, or delete the line and post the review as a `comment` output.
+
 ### Instructions
 
 The `instruction` field is the core of each node. Write it as you would write a prompt for a coding agent -- clear, specific, and focused on a single task. The agent receives the instruction along with the workflow input and all prior node results as context.

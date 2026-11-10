@@ -1,8 +1,12 @@
+spec_version: "2"
 id: seed-content
 name: Content Generation Pipeline
 workflow_type: content_generation
 description: Audit content gaps, generate educational content, validate quality, and publish to Supabase
 entry: audit
+# Safe by default (spec_version 2): a node is read-only unless it declares
+# permissions. generate inserts and validate updates rows, each through its
+# Supabase tools only.
 nodes:
   audit:
     name: Audit Content Gaps
@@ -125,6 +129,12 @@ nodes:
       Return a summary of what was generated and inserted.
     skills:
       - supabase
+    permissions:
+      access: write
+      deny: [shell, write, edit, net, subagent]
+    tools:
+      allow:
+        - supabase_insert
     output:
       type: object
       properties:
@@ -179,6 +189,13 @@ nodes:
       Return a quality report.
     skills:
       - supabase
+    permissions:
+      access: write
+      deny: [shell, write, edit, net, subagent]
+    tools:
+      allow:
+        - supabase_query
+        - supabase_update
     output:
       type: object
       properties:

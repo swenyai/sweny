@@ -6,6 +6,7 @@
  */
 
 import type { NodePolicy, ToolClass } from "./harness/types.js";
+import { effectiveSpecVersion } from "./migrations.js";
 import type { Node, NodeAccess, NodeNative, NodePermissions, NodePermissionsSpec, Workflow } from "./types.js";
 
 export interface ResolvedPermissions {
@@ -27,7 +28,7 @@ function spec(p: NodePermissions | undefined): NodePermissionsSpec {
  * behavior. The loader migrates v1 files to v2 with that `write` made explicit.
  */
 export function defaultNodeAccess(workflow: Pick<Workflow, "spec_version"> = {}): NodeAccess {
-  return Number(workflow.spec_version ?? "1") >= 2 ? "read" : "write";
+  return effectiveSpecVersion(workflow) >= 2 ? "read" : "write";
 }
 
 /**
@@ -99,4 +100,39 @@ export function buildNodePolicy(opts: {
     ...(opts.permissions.strict ? { exclusiveMcp: true } : {}),
     ...(opts.permissions.native === "none" ? { nativeNone: true } : {}),
   };
+}
+
+const APPROVE = /\bapprove\b/i;
+/** "never approve", "do not approve", "don't ever approve": the negation governs approve itself. */
+const NEGATED = /(?:\b(?:never|not|no|nor)|n't)\s+(?:\w+\s+)?approve\b/i;
+const REVIEW = /\bpull requests?\b|\bPRs?\b|\breview/i;
+
+/**
+ * Load warnings for review nodes told to approve (#598). The pr-review
+ * template before #598 said "If no issues found, approve with a brief note";
+ * files generated from it keep that line through `sweny workflow upgrade`.
+ * Precise on purpose: only a node that can write (so it could act on it), in a
+ * `pr_review` workflow or whose instruction is about a pull request or review,
+ * with an inline instruction line that says "approve", not negated ("never approve").
+ */
+export function approveDirectiveWarnings(workflow: Workflow): string[] {
+  const warnings: string[] = [];
+  for (const [id, node] of Object.entries(workflow.nodes)) {
+    const text =
+      typeof node.instruction === "string"
+        ? node.instruction
+        : "inline" in node.instruction
+          ? node.instruction.inline
+          : undefined;
+    if (text === undefined || resolveNodePermissions(node, workflow).access !== "write") continue;
+    if (workflow.workflow_type !== "pr_review" && !REVIEW.test(text)) continue;
+    const line = text.split("\n").find((l) => APPROVE.test(l) && !NEGATED.test(l));
+    if (line === undefined) continue;
+    warnings.push(
+      `Node "${id}" can write and its instruction tells the agent to approve ("${line.trim()}"). ` +
+        "An AI reviewer should never approve: delete that line, and post the review as a comment output " +
+        "(see `sweny new --template pr-review`).",
+    );
+  }
+  return warnings;
 }

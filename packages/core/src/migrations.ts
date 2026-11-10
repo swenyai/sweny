@@ -50,6 +50,16 @@ export interface MigrationNote {
 /** The spec version this build of sweny reads natively. */
 export const CURRENT_SPEC_VERSION = 2;
 
+/**
+ * The spec version a workflow object runs as: its `spec_version`, or 1 when
+ * absent (a file written before the field, or a workflow built in code that
+ * the loader never migrated). Permission defaults and the journal's workflow
+ * hash both read this, so resume binds to the version the policy ran under.
+ */
+export function effectiveSpecVersion(workflow: { spec_version?: string }): number {
+  return workflow.spec_version === undefined ? 1 : Number(workflow.spec_version);
+}
+
 // ─── v1 -> v2: safe by default (#598) ────────────────────────────
 
 function isRecord(v: unknown): v is Record<string, unknown> {

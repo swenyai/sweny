@@ -9,13 +9,21 @@
  * the pr-review template has no way to approve a pull request.
  */
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, readdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { parse as parseYaml } from "yaml";
 
-import { defaultNodeAccess, hasNodePolicy, resolveNodePermissions } from "../node-policy.js";
-import { CURRENT_SPEC_VERSION, implicitWriteWarning, migrateWorkflow, type RawWorkflow } from "../migrations.js";
+import { approveDirectiveWarnings, defaultNodeAccess, hasNodePolicy, resolveNodePermissions } from "../node-policy.js";
+import {
+  CURRENT_SPEC_VERSION,
+  effectiveSpecVersion,
+  implicitWriteWarning,
+  migrateWorkflow,
+  type RawWorkflow,
+} from "../migrations.js";
+import { canonicalHash, workflowHashOf } from "../journal.js";
 import { loadAndValidateWorkflow, validateParsed } from "../loader.js";
 import { upgradeWorkflowFile } from "../cli/workflow-upgrade.js";
 import { WORKFLOW_TEMPLATES } from "../cli/templates.js";
@@ -23,6 +31,7 @@ import { execute } from "../executor.js";
 import { createSkillMap, github } from "../skills/index.js";
 import type { Claude, Node, NodeResult, Skill, Tool, Workflow } from "../types.js";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const silent = { info() {}, warn() {}, error() {}, debug() {} };
 
 function tmpFile(name: string, content: string) {
@@ -475,5 +484,129 @@ describe("pr-review never approves", () => {
     expect(mentions.length).toBeGreaterThan(0);
     for (const line of mentions) expect(line, line).toMatch(/never/i);
     expect(github.tools.filter((t) => /approv|review/i.test(t.name))).toEqual([]);
+  });
+});
+
+// ─── Journal binding ─────────────────────────────────────────────
+
+describe("the journal hash binds the version the policy runs as", () => {
+  const base = { id: "w", name: "W", description: "", entry: "a", nodes: {}, edges: [] } as unknown as Workflow;
+  it.each([
+    ["missing", undefined, "1", "write"],
+    ['"1"', "1", "1", "write"],
+    ['"2"', "2", "2", "read"],
+  ])("spec_version %s: hashed as %s, default access %s", (_label, declared, hashed, access) => {
+    const wf = declared === undefined ? base : { ...base, spec_version: declared };
+    expect(String(effectiveSpecVersion(wf))).toBe(hashed);
+    expect(workflowHashOf(wf)).toBe(canonicalHash({ ...wf, spec_version: hashed }));
+    expect(defaultNodeAccess(wf)).toBe(access);
+  });
+  it("a missing version and v1 are the same workflow for resume; v2 is not", () => {
+    expect(workflowHashOf(base)).toBe(workflowHashOf({ ...base, spec_version: "1" }));
+    expect(workflowHashOf(base)).not.toBe(workflowHashOf({ ...base, spec_version: "2" }));
+  });
+});
+
+// ─── Shipped and linked workflow files ───────────────────────────
+
+const REPO = join(__dirname, "..", "..", "..", "..");
+const SHIPPED_DIRS = [join(REPO, "examples"), join(__dirname, "..", "workflows")];
+
+describe("every workflow file we ship or link loads with zero warnings", () => {
+  const files = SHIPPED_DIRS.flatMap((dir) =>
+    readdirSync(dir)
+      .filter((f) => /\.ya?ml$/.test(f))
+      .map((f) => join(dir, f)),
+  );
+  it("finds the examples and the bundled workflows", () => {
+    expect(files.length).toBeGreaterThanOrEqual(6);
+  });
+  it.each(files)("%s", (file) => {
+    const r = loadAndValidateWorkflow(file);
+    if (!r.ok) throw new Error(r.errors.map((e) => e.message).join("; "));
+    expect(r.workflow.spec_version).toBe("2");
+    expect(r.warnings).toBeUndefined();
+  });
+});
+
+// ─── Approve directives in old review workflows ──────────────────
+
+/** The pr-review template as `sweny new` wrote it before #598. */
+const OLD_PR_REVIEW = `id: pr-review
+name: PR Review Bot
+description: Review pull requests for code quality, security issues, and best practices.
+workflow_type: pr_review
+entry: fetch-diff
+
+nodes:
+  fetch-diff:
+    name: Fetch PR Changes
+    instruction: |
+      Fetch the pull request diff. Identify which files changed,
+      what was added, modified, or removed. Summarize the scope
+      of the change.
+    skills: [github]
+
+  post-review:
+    name: Post Review Comment
+    instruction: |
+      Post a structured review comment on the pull request.
+      Lead with a summary, then list findings by severity.
+      If no issues found, approve with a brief note.
+    skills: [github]
+
+edges:
+  - from: fetch-diff
+    to: post-review
+`;
+
+describe("a review node told to approve", () => {
+  it("the old pr-review template warns once, naming the node and the line, and still does after upgrade", () => {
+    const f = tmpFile("pr-review.yml", OLD_PR_REVIEW);
+    try {
+      for (const stage of ["v1", "upgraded"]) {
+        if (stage === "upgraded") expect(upgradeWorkflowFile(f.path).status).toBe("upgraded");
+        const r = loadAndValidateWorkflow(f.path);
+        if (!r.ok) throw new Error(r.errors.map((e) => e.message).join("; "));
+        const approve = (r.warnings ?? []).filter((w) => w.includes("tells the agent to approve"));
+        expect(approve, stage).toHaveLength(1);
+        expect(approve[0]).toContain('Node "post-review"');
+        expect(approve[0]).toContain("If no issues found, approve with a brief note.");
+      }
+    } finally {
+      f.cleanup();
+    }
+  });
+
+  const node = (instruction: string, permissions?: "read" | "write") => ({
+    name: "N",
+    instruction,
+    skills: ["github"],
+    ...(permissions ? { permissions } : {}),
+  });
+  const workflowWith = (n: Node, type?: string): Workflow =>
+    ({
+      id: "w",
+      name: "W",
+      description: "",
+      spec_version: "2",
+      ...(type ? { workflow_type: type } : {}),
+      entry: "n",
+      nodes: { n },
+      edges: [],
+    }) as Workflow;
+
+  it.each([
+    ["a read node", workflowWith(node("Approve the pull request."), "pr_review"), 0],
+    ["a negated line", workflowWith(node("Never approve the pull request.", "write"), "pr_review"), 0],
+    ["no review context", workflowWith(node("Approve the expense report.", "write")), 0],
+    ["a write review node", workflowWith(node("Review the PR.\nApprove it if clean.", "write")), 1],
+    ["inline source", workflowWith(node({ inline: "Approve it." } as never, "write"), "pr_review"), 1],
+  ])("%s -> %i warning(s)", (_label, wf, count) => {
+    expect(approveDirectiveWarnings(wf)).toHaveLength(count);
+  });
+
+  it("no bundled template warns", () => {
+    for (const t of WORKFLOW_TEMPLATES) expect(approveDirectiveWarnings(load(t.yaml)), t.id).toEqual([]);
   });
 });

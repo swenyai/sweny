@@ -1,3 +1,4 @@
+spec_version: "2"
 id: implement
 name: Implement Fix
 workflow_type: pr_review

@@ -88,7 +88,9 @@ describe("hashing", () => {
 
   it("workflowHashOf binds the effective spec_version", () => {
     const wf = { id: "w", entry: "a", nodes: {}, edges: [] } as unknown as Workflow;
-    expect(workflowHashOf(wf)).toBe(canonicalHash({ ...wf, spec_version: String(CURRENT_SPEC_VERSION) }));
+    // Absent runs as v1 (#598), so it hashes as v1, not as the current version.
+    expect(workflowHashOf(wf)).toBe(canonicalHash({ ...wf, spec_version: "1" }));
+    expect(workflowHashOf(wf)).not.toBe(canonicalHash({ ...wf, spec_version: String(CURRENT_SPEC_VERSION) }));
     expect(workflowHashOf({ ...wf, spec_version: "1" } as Workflow)).toBe(canonicalHash({ ...wf, spec_version: "1" }));
   });
 
