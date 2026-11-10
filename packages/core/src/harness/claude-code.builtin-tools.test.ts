@@ -117,7 +117,7 @@ describe("Claude Code built-in tool allow-list", () => {
     expect(mod.READ_ONLY_DISALLOWED_TOOLS).toEqual(expect.arrayContaining(["WebSearch", "WebFetch"]));
   });
 
-  it("a write node gets the file, shell, net and subagent built-ins, nothing else", async () => {
+  it("a write node gets the file, shell and web built-ins, nothing else", async () => {
     const opts = await optionsFor({ policy: policy() });
     expect(opts.tools).toEqual([
       "Read",
@@ -130,9 +130,20 @@ describe("Claude Code built-in tool allow-list", () => {
       "MultiEdit",
       "WebFetch",
       "WebSearch",
-      "Task",
-      "Agent",
     ]);
+  });
+
+  // Nothing shows a subagent is held to its parent's `tools`, so no default depends on it.
+  it.each([
+    ["write", {}],
+    ["strict write", { strict: true }],
+    ["read-only", { readOnly: true }],
+  ])("a %s node gets no subagent tool by default", async (_n, over) => {
+    const opts = await optionsFor({ policy: policy(over) });
+    expect(opts.tools).not.toContain("Task");
+    expect(opts.tools).not.toContain("Agent");
+    expect(mod.CLAUDE_WRITE_BUILTIN_TOOLS).not.toContain("Task");
+    expect(mod.CLAUDE_WRITE_BUILTIN_TOOLS).not.toContain("Agent");
   });
 
   it("a request with no policy at all gets the write list, never the full preset", async () => {
@@ -154,10 +165,10 @@ describe("Claude Code built-in tool allow-list", () => {
   );
 
   it("tools.deny classes and legacy disallowed names leave the allow-list too", async () => {
-    const opts = await optionsFor({ policy: policy({ deny: ["shell", "net"], nativeDeny: ["Task"] }) });
-    expect(opts.tools).toEqual(["Read", "Grep", "Glob", "Write", "NotebookEdit", "Edit", "MultiEdit", "Agent"]);
+    const opts = await optionsFor({ policy: policy({ deny: ["shell", "net"], nativeDeny: ["MultiEdit"] }) });
+    expect(opts.tools).toEqual(["Read", "Grep", "Glob", "Write", "NotebookEdit", "Edit"]);
     // The deny list still goes to the SDK as before: belt and braces.
-    expect(opts.disallowedTools).toEqual(expect.arrayContaining(["Bash", "WebFetch", "WebSearch", "Task"]));
+    expect(opts.disallowedTools).toEqual(expect.arrayContaining(["Bash", "WebFetch", "WebSearch", "MultiEdit"]));
   });
 
   it("a read-only node with shell and net denied keeps Read, Grep and Glob", async () => {
@@ -286,6 +297,26 @@ describe("Claude Code built-in tool allow-list", () => {
       });
       log.flush();
       expect(lines.join("")).not.toContain("agent tools:");
+    });
+
+    it("reports the agent's tool list on a successful result, for the executor's repair rule", async () => {
+      local();
+      mockQuery.mockImplementationOnce(() => initThenDone(["Read", "StructuredOutput", "mcp__sweny-core__get_issue"]));
+      const r = await new mod.ClaudeCodeHarness({ logger: logger(), envScope: false }).run({
+        instruction: "x",
+        context: {},
+        tools: [],
+      });
+      expect(r.agentTools).toEqual(["Read", "StructuredOutput", "mcp__sweny-core__get_issue"]);
+    });
+
+    it("reports no tool list when the agent never listed one", async () => {
+      const r = await new mod.ClaudeCodeHarness({ logger: logger(), envScope: false }).run({
+        instruction: "x",
+        context: {},
+        tools: [],
+      });
+      expect(r.agentTools).toBeUndefined();
     });
 
     it("warns, naming them, when a node tool is missing from the agent's tool list", async () => {

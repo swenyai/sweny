@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { parse } from "yaml";
-import type { Claude, ExecutionEvent, Workflow } from "../types.js";
+import type { Claude, ExecutionEvent, Skill, Workflow } from "../types.js";
 
 const silent = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -34,6 +34,13 @@ function lazyClaudeCode({ prompt, options }: { prompt: string; options: any }) {
   return (async function* () {
     const server = options.mcpServers?.["sweny-core"];
     const tools: Array<{ name: string; handler: (args: any) => Promise<any> }> = server?.instance?.tools ?? [];
+    // What Claude Code lists at start: the allowed built-ins, StructuredOutput, the MCP tools.
+    yield {
+      type: "system",
+      subtype: "init",
+      tools: [...(options.tools ?? []), "StructuredOutput", ...tools.map((t) => `mcp__sweny-core__${t.name}`)],
+      mcp_servers: server ? [{ name: "sweny-core", status: "connected" }] : [],
+    };
     if (prompt.includes("finished without calling them")) {
       let n = 0;
       for (const t of tools) {
@@ -152,10 +159,35 @@ describe("pr-risk-review scope node on Claude Code: an agent that skips its requ
 // ─── Harness-neutral: the executor's repair rule ─────────────────────
 
 describe("required-tool repair in the executor (any harness)", () => {
+  /** A skill with one read tool, one write tool, and an MCP alias for the write tool. */
+  const desk: Skill = {
+    id: "desk",
+    name: "Desk",
+    description: "test desk",
+    category: "general",
+    config: {},
+    tools: [
+      {
+        name: "lookup",
+        access: "read",
+        description: "Look up",
+        input_schema: { type: "object" },
+        handler: async () => ({}),
+      },
+      {
+        name: "post_comment",
+        access: "write",
+        description: "Post",
+        input_schema: { type: "object" },
+        handler: async () => ({}),
+      },
+    ],
+    mcpAliases: { post_comment: ["save_comment"] },
+  };
   const node = (over: Record<string, unknown> = {}) => ({
     name: "N",
     instruction: "Look it up with lookup.",
-    skills: [],
+    skills: ["desk"],
     eval: [{ name: "looked", kind: "function" as const, rule: { all_tools_called: ["lookup"] } }],
     ...over,
   });
@@ -167,6 +199,9 @@ describe("required-tool repair in the executor (any harness)", () => {
     nodes: { n: node(over) },
     edges: [],
   });
+  const needs = (tool: string) => ({
+    eval: [{ name: "did_it", kind: "function" as const, rule: { all_tools_called: [tool] } }],
+  });
   const called = (tool: string, status: "success" | "error" = "success") => ({
     tool,
     input: {},
@@ -174,16 +209,32 @@ describe("required-tool repair in the executor (any harness)", () => {
     status,
   });
 
-  /** An agent that calls `lookup` only once told it skipped it (or never, when `stubborn`). */
-  function agent(opts: { stubborn?: boolean; firstCalls?: any[]; data?: Record<string, unknown> } = {}) {
+  /**
+   * An agent that reports the tools it was given, like a harness that lists
+   * them (Claude Code's init message), and calls `onTold` only once told it
+   * skipped them (never, when `stubborn`).
+   */
+  function agent(opts: { stubborn?: boolean; firstCalls?: any[]; onTold?: string[]; reportTools?: boolean } = {}) {
     const instructions: string[] = [];
     const claude: Claude = {
       async run(o) {
         instructions.push(o.instruction);
         const told = o.instruction.includes("finished without calling them");
         const first = instructions.length === 1 ? (opts.firstCalls ?? []) : [];
-        const toolCalls = told && !opts.stubborn ? [called("lookup")] : first;
-        return { status: "success", data: opts.data ?? {}, toolCalls };
+        const toolCalls = told && !opts.stubborn ? (opts.onTold ?? ["lookup"]).map((t) => called(t)) : first;
+        const agentTools = [
+          "Read",
+          "Grep",
+          "Glob",
+          "StructuredOutput",
+          ...o.tools.map((t) => `mcp__sweny-core__${t.name}`),
+        ];
+        return {
+          status: "success",
+          data: {},
+          toolCalls,
+          ...(opts.reportTools === false ? {} : { agentTools }),
+        };
       },
       async evaluate(o) {
         return o.choices[0]!.id;
@@ -195,10 +246,15 @@ describe("required-tool repair in the executor (any harness)", () => {
     return { claude, instructions };
   }
 
-  async function run(workflow: Workflow, claude: Claude) {
+  async function run(
+    workflow: Workflow,
+    claude: Claude,
+    input: Record<string, unknown> = {},
+    extra: Record<string, unknown> = {},
+  ) {
     const { execute } = await import("../executor.js");
     const { createSkillMap } = await import("../skills/index.js");
-    return execute(workflow, {}, { skills: createSkillMap([]), claude, logger: silent });
+    return execute(workflow, input, { skills: createSkillMap([desk]), claude, logger: silent, ...extra });
   }
 
   it("repairs once and passes when the agent then calls the tool", async () => {
@@ -264,10 +320,53 @@ describe("required-tool repair in the executor (any harness)", () => {
     expect(instructions).toHaveLength(1);
     expect(results.get("n")!.status).toBe("success");
   });
+
+  // Reachability: the repair asks only for tools on the list the agent had.
+  it("no repair when the harness reports no tool list", async () => {
+    const { claude, instructions } = agent({ reportTools: false });
+    await run(wf(), claude);
+    expect(instructions).toHaveLength(1);
+  });
+
+  it("no repair in a dry run for a write tool the run withheld", async () => {
+    const { claude, instructions } = agent({ onTold: ["post_comment"] });
+    const { results } = await run(wf(needs("post_comment")), claude, { dryRun: true });
+    expect(instructions).toHaveLength(1);
+    expect(results.get("n")!.status).toBe("failed");
+  });
+
+  it("no repair in a staged run for a write tool the run withheld", async () => {
+    const { claude, instructions } = agent({ onTold: ["post_comment"] });
+    const { results } = await run(wf(needs("post_comment")), claude, {}, { stageOutputs: true });
+    expect(instructions).toHaveLength(1);
+    expect(results.get("n")!.status).toBe("failed");
+  });
+
+  it("no repair on a live permissions: read node for a write tool it never had", async () => {
+    const { claude, instructions } = agent({ onTold: ["post_comment"] });
+    const { results } = await run(wf({ ...needs("post_comment"), permissions: "read" }), claude);
+    expect(instructions).toHaveLength(1);
+    expect(results.get("n")!.status).toBe("failed");
+  });
+
+  it("no repair for an alias name whose tools were all withheld (dry run)", async () => {
+    const { claude, instructions } = agent({ onTold: ["save_comment"] });
+    await run(wf(needs("save_comment")), claude, { dryRun: true });
+    expect(instructions).toHaveLength(1);
+  });
+
+  it("an alias name reachable through a listed tool is repaired, and the aliased call passes", async () => {
+    const { claude, instructions } = agent({ onTold: ["post_comment"] });
+    const { results } = await run(wf(needs("save_comment")), claude);
+    expect(instructions).toHaveLength(2);
+    expect(instructions[1]).toContain("- save_comment");
+    expect(results.get("n")!.status).toBe("success");
+  });
 });
 
 describe("uncalledRequiredTools", () => {
   const failure = (name: string) => ({ name, kind: "function" as const, pass: false });
+  const LISTED = ["Read", "mcp__sweny-core__a", "mcp__sweny-core__c", "mcp__x__x", "y", "z", "other"];
 
   it("names every uncalled all_tools_called tool and an any_tool_called set", async () => {
     const { uncalledRequiredTools } = await import("../executor.js");
@@ -277,7 +376,7 @@ describe("uncalledRequiredTools", () => {
       { name: "one", kind: "function" as const, rule: { any_tool_called: ["z"] } },
     ];
     const calls = [{ tool: "b", input: {}, output: {}, status: "success" as const }];
-    expect(uncalledRequiredTools(evals, [failure("all"), failure("any"), failure("one")], calls)).toEqual([
+    expect(uncalledRequiredTools(evals, [failure("all"), failure("any"), failure("one")], calls, LISTED)).toEqual([
       "a",
       "c",
       "one of x, y",
@@ -290,29 +389,46 @@ describe("uncalledRequiredTools", () => {
     const evals = [{ name: "all", kind: "function" as const, rule: { all_tools_called: ["add_comment", "other"] } }];
     const calls = [{ tool: "save_comment", input: {}, output: {}, status: "success" as const }];
     const aliases = new Map([["add_comment", new Set(["add_comment", "save_comment"])]]);
-    expect(uncalledRequiredTools(evals, [failure("all")], calls, aliases)).toEqual(["other"]);
+    expect(uncalledRequiredTools(evals, [failure("all")], calls, LISTED, aliases)).toEqual(["other"]);
   });
 
-  it("is empty when a missing tool was withheld from the node (dry or staged run)", async () => {
+  it("is empty unless every missing tool is on the agent's list, by name, bare MCP name or alias", async () => {
     const { uncalledRequiredTools } = await import("../executor.js");
-    const all = [{ name: "all", kind: "function" as const, rule: { all_tools_called: ["create_issue"] } }];
-    expect(uncalledRequiredTools(all, [failure("all")], [], undefined, ["create_issue"])).toEqual([]);
+    const all = [{ name: "all", kind: "function" as const, rule: { all_tools_called: ["a", "create_issue"] } }];
+    expect(uncalledRequiredTools(all, [failure("all")], [], LISTED)).toEqual([]);
+    expect(uncalledRequiredTools(all, [failure("all")], [], undefined)).toEqual([]);
+    const aliases = new Map([["create_issue", new Set(["create_issue", "save_issue"])]]);
+    expect(uncalledRequiredTools(all, [failure("all")], [], [...LISTED, "mcp__linear__save_issue"], aliases)).toEqual([
+      "a",
+      "create_issue",
+    ]);
+    // A substring or a server name is not a listing.
+    expect(uncalledRequiredTools(all, [failure("all")], [], ["mcp__create_issue__q", "mcp__sweny-core__a"])).toEqual(
+      [],
+    );
+  });
+
+  it("an any_tool_called set needs one reachable member and names only those", async () => {
+    const { uncalledRequiredTools } = await import("../executor.js");
     const any = [
-      { name: "any", kind: "function" as const, rule: { any_tool_called: ["create_issue", "add_comment"] } },
+      { name: "any", kind: "function" as const, rule: { any_tool_called: ["create_issue", "add_comment", "y"] } },
     ];
-    expect(uncalledRequiredTools(any, [failure("any")], [], undefined, ["create_issue", "add_comment"])).toEqual([]);
-    expect(uncalledRequiredTools(any, [failure("any")], [], undefined, ["create_issue"])).toEqual([
-      "one of create_issue, add_comment",
+    expect(uncalledRequiredTools(any, [failure("any")], [], ["Read"])).toEqual([]);
+    expect(uncalledRequiredTools(any, [failure("any")], [], ["y"])).toEqual(["y"]);
+    expect(uncalledRequiredTools(any, [failure("any")], [], ["y", "mcp__s__add_comment"])).toEqual([
+      "one of add_comment, y",
     ]);
   });
 
   it("is empty for a judge or value failure, or a failure with no matching evaluator", async () => {
     const { uncalledRequiredTools } = await import("../executor.js");
     const evals = [{ name: "all", kind: "function" as const, rule: { all_tools_called: ["a"] } }];
-    expect(uncalledRequiredTools(evals, [{ name: "all", kind: "judge", pass: false }], [])).toEqual([]);
-    expect(uncalledRequiredTools(evals, [{ name: "output_required", kind: "value", pass: false }], [])).toEqual([]);
-    expect(uncalledRequiredTools(evals, [failure("missing")], [])).toEqual([]);
-    expect(uncalledRequiredTools(undefined, [failure("all")], [])).toEqual([]);
+    expect(uncalledRequiredTools(evals, [{ name: "all", kind: "judge", pass: false }], [], LISTED)).toEqual([]);
+    expect(uncalledRequiredTools(evals, [{ name: "output_required", kind: "value", pass: false }], [], LISTED)).toEqual(
+      [],
+    );
+    expect(uncalledRequiredTools(evals, [failure("missing")], [], LISTED)).toEqual([]);
+    expect(uncalledRequiredTools(undefined, [failure("all")], [], LISTED)).toEqual([]);
   });
 
   it("the repair instruction lists the tools, then the step", async () => {

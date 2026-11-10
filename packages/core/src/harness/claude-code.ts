@@ -211,8 +211,10 @@ export function compileClaudeCodeDeny(policy: NodePolicy, legacy: readonly strin
  * The only Claude Code built-in tools a node may get, by policy. Every node
  * reads and searches the checkout, and a read-only node gets nothing else: no
  * web search or fetch, since either can carry repo data out. A write node adds
- * the shell, file-edit, web and subagent built-ins (its `tools.deny` classes
- * and `disallowed_tools` names then leave the list).
+ * the shell, file-edit and web built-ins (its `tools.deny` classes and
+ * `disallowed_tools` names then leave the list). No node gets the subagent
+ * tools (Task, Agent) by default: nothing shows a subagent is held to its
+ * parent's `tools`, so the default must not depend on it.
  *
  * Passed as the SDK's `tools` option, which "Specif[ies] the base set of
  * available built-in tools" (sdk.d.ts); `allowedTools` only auto-approves
@@ -233,7 +235,6 @@ export const CLAUDE_WRITE_BUILTIN_TOOLS = [
   ...CLAUDE_TOOLS_BY_CLASS.write,
   ...CLAUDE_TOOLS_BY_CLASS.edit,
   ...CLAUDE_TOOLS_BY_CLASS.net,
-  ...CLAUDE_TOOLS_BY_CLASS.subagent,
 ] as const;
 
 /**
@@ -652,7 +653,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     gitCredentials?: string[];
     /** Collects what this run cannot honor, for `HarnessRunResult.degraded`. */
     degraded?: string[];
-  }): Promise<NodeResult> {
+  }): Promise<NodeResult & Pick<HarnessRunResult, "agentTools">> {
     const {
       instruction,
       context,
@@ -817,6 +818,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     // Fail closed: a stream that ends with no terminal `result` message
     // (subprocess died, stream truncated) is not a success.
     let sawResult = false;
+    // The tool names the agent was given (init message), for the executor's repair rule.
+    let agentTools: string[] | undefined;
 
     // Timeout / abort wiring (back-compat: only armed when requested).
     // A single AbortController drives both an optional caller signal and an
@@ -917,6 +920,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
           // diagnosable without a verbose rerun; locally they stay at info.
           const init = message as any;
           if (Array.isArray(init.tools)) {
+            agentTools = init.tools.filter((t: unknown): t is string => typeof t === "string");
             const line = `  agent tools: ${init.tools.join(", ")}`;
             if (runningInCi()) this.logger.warn(line);
             else this.logger.info(line);
@@ -1120,6 +1124,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       data: { summary: response, ...parsedData },
       toolCalls,
       ...(usage ? { usage } : {}),
+      ...(agentTools ? { agentTools } : {}),
     };
   }
 

@@ -62,7 +62,7 @@ import { fenceUntrusted, fenceUntrustedJson } from "./untrusted.js";
 import { asClaude } from "./harness/compat.js";
 import { budgetGate, isToolClass, policyGate, resolveHarnessPolicy } from "./harness/policy.js";
 import type { HarnessPolicyMode } from "./harness/policy.js";
-import type { AgentHarness } from "./harness/types.js";
+import type { AgentHarness, HarnessRunResult } from "./harness/types.js";
 import { BudgetGuard, BudgetRefusal, describeOverrun, minLimits, spendOf, toLimits } from "./budget.js";
 import type { SpendKind } from "./budget.js";
 import { createRunDecider, wantsDecider } from "./decider.js";
@@ -1209,14 +1209,21 @@ async function executeRun(
       if (outcome.pass) break;
 
       // Required tools: a node whose only failures are `function` evals naming
-      // tools its agent never called gets one repair turn that names them,
-      // before any eval retry. Same footing as the output contract repair: part
+      // tools its agent never called, all of them on the tool list the harness
+      // says the agent had, gets one repair turn that names them, before any
+      // eval retry. Same footing as the output contract repair: part
       // of this visit (no extra max_steps slot), its spend counted. Agents
       // sometimes answer on turn 1 without the tools they were given (dogfood
       // run 42890245104: `called: [StructuredOutput]`).
       const uncalled = toolRepaired
         ? []
-        : uncalledRequiredTools(node.eval, outcome.failures, result.toolCalls, toolAliases, skippedWrites);
+        : uncalledRequiredTools(
+            node.eval,
+            outcome.failures,
+            result.toolCalls,
+            (result as Partial<HarnessRunResult>).agentTools,
+            toolAliases,
+          );
       if (uncalled.length > 0) {
         toolRepaired = true;
         logger.warn(`  required tools not called: ${uncalled.join(", ")}; asking the agent once to call them`, {
@@ -1961,19 +1968,25 @@ export function outputContractProblems(data: unknown, output: JSONSchema | undef
 
 /**
  * Required tools the agent never called, when that is the only reason a node
- * failed its evals: every failure is a `function` evaluator, none saw a
- * forbidden call, and every required tool it names is absent from the trace
- * (not called and failed: that is the retry path's job). Empty otherwise,
- * and empty when a missing tool was withheld from the node (dry or staged
- * run): no turn can call it. An `any_tool_called` set reads "one of a, b".
+ * failed its evals and another turn could call them: every failure is a
+ * `function` evaluator, none saw a forbidden call, every required tool it names
+ * is absent from the trace (not called and failed: that is the retry path's
+ * job), and every one is reachable, i.e. on `agentTools`, the tool list the
+ * harness reported for the run, by its own name or an alias (an MCP tool
+ * counts by its bare name). Empty otherwise, and empty when the harness
+ * reported no list. An `any_tool_called` set needs one reachable member and
+ * reads "one of a, b" over its reachable members.
  */
 export function uncalledRequiredTools(
   evaluators: Evaluator[] | undefined,
   failures: EvalResult[],
   toolCalls: ToolCall[],
+  agentTools: readonly string[] | undefined,
   aliases?: ToolAliases,
-  withheld: readonly string[] = [],
 ): string[] {
+  if (!agentTools) return [];
+  const listed = new Set(agentTools.map(bareToolName));
+  const reachable = (name: string) => listed.has(name) || [...(aliases?.get(name) ?? [])].some((a) => listed.has(a));
   const uncalled: string[] = [];
   // A call to any of these (by name or alias), successful or not.
   const invoked = (names: string[]) => checkNoToolCalled(names, toolCalls, aliases) !== null;
@@ -1986,16 +1999,23 @@ export function uncalledRequiredTools(
     if (rule.no_tool_called && rule.no_tool_called.length > 0 && invoked(rule.no_tool_called)) return [];
     for (const name of rule.all_tools_called ?? []) {
       if (checkAllToolsCalled([name], toolCalls, aliases) === null) continue;
-      if (invoked([name]) || withheld.includes(name)) return [];
+      if (invoked([name]) || !reachable(name)) return [];
       uncalled.push(name);
     }
     const any = rule.any_tool_called ?? [];
     if (any.length > 0 && checkAnyToolCalled(any, toolCalls, aliases) !== null) {
-      if (invoked(any) || any.every((t) => withheld.includes(t))) return [];
-      uncalled.push(any.length === 1 ? any[0] : `one of ${any.join(", ")}`);
+      const open = any.filter(reachable);
+      if (invoked(any) || open.length === 0) return [];
+      uncalled.push(open.length === 1 ? open[0] : `one of ${open.join(", ")}`);
     }
   }
   return [...new Set(uncalled)];
+}
+
+/** `mcp__<server>__<tool>` → `<tool>`; any other name unchanged. Tool calls are recorded the same way. */
+function bareToolName(name: string): string {
+  const parts = name.split("__");
+  return parts.length >= 3 && parts[0] === "mcp" ? parts.slice(2).join("__") : name;
 }
 
 /** The repair turn for {@link uncalledRequiredTools}: names the tools, then the step again. */

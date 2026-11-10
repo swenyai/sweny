@@ -248,6 +248,7 @@ A conforming validator MUST enforce the following rules:
 | `UNBOUNDED_CYCLE`          | A cycle exists with no `max_iterations` guard.                                                                                                   |
 | `EDGE_ITERATIONS_EXCEEDED` | An edge's `max_iterations` is above 100.                                                                                                         |
 | `RETRY_MAX_EXCEEDED`       | A node's `retry.max` is above 10.                                                                                                                |
+| `DUPLICATE_EVALUATOR`      | A node declares two evaluators with the same `name`.                                                                                             |
 | `UNKNOWN_SKILL`            | A node references a skill not in the registry.                                                                                                   |
 | `INVALID_INLINE_SKILL`     | An inline skill provides neither `instruction` nor `mcp`.                                                                                        |
 | `PERMISSION_CEILING`       | A node declares `permissions: write` under a workflow `read`.                                                                                    |
