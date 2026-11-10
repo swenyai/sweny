@@ -14,7 +14,9 @@ import { parse } from "yaml";
 import type { Claude, ExecutionEvent, NodeResult, Workflow } from "../types.js";
 import { PACK_TEMPLATES } from "../cli/packs.js";
 import { parseWorkflow } from "../schema.js";
-import { PR_PATCH_CAPS } from "../skills/github.js";
+import { PR_PATCH_CAPS, github } from "../skills/github.js";
+import { resolveNodePermissions } from "../node-policy.js";
+import { isReadTool } from "../executor.js";
 
 const silent = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -155,6 +157,12 @@ describe("pr-risk-review assess: bounded hunks, cited reasons, one judged retry"
 
   it("ships assess with only the read-only patch tool, one retry, and the judge still in place", () => {
     const assess = pack.nodes.assess!;
+    // Spec v2 (#598): a node with nothing declared is read-only, and a read
+    // node keeps only `access: "read"` tools. The patch tool must survive that.
+    expect(pack.spec_version).toBe("2");
+    expect(assess.permissions).toBeUndefined();
+    expect(resolveNodePermissions(assess, pack).access).toBe("read");
+    expect(isReadTool(github.tools.find((t) => t.name === "github_get_pr_patches")!)).toBe(true);
     expect(assess.skills).toEqual(["github"]);
     expect(assess.tools?.allow).toEqual(["github_get_pr_patches"]);
     expect(assess.retry?.max).toBe(1);
