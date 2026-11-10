@@ -3,6 +3,7 @@ import type { Command } from "commander";
 import type { McpServerConfig } from "../types.js";
 import type { FileConfig } from "./config-file.js";
 import { hasCodexLogin } from "../agent-env.js";
+import { registerDeprecatedFlags } from "./deprecated-flags.js";
 import { parseAcpAgent, unsupportedAgentError } from "../harness/agents.js";
 
 export interface CliConfig {
@@ -119,7 +120,7 @@ export interface CliConfig {
 export function registerTriageCommand(program: Command): Command {
   // NOTE: File-eligible options omit Commander defaults so parseCliInputs() can
   // distinguish "user passed flag" from "not passed" and fall through to .sweny.yml.
-  return program
+  const cmd = program
     .command("triage")
     .description("Run the SWEny triage workflow")
     .option(
@@ -197,6 +198,7 @@ export function registerTriageCommand(program: Command): Command {
       "--file-root [dir]",
       "Sandbox file: Sources to this directory tree (defaults to the working directory when the flag is given without a value)",
     );
+  return registerDeprecatedFlags(cmd);
 }
 
 export function parseCliInputs(options: Record<string, unknown>, fileConfig: FileConfig = {}): CliConfig {
@@ -803,7 +805,7 @@ function parseObservabilityCredentials(
 }
 
 export function registerImplementCommand(program: Command): Command {
-  return program
+  const cmd = program
     .command("implement <issueId>")
     .description("Implement a fix for a specific issue and open a PR")
     .option(
@@ -839,6 +841,7 @@ export function registerImplementCommand(program: Command): Command {
       "--file-root [dir]",
       "Sandbox file: Sources to this directory tree (defaults to the working directory when the flag is given without a value)",
     );
+  return registerDeprecatedFlags(cmd);
 }
 
 /**

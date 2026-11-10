@@ -626,6 +626,15 @@ The check asks the npm registry (`registry.npmjs.org`) for the latest `@sweny-ai
 
 **Homebrew installs** are detected but not driven automatically — the command prints `brew upgrade sweny` for you to run.
 
+## Deprecated flags
+
+These flags did nothing and were removed from the docs, then restored so existing scripts and CI jobs (the `swenyai/triage` action passes most of them) keep running. They are accepted, hidden from `--help`, and have no effect. Using one prints a single warning to stderr; they will be removed in a future minor version, so drop them from your invocations.
+
+- `sweny triage`: `--cache-dir`, `--cache-ttl`, `--no-cache`, `--service-map-path`, `--gitlab-base-url`, `--linear-bug-label-id`, `--linear-triage-label-id`, `--linear-state-backlog`
+- `sweny triage` and `sweny implement`: `--output-dir`, `--linear-team-id`, `--linear-state-in-progress`, `--linear-state-peer-review`
+
+The matching environment variables and `.sweny.yml` keys are ignored too, and never raised an error.
+
 ## Global options
 
 These options are available on all commands:
