@@ -182,10 +182,10 @@ Drift
 On every pull request: read-only scope and risk review, one comment, no code writes.
 
 - **Runs:** Every pull request opened, reopened, or marked ready (same-repo PRs)
-- **Reads:** The PR title and description and the changed-file list with line counts (`github_get_issue`, `github_list_pr_files`). No patch bodies.
+- **Reads:** The PR title and description and the changed-file list with line counts (`github_get_issue`, `github_list_pr_files`), then the patch hunks of the riskiest files: the risky areas first (CI/CD, auth, migrations, dependency manifests, secrets and config, public API), then the largest other changes (`github_get_pr_patches`). The tool caps the read at 8 files, 6000 bytes a file and 24000 bytes in all, and the comment names every file it left out or cut.
 - **Writes:** One comment, pinned to the PR in `pr_number` (a safe output: a comment on any other issue or PR is refused). No code writes, no issues, no PRs.
 - **Permissions:** `contents: read`, `pull-requests: write`. Fork PRs get a read-only token, so the job is skipped for them.
-- **Expected tokens:** 10k to 30k per run (estimate)
+- **Expected tokens:** 15k to 50k per run (estimate)
 
 ### Trigger
 
@@ -227,7 +227,7 @@ jobs:
 ### Gates
 
 - `scope`: function gates (it listed the files, it wrote nothing) and value gates on size and risky-area names.
-- `assess`: value gates on the risk level and that every reason has evidence, and the pack's only judge gate: every reason must cite a path or fact from the measured scope.
+- `assess`: a function gate that it read the hunks, value gates on the risk level and that every reason cites a file, a hunk header and a quoted changed line, and the pack's only judge gate: no reason may say more than its quoted line shows (no claimed bugs, no inferred behavior). A failed gate gets one retry with the gate's reasoning in front of the step; a second failure fails the run.
 - `post-comment`: function gate that the comment was requested, value gate on the result. SWEny posts it after the step.
 
 The review is one comment on the PR, updated in place on later runs: the findings plus one link to the run's receipt. Cost, tokens, duration and the DAG go to the Action's job summary, not the thread. A run whose findings match the last post writes nothing, and the job summary says so. See [PR comment](/action/inputs/#pr-comment).
@@ -251,14 +251,16 @@ Illustrative, not captured from a run.
 ```text
 Risk: high (size m, 6 files)
 
-- src/auth/session.ts changed and no test file was touched
-- db/migrations/0041_add_index.sql is a data migration
+- The session cookie is set without the secure flag (src/auth/session.ts @@ -40,6 +40,7 @@ `secure: false,`)
+- A data migration adds an index without CONCURRENTLY (db/migrations/0041_add_index.sql @@ -0,0 +1,3 @@ `CREATE INDEX idx_orders_user ON orders (user_id);`)
+- No test file was touched.
 
 Where to look
-- session secret handling in src/auth/session.ts
+- cookie flags in src/auth/session.ts
 - whether 0041 needs a concurrent index build
 
-Read-only scope review. No code was changed.
+Not read: package-lock.json (no patch from GitHub)
+Read-only risk triage. No code was changed.
 ```
 
 ## Failure alerts
