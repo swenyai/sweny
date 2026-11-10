@@ -148,10 +148,11 @@ describe("recordTrySvg", () => {
     expect(svg).toContain("npm run build");
     expect(svg).not.toContain("npm run typecheck");
     expect(svg).not.toContain("Dockerfile");
-    // a short answer is shown whole
+    // a list within the limit is shown whole, with no count
     const short = (await recordTrySvg(illustrativeFixture())).replace(new RegExp(NBSP, "g"), " ");
-    expect(short).toContain("npm start (serves on http://localhost:3000)");
-    expect(short).not.toMatch(/\(\d+ of \d+\):/);
+    expect(short).toContain("How to run it (2 of 4):");
+    expect(short).toContain("The README does not mention the PORT or DB_PATH");
+    expect(short).toContain("Watch out for:");
   });
 
   it("lays out by explicit columns: no reliance on whitespace handling", async () => {
