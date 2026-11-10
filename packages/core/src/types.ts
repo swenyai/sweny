@@ -345,6 +345,43 @@ export interface EvaluatorRule {
   output_required?: string[];
   /** Each assertion must hold against `result.data`. (`value` rules.) */
   output_matches?: OutputMatch[];
+  /**
+   * Every id and URL in `result.data` must appear in what the agent saw: its
+   * successful tool outputs, plus (by default) the workflow input and prior
+   * nodes' context. (`function` rules only.) See {@link OutputGroundedRule}.
+   */
+  output_grounded?: OutputGroundedRule;
+}
+
+/**
+ * Config for the `output_grounded` check (#580). Every field is optional;
+ * `{}` scans the whole output for URLs, `owner/repo#N` refs and issue keys.
+ */
+export interface OutputGroundedRule {
+  /** Paths into `result.data` whose strings are scanned with `patterns`. Default: the whole output. */
+  paths?: string[];
+  /** Paths whose string or number values are each one id, checked whole (e.g. `items[*].ticket_id`). */
+  ids?: string[];
+  /**
+   * What counts as an id in scanned text: built-in names `url`, `github_ref`
+   * (`owner/repo#123`), `issue_key` (`ENG-123`), or a JavaScript regex source
+   * (its first capture group is the id when it has one). Default: all built-ins.
+   */
+  patterns?: string[];
+  /** Constants that always pass (URLs compared normalized). */
+  allow?: string[];
+  /** Only these tools' outputs count as evidence (alias-expanded). Default: every successful tool call. */
+  tools?: string[];
+  /** The workflow input counts as evidence. Default `true`. */
+  inputs?: boolean;
+  /** Prior nodes' context (what this node's prompt was given) counts as evidence. Default `true`. */
+  context?: boolean;
+  /**
+   * Fail an id seen only in the input or prior context when this node's tool
+   * outputs returned other ids of the same kind (same issue-key prefix, same
+   * repo, same URL collection) but not this one. Default `false`.
+   */
+  stale?: boolean;
 }
 
 /**

@@ -173,6 +173,20 @@ export const evalPolicyZ = z.enum(EVAL_POLICIES);
  */
 const SUPPORTED_EVAL_POLICIES = new Set<string>(["all_pass"]);
 
+/** `output_grounded` config (#580). Mirrors `OutputGroundedRule` in types.ts. */
+export const outputGroundedZ = z
+  .object({
+    paths: z.array(z.string().min(1)).min(1).optional(),
+    ids: z.array(z.string().min(1)).min(1).optional(),
+    patterns: z.array(z.string().min(1)).min(1).optional(),
+    allow: z.array(z.string().min(1)).min(1).optional(),
+    tools: z.array(z.string().min(1)).min(1).optional(),
+    inputs: z.boolean().optional(),
+    context: z.boolean().optional(),
+    stale: z.boolean().optional(),
+  })
+  .strict();
+
 export const evaluatorRuleZ = z
   .object({
     any_tool_called: z.array(z.string().min(1)).min(1).optional(),
@@ -180,6 +194,7 @@ export const evaluatorRuleZ = z
     no_tool_called: z.array(z.string().min(1)).min(1).optional(),
     output_required: z.array(z.string().min(1)).min(1).optional(),
     output_matches: z.array(outputMatchZ).min(1).optional(),
+    output_grounded: outputGroundedZ.optional(),
   })
   .strict()
   .refine(
@@ -188,10 +203,11 @@ export const evaluatorRuleZ = z
       r.all_tools_called !== undefined ||
       r.no_tool_called !== undefined ||
       r.output_required !== undefined ||
-      r.output_matches !== undefined,
+      r.output_matches !== undefined ||
+      r.output_grounded !== undefined,
     {
       message:
-        "evaluator rule must declare at least one of: any_tool_called, all_tools_called, no_tool_called, output_required, output_matches",
+        "evaluator rule must declare at least one of: any_tool_called, all_tools_called, no_tool_called, output_required, output_matches, output_grounded",
     },
   );
 
@@ -226,6 +242,14 @@ export const evaluatorZ = z
           code: z.ZodIssueCode.custom,
           message: `evaluator '${e.name}' (kind: ${e.kind}) must declare a rule`,
           path: ["rule"],
+        });
+      }
+      // output_grounded reads the tool trace; a value evaluator would skip it and pass silently.
+      if (e.kind === "value" && e.rule?.output_grounded !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `evaluator '${e.name}' declares output_grounded on kind: value; output_grounded reads the tool trace, so declare it on kind: function`,
+          path: ["rule", "output_grounded"],
         });
       }
       if (e.rubric !== undefined || e.pass_when !== undefined || e.model !== undefined) {
@@ -1059,6 +1083,22 @@ export const workflowJsonSchema = {
             no_tool_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
             output_required: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
             output_matches: { type: "array", items: { $ref: "#/$defs/OutputMatch" }, minItems: 1 },
+            output_grounded: {
+              type: "object",
+              description:
+                "function only. Every id and URL in the output must appear in the node's successful tool outputs, the workflow input or prior nodes' context.",
+              additionalProperties: false,
+              properties: {
+                paths: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+                ids: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+                patterns: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+                allow: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+                tools: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+                inputs: { type: "boolean" },
+                context: { type: "boolean" },
+                stale: { type: "boolean" },
+              },
+            },
           },
         },
         rubric: {
@@ -1092,6 +1132,11 @@ export const workflowJsonSchema = {
               anyOf: [{ required: ["rubric"] }, { required: ["pass_when"] }, { required: ["model"] }],
             },
           },
+        },
+        {
+          // output_grounded reads the tool trace: function only.
+          if: { properties: { kind: { const: "value" } } },
+          then: { properties: { rule: { not: { required: ["output_grounded"] } } } },
         },
         {
           if: { properties: { kind: { const: "judge" } } },

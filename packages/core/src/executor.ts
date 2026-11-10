@@ -1180,6 +1180,9 @@ async function executeRun(
             claude: judgeClaude,
             node,
             workflow,
+            // What the prompt was given: evidence for output_grounded (#580).
+            context,
+            nodeId: currentId,
             sequential: budgetOn,
             ...(signal ? { signal } : {}),
             ...(timeoutMs !== undefined ? { timeoutMs } : {}),

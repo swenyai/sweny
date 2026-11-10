@@ -165,6 +165,62 @@
                 "$ref": "#/$defs/OutputMatch"
               },
               "minItems": 1
+            },
+            "output_grounded": {
+              "type": "object",
+              "description": "function only. Every id and URL in the output must appear in the node's successful tool outputs, the workflow input or prior nodes' context.",
+              "additionalProperties": false,
+              "properties": {
+                "paths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minItems": 1
+                },
+                "ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minItems": 1
+                },
+                "patterns": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minItems": 1
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minItems": 1
+                },
+                "tools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minItems": 1
+                },
+                "inputs": {
+                  "type": "boolean"
+                },
+                "context": {
+                  "type": "boolean"
+                },
+                "stale": {
+                  "type": "boolean"
+                }
+              }
             }
           }
         },
@@ -208,6 +264,24 @@
                   "required": ["model"]
                 }
               ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "value"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "rule": {
+                "not": {
+                  "required": ["output_grounded"]
+                }
+              }
             }
           }
         },

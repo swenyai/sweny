@@ -611,6 +611,58 @@ A tool "was called and succeeded" when it appears in the node's tool-call trace 
 
 The `function` kind is also the natural home for any future code-based check (for example, "the diff touched fewer than 10 files"). v1 covers tool-call assertions; the kind is intentionally named `function` rather than `tool_call` to leave that door open.
 
+#### `output_grounded`: ids and links the agent actually saw
+
+A `function` rule that fails the node when its output cites an id or URL the agent never saw. Every id and URL in `result.data` must appear in the evidence: the outputs of the node's own successful tool calls, plus, by default, the workflow input and the prior nodes' context the prompt was given. It is deterministic and makes no model call.
+
+```yaml
+eval:
+  - name: cites_only_seen
+    kind: function
+    rule:
+      output_grounded:
+        paths: ["items[*].body"] # scan these strings (default: the whole output)
+        ids: ["items[*].ticket_id"] # each value here is one id, checked whole
+        allow: ["https://docs.example.com/runbook"] # constants that always pass
+        inputs: true # the workflow input is evidence (default)
+        stale: true # see below (default false)
+```
+
+`output_grounded: {}` is a valid rule: it scans every string in the output with the built-in patterns. A failure names each offending value and its path:
+
+```
+eval failed (policy: all_pass):
+  - cites_only_seen (function): output_grounded: 1 value(s) not grounded in tool outputs, inputs or prior context: items[2].body "https://github.com/acme/api/pull/918"
+```
+
+| Field      | Type     | Default       | Meaning                                                                                                                                              |
+| ---------- | -------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `paths`    | string[] | whole output  | [Paths](#path-grammar) whose strings are scanned with `patterns`. A path that does not resolve has nothing to check; a malformed one fails the rule. |
+| `ids`      | string[] | none          | Paths whose string or number values are each one id, checked whole (for ids no pattern recognizes, like `4821`).                                     |
+| `patterns` | string[] | all built-ins | `url`, `github_ref` (`owner/repo#123`), `issue_key` (`ENG-123`), or a JavaScript regex source; its first capture group is the id when it has one.    |
+| `allow`    | string[] | none          | Constants that always pass. Exact match; URLs are compared normalized.                                                                               |
+| `tools`    | string[] | every tool    | Only these tools' outputs count as evidence (skill aliases apply).                                                                                   |
+| `inputs`   | boolean  | `true`        | The workflow input counts as evidence. `false` requires every id to come from a tool or a prior node.                                                |
+| `context`  | boolean  | `true`        | Prior nodes' context counts as evidence. The node's own earlier visit (in a loop) never does.                                                        |
+| `stale`    | boolean  | `false`       | Fail an id seen only in the input or prior context when this node's tools returned other ids of the same kind and not this one.                      |
+
+Matching rules:
+
+- A URL matches when its normalized form does: scheme and host lowercased, default port, fragment and trailing slash dropped. Path and query stay case-sensitive. Sentence punctuation after a URL in prose is not part of it.
+- An `owner/repo#N` ref also matches a `/owner/repo/issues/N` or `/owner/repo/pull/N` URL a tool returned.
+- Other ids match as whole tokens: `ENG-12` is not grounded by `ENG-123`, and `48` is not grounded by `4821`.
+- An id inside a URL is checked once, as the URL.
+- Only successful tool calls count. A tool's input is never evidence, and neither is an error output.
+
+Limits, stated plainly:
+
+- **Evidence is what the harness traced.** Anything a tool returned counts, including a shell that echoes text or a subagent's summary. To close that, deny the shell or set `tools` to the tools you trust.
+- **Grounding is per node.** A prior node's output is evidence for the next node even if that node invented it. Put the evaluator on the node that first produces the id.
+- **`stale` is a heuristic.** "Same kind" means the same issue-key prefix, the same `owner/repo`, the same URL collection (the URL minus its last path segment), or the same custom pattern. It catches "the input names OPS-7, and the open-tickets listing this node fetched does not include it". A paginated or filtered listing can flag a valid id, which is why it is opt-in. It does not detect a changed status or title on an id the tool did return.
+- **`issue_key` matches things like `UTF-8` and `SHA-256`.** Add them to `allow`, or choose `patterns`.
+- **Short ids are weak.** A whole-value id like `7` is grounded by any `7` token in the evidence. The check is strongest on URLs and prefixed keys.
+- **Retries and resume.** The evaluated attempt's own tool calls are the evidence; each retry is checked against its own. Tool outputs are held in memory for the check and never journaled. The verdict is journaled like any other `EvalResult`, so a node replayed on resume keeps it and is not re-checked; a node that re-runs on resume is checked against its new tool outputs.
+
 #### `judge`: LLM-as-judge
 
 Calls a small, fast model through the node's agent harness with the node's data, the node's tool-call trace, and the author's rubric. The judge returns a single verdict word (default `yes` / `no`) plus a short reasoning string. Use when the contract is conditional, semantic, or otherwise outside the reach of a deterministic rule.
