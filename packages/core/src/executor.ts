@@ -69,7 +69,7 @@ import { createRunDecider, wantsDecider } from "./decider.js";
 import type { DeciderOperatorConfig, RunDecider } from "./decider.js";
 import { redact, runSecretValues } from "./journal.js";
 import type { Budget, BudgetOverrun } from "./budget.js";
-import { buildNodePolicy, resolveNodePermissions } from "./node-policy.js";
+import { buildNodePolicy, hasNodePolicy, resolveNodePermissions } from "./node-policy.js";
 import {
   applySafeOutputs,
   createEmitOutputTool,
@@ -658,8 +658,8 @@ async function executeRun(
     // #365: `permissions: read` (explicit, inherited, or implied by `outputs`)
     // gets the same tool gate as a dry run.
     const permissions = resolveNodePermissions(node, workflow);
-    const declaresPolicy =
-      node.permissions !== undefined || workflow.permissions !== undefined || (node.outputs?.length ?? 0) > 0;
+    // #598: a spec v2 node with nothing declared is `read`, a policy like any other.
+    const declaresPolicy = hasNodePolicy(node, workflow);
     const readOnlyNode = dryRun || permissions.access === "read";
     // A staged run (--stage, safe_outputs.staged) writes nothing either: its
     // write tools are withheld too, and the dispatcher below refuses any that

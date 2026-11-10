@@ -37,6 +37,8 @@ const v2to3: Migration = {
   migrate: (raw) => ({ ...raw, description: raw.description ?? `About ${String(raw.name)}` }),
 };
 const FAKE: MigrationConfig = { current: 3, migrations: [v1to2, v2to3] };
+/** A registry where v1 is current, for the "stamp only" path. */
+const V1_ONLY: MigrationConfig = { current: 1, migrations: [] };
 const IDENTITY: MigrationConfig = {
   current: 2,
   migrations: [{ from: 1, to: 2, description: "identity", migrate: (raw) => ({ ...raw }) }],
@@ -76,19 +78,19 @@ describe("registry", () => {
 describe("spec_version default", () => {
   const base = { id: "d", name: "D", entry: "a", nodes: { a: { name: "A", instruction: "x", skills: [] } }, edges: [] };
 
-  it("a file without spec_version loads as v1 with no warning", () => {
+  it("a file without spec_version loads as v1, migrated in memory to the current version", () => {
     const r = validateParsed(base);
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.warnings).toBeUndefined();
-      expect(r.workflow.spec_version).toBeUndefined();
+      expect(r.workflow.spec_version).toBe(String(CURRENT_SPEC_VERSION));
+      expect(r.warnings?.[0]).toContain('spec_version "1"');
     }
   });
   it("accepts spec_version as string or YAML number and normalizes to a string", () => {
-    for (const v of ["1", 1]) {
+    for (const v of ["1", 1, "2", 2]) {
       const r = validateParsed({ ...base, spec_version: v });
       expect(r.ok).toBe(true);
-      if (r.ok) expect(r.workflow.spec_version).toBe("1");
+      if (r.ok) expect(r.workflow.spec_version).toBe("2");
     }
   });
   it("rejects a malformed spec_version", () => {
@@ -175,8 +177,8 @@ describe("too-new refusal", () => {
       expect(r.errors[0].message).toContain("Upgrade sweny");
     }
   });
-  it("refuses v2 on the built-in registry (current is v1)", () => {
-    const r = validateParsed({ id: "d", spec_version: "2" });
+  it("refuses v3 on the built-in registry (current is v2)", () => {
+    const r = validateParsed({ id: "d", spec_version: "3" });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errors[0].message).toContain("Upgrade sweny");
   });
@@ -217,10 +219,10 @@ describe("sweny workflow upgrade", () => {
     }
   });
   it("is a no-op on a file already at the current version", () => {
-    const f = tmpFile("wf.yml", `spec_version: "1"\nid: demo\nname: Demo\n${BODY}`);
+    const f = tmpFile("wf.yml", `spec_version: "2"\nid: demo\nname: Demo\n${BODY}`);
     try {
       const before = readFileSync(f.path, "utf-8");
-      expect(upgradeWorkflowFile(f.path)).toEqual({ status: "current", version: 1 });
+      expect(upgradeWorkflowFile(f.path)).toEqual({ status: "current", version: 2 });
       expect(readFileSync(f.path, "utf-8")).toBe(before);
     } finally {
       f.cleanup();
@@ -229,7 +231,7 @@ describe("sweny workflow upgrade", () => {
   it("stamps spec_version on a current file that omits it, preserving the rest", () => {
     const f = tmpFile("wf.yml", `# keep me\nid: demo\nname: Demo # inline\n${BODY}`);
     try {
-      const r = upgradeWorkflowFile(f.path);
+      const r = upgradeWorkflowFile(f.path, { migration: V1_ONLY });
       expect(r.status).toBe("upgraded");
       const text = readFileSync(f.path, "utf-8");
       expect(text.startsWith("# keep me\nspec_version:")).toBe(true);

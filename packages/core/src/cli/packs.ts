@@ -13,6 +13,7 @@
  *   - safe outputs (#365): every GitHub write (issue, comment) is a declared
  *     output with a cap, and a pin or title prefix where one applies; sweny
  *     applies it after the node. No node holds a GitHub write tool.
+ *   - spec_version 2 (#598): a node with no `permissions` is read-only
  *   - least privilege: a workflow-level `permissions` ceiling, and every node
  *     is `read` except a delivery node that needs a write no safe output
  *     covers (Slack); its write tools are named in `pack.writes` and its tool
@@ -23,7 +24,8 @@
 
 import type { WorkflowTemplate } from "./templates.js";
 
-const DIGEST_YAML = `id: weekly-digest
+const DIGEST_YAML = `spec_version: "2"
+id: weekly-digest
 name: Weekly Repo Digest
 description: What changed in this repo in the last week (commits, merged PRs, issues opened and closed, risky files touched), delivered to an issue or Slack.
 workflow_type: generic
@@ -429,7 +431,8 @@ Watch next week
 - Add a test for session rotation (src/auth/session.ts)
 `;
 
-const DRIFT_YAML = `id: dependency-drift
+const DRIFT_YAML = `spec_version: "2"
+id: dependency-drift
 name: Dependency and Security Drift
 description: Weekly. Reads lockfiles and open Dependabot alerts, then files one deduped issue with what matters and why. Read-only otherwise.
 workflow_type: generic
@@ -808,7 +811,8 @@ Drift
 9 lower-severity or dev-only alerts deferred.
 `;
 
-const RISK_YAML = `id: pr-risk-review
+const RISK_YAML = `spec_version: "2"
+id: pr-risk-review
 name: PR Risk Review
 description: Read-only risk review of a pull request from its scope (files, size, tests touched, risky areas). Posts one comment. Never writes code.
 workflow_type: pr_review
@@ -1023,6 +1027,7 @@ nodes:
       - type: comment
         max: 1
         number: { input: pr_number }
+        target: { input: repo }
     max_turns: 4
     output:
       type: object

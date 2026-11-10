@@ -112,7 +112,7 @@ import type { Logger, NodeResult, NodeUsage, RouteRung, Skill, Tool, ToolContext
 import { isRefusal, refusalReason } from "./types.js";
 import type { SafeOutputIntent, WriteStageState } from "./safe-outputs.js";
 import { resolveNodePermissions } from "./node-policy.js";
-import { CURRENT_SPEC_VERSION } from "./migrations.js";
+import { effectiveSpecVersion } from "./migrations.js";
 import { spendOf, type SeedSpend, type Spend, type SpendKind } from "./budget.js";
 import type { DeciderCounters } from "./decider.js";
 
@@ -160,10 +160,11 @@ export function canonicalHash(value: unknown): string {
 /**
  * Hash of the workflow a journal is bound to: the canonical workflow plus its
  * effective `spec_version` (#469), so a file that only changes spec version
- * (and therefore migrations) is a different workflow for resume.
+ * (and therefore migrations) is a different workflow for resume. Absent means
+ * 1, the version such a workflow runs as (#598), not the current one.
  */
 export function workflowHashOf(workflow: Workflow): string {
-  return canonicalHash({ ...workflow, spec_version: workflow.spec_version ?? String(CURRENT_SPEC_VERSION) });
+  return canonicalHash({ ...workflow, spec_version: String(effectiveSpecVersion(workflow)) });
 }
 
 /** Hash of what the nodes were told: every resolved instruction, rule and context Source. */

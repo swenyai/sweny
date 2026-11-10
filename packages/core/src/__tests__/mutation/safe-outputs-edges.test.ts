@@ -1256,7 +1256,7 @@ describe("safe outputs: closing needs a pinned repository", () => {
 
   it("the agent cannot name the repository it closes in", async () => {
     expect(await receiptsOf({ declarations: decl, intents: [close()], env: {} })).toStrictEqual([
-      refused("issue_state", "close needs a pinned repository", at),
+      refused("issue_state", "pinned output needs a trusted repository", { via: "github" }),
     ]);
   });
 
@@ -1275,8 +1275,16 @@ describe("safe outputs: closing needs a pinned repository", () => {
     expect(fromRun.map((r) => r.status)).toStrictEqual(["applied"]);
   });
 
-  it("reopening needs no repository pin", async () => {
-    const r = await receiptsOf({ declarations: decl, intents: [close({ state: "reopen" })], env: {} });
-    expect(r.map((x) => x.status)).toStrictEqual(["applied"]);
+  it("reopening a pinned issue needs a trusted repository too (#598); an unpinned reopen does not", async () => {
+    const pinned = await receiptsOf({ declarations: decl, intents: [close({ state: "reopen" })], env: {} });
+    expect(pinned).toStrictEqual([
+      refused("issue_state", "pinned output needs a trusted repository", { via: "github" }),
+    ]);
+    const unpinned = await receiptsOf({
+      declarations: [{ type: "issue_state" as const, state: "reopen" as const }],
+      intents: [close({ state: "reopen" })],
+      env: {},
+    });
+    expect(unpinned.map((x) => x.status)).toStrictEqual(["applied"]);
   });
 });

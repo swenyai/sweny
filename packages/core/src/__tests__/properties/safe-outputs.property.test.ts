@@ -417,8 +417,10 @@ describe("safe outputs: a close only lands on the pinned issue", () => {
             expect(String(call.input.repo).toLowerCase()).toBe(pinnedRepo!.toLowerCase());
             expect(s.declState === undefined || s.declState === "close").toBe(true);
           }
-          // Any write on a pinned declaration lands on the pin, and nowhere else.
+          // Any write on a pinned declaration lands on the pin, and nowhere else,
+          // in a repository from the declaration or the run, never the agent (#598).
           if (pin !== undefined) expect(n).toBe(Number(pin));
+          if (s.pin !== undefined) expect(pinnedRepo).toBeDefined();
           if (pinnedRepo) expect(String(call.input.repo).toLowerCase()).toBe(pinnedRepo.toLowerCase());
         }
 
@@ -428,7 +430,8 @@ describe("safe outputs: a close only lands on the pinned issue", () => {
           if (!pinValid) return false;
           if (i.number !== undefined && norm(i.number) !== norm(pin!)) return false;
           if (i.target && pinnedRepo && i.target.toLowerCase() !== pinnedRepo.toLowerCase()) return false;
-          if (!(i.target ?? pinnedRepo)) return false;
+          // A pinned declaration never takes its repository from the intent (#598).
+          if (!pinnedRepo) return false;
           const asked = i.state?.trim().toLowerCase() || s.declState;
           // A close never takes its repository from the intent.
           if (asked === "close" && !pinnedRepo) return false;
