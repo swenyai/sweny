@@ -205,6 +205,46 @@ export function compileClaudeCodeDeny(policy: NodePolicy, legacy: readonly strin
   ];
 }
 
+/**
+ * The only Claude Code built-in tools a node may get, by policy. Every node
+ * reads and searches the checkout; a read-only node may also search the web
+ * (no arbitrary URL fetch); a write node adds the shell, file-edit, URL-fetch
+ * and subagent built-ins (its `tools.deny` classes and `disallowed_tools`
+ * names then leave the list).
+ *
+ * Passed as the SDK's `tools` option, which "Specif[ies] the base set of
+ * available built-in tools" (sdk.d.ts); `allowedTools` only auto-approves
+ * ("To restrict which tools are available, use the `tools` option instead").
+ * Anything not named here never reaches a node: agent-to-agent messaging
+ * (SendMessage, ListAgents), scheduling (Cron*, ScheduleWakeup), remote
+ * triggers, notifications, worktrees, design sync, Skill, Workflow and
+ * ToolSearch (added back only while a server defers its tools, see
+ * {@link runQuery}). Dogfood run 42890468912 listed 23 tools for a read-only
+ * node that needed two.
+ */
+export const CLAUDE_READ_ONLY_BUILTIN_TOOLS = ["Read", "Grep", "Glob", "WebSearch"] as const;
+export const CLAUDE_WRITE_BUILTIN_TOOLS = [
+  "Read",
+  "Grep",
+  "Glob",
+  ...CLAUDE_TOOLS_BY_CLASS.shell,
+  ...CLAUDE_TOOLS_BY_CLASS.write,
+  ...CLAUDE_TOOLS_BY_CLASS.edit,
+  ...CLAUDE_TOOLS_BY_CLASS.net,
+  ...CLAUDE_TOOLS_BY_CLASS.subagent,
+] as const;
+
+/**
+ * The built-in allow-list for one node: the policy's list minus every name the
+ * compiled deny list removes. Path-scoped rules (`Read(//dir/**)`) narrow a
+ * tool, they do not remove it, so they are not matched here.
+ */
+export function claudeCodeBuiltinTools(policy: { readOnly: boolean }, deny: readonly string[] = []): string[] {
+  const denied = new Set(deny);
+  const base: readonly string[] = policy.readOnly ? CLAUDE_READ_ONLY_BUILTIN_TOOLS : CLAUDE_WRITE_BUILTIN_TOOLS;
+  return base.filter((t) => !denied.has(t));
+}
+
 /** How sweny resolves which credentials reach the Claude Code subprocess. */
 export type SwenyAuthMode = "auto" | "api-key" | "oauth";
 
@@ -797,6 +837,21 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       } else if (sdkTools.length > 0) {
         allMcpServers["sweny-core"] = mcpServer;
       }
+      // Deterministic tool loading: when every server loads its tools up front
+      // (sweny-core always does; a node's skill servers do unless they opt out),
+      // tool search has nothing to defer, so it is off and ToolSearch is not on
+      // the list. `ENABLE_TOOL_SEARCH=false` is the bundled CLI's switch (its
+      // own docs: "To turn it off ... set `ENABLE_TOOL_SEARCH` to `false`"; CLI
+      // 0.3.319 drops ToolSearch from the init tool list with it). A client-level
+      // server not marked alwaysLoad keeps tool search, and ToolSearch, so its
+      // deferred tools stay reachable.
+      const defers = Object.entries(allMcpServers).some(
+        ([name, cfg]) => name !== "sweny-core" && cfg?.alwaysLoad !== true,
+      );
+      if (!defers) env.ENABLE_TOOL_SEARCH = "false";
+      const builtinTools = opts.nativeNone
+        ? []
+        : [...claudeCodeBuiltinTools({ readOnly: !!readOnly }, disallowedTools), ...(defers ? ["ToolSearch"] : [])];
 
       stream = query({
         prompt,
@@ -824,10 +879,13 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
           strictMcpConfig: true,
           settingSources: [],
           ...(disallowedTools && disallowedTools.length > 0 ? { disallowedTools } : {}),
-          // permissions.native: none. `tools: []` removes every built-in tool whatever its
-          // name; `settingSources: []` loads no user, project or local settings, CLAUDE.md or skills
-          // (already the default above since #497; kept so the policy value states its whole contract).
-          ...(opts.nativeNone ? { tools: [], settingSources: [] } : {}),
+          // Least privilege: only the built-ins this node's policy names (see
+          // CLAUDE_WRITE_BUILTIN_TOOLS). permissions.native: none passes `tools: []`,
+          // which removes every built-in tool whatever its name.
+          tools: builtinTools,
+          // `settingSources: []` loads no user, project or local settings, CLAUDE.md or skills
+          // (already the default above since #497; kept so native: none states its whole contract).
+          ...(opts.nativeNone ? { settingSources: [] } : {}),
           // CC-08: ask the SDK to produce validated structured output when the
           // node declares an output schema. The SDK then returns the parsed
           // value on `result.structured_output`, which we prefer over the
@@ -838,10 +896,20 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
 
       for await (const message of stream) {
         if (message.type === "system" && (message as any).subtype === "init") {
-          // What the agent was actually given: the tool list (--verbose) and,
-          // loudly, a node tool server that did not come up.
+          // What the agent was actually given: the tool names at info (never
+          // inputs) and, as warnings that reach a non-verbose log, a node tool
+          // or tool server that did not make it onto the list.
           const init = message as any;
-          if (Array.isArray(init.tools)) this.logger.debug(`  agent tools: ${init.tools.join(", ")}`);
+          if (Array.isArray(init.tools)) {
+            this.logger.info(`  agent tools: ${init.tools.join(", ")}`);
+            const listed = new Set<string>(init.tools);
+            const absent = allMcpServers["sweny-core"]
+              ? tools.map((t) => t.name).filter((n) => !listed.has(`mcp__sweny-core__${n}`))
+              : [];
+            if (absent.length > 0) {
+              this.logger.warn(`  node tools missing from the agent's tool list: ${absent.join(", ")}`);
+            }
+          }
           const core = Array.isArray(init.mcp_servers)
             ? init.mcp_servers.find((s: any) => s?.name === "sweny-core")
             : undefined;

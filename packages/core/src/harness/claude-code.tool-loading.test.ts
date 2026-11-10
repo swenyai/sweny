@@ -158,14 +158,14 @@ describe("pr-risk-review scope node on Claude Code: skill tools are on the turn-
     );
     const { ClaudeCodeHarness } = await import("./claude-code.js");
     const { github } = await import("../skills/index.js");
-    const logs = { warn: [] as string[], debug: [] as string[] };
+    const logs = { warn: [] as string[], info: [] as string[] };
     const logger = {
       ...silent,
       warn: (m: string) => void logs.warn.push(m),
-      debug: (m: string) => void logs.debug.push(m),
+      info: (m: string) => void logs.info.push(m),
     };
     await new ClaudeCodeHarness({ logger }).run({ instruction: "x", context: {}, tools: github.tools.slice(0, 1) });
-    expect(logs.debug).toContain("  agent tools: Read, StructuredOutput");
+    expect(logs.info).toContain("  agent tools: Read, StructuredOutput");
     expect(logs.warn.some((m) => m.includes("sweny-core tool server is failed"))).toBe(true);
   });
 

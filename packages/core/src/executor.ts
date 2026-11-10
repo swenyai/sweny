@@ -36,12 +36,15 @@ import type {
   Source,
   ResolvedSource,
   EvalResult,
+  Evaluator,
+  ToolCall,
   RouteRung,
 } from "./types.js";
 import { consoleLogger } from "./types.js";
 import { resolveSources } from "./source-resolver.js";
 import { evaluateAll, aggregateEval } from "./eval/index.js";
-import type { AggregateOutcome } from "./eval/index.js";
+import type { AggregateOutcome, ToolAliases } from "./eval/index.js";
+import { checkAllToolsCalled, checkAnyToolCalled, checkNoToolCalled } from "./eval/function.js";
 import { evaluateRequires } from "./requires.js";
 import { evaluateExpression, isWhenExpression, parseExpression, whenLabel } from "./when.js";
 import type { ExpressionResult, ExpressionScope, ExprNode } from "./when.js";
@@ -836,6 +839,8 @@ async function executeRun(
     let currentInstruction = instruction;
     // One structured-output repair per visit (#357), before any eval retry.
     let repaired = false;
+    // One required-tool repair per visit, before any eval retry.
+    let toolRepaired = false;
     const retry = node.retry;
     // Per-node execution model: node.model ?? workflow.model. When undefined,
     // claude.run falls back to its own client default (then Claude Code's).
@@ -967,8 +972,8 @@ async function executeRun(
       // Resume (#363): spend is journaled as it is reported, so a crash mid-node
       // does not hand the resumed run a fresh budget.
       const usageNode: string = currentId;
-      // The repair call (at most one) shifts later attempts by one, so every agent call has its own key.
-      const usageAttempt = attempt + (repaired ? 1 : 0);
+      // Each repair call (at most one of each) shifts later attempts by one, so every agent call has its own key.
+      const usageAttempt = attempt + (repaired ? 1 : 0) + (toolRepaired ? 1 : 0);
       let liveUsage: NodeUsage | undefined;
       // A live usage record the journal cannot write stops the agent at once:
       // its spend would be invisible to a resume.
@@ -1202,6 +1207,34 @@ async function executeRun(
         outcome = aggregateEval(evalResults, node.eval_policy ?? "all_pass");
       }
       if (outcome.pass) break;
+
+      // Required tools: a node whose only failures are `function` evals naming
+      // tools its agent never called gets one repair turn that names them,
+      // before any eval retry. Same footing as the output contract repair: part
+      // of this visit (no extra max_steps slot), its spend counted. Agents
+      // sometimes answer on turn 1 without the tools they were given (dogfood
+      // run 42890245104: `called: [StructuredOutput]`).
+      const uncalled = toolRepaired
+        ? []
+        : uncalledRequiredTools(node.eval, outcome.failures, result.toolCalls, toolAliases, skippedWrites);
+      if (uncalled.length > 0) {
+        toolRepaired = true;
+        logger.warn(`  required tools not called: ${uncalled.join(", ")}; asking the agent once to call them`, {
+          node: currentId,
+        });
+        safeObserve(
+          observer,
+          {
+            type: "node:warning",
+            node: currentId,
+            reason: "required tools not called; one repair attempt",
+            fields: uncalled,
+          },
+          logger,
+        );
+        currentInstruction = requiredToolsRepairInstruction(uncalled, currentInstruction);
+        continue;
+      }
 
       // Apply the failure to the result.
       result.status = "failed";
@@ -1924,6 +1957,55 @@ export function outputContractProblems(data: unknown, output: JSONSchema | undef
     }
   }
   return problems;
+}
+
+/**
+ * Required tools the agent never called, when that is the only reason a node
+ * failed its evals: every failure is a `function` evaluator, none saw a
+ * forbidden call, and every required tool it names is absent from the trace
+ * (not called and failed: that is the retry path's job). Empty otherwise,
+ * and empty when a missing tool was withheld from the node (dry or staged
+ * run): no turn can call it. An `any_tool_called` set reads "one of a, b".
+ */
+export function uncalledRequiredTools(
+  evaluators: Evaluator[] | undefined,
+  failures: EvalResult[],
+  toolCalls: ToolCall[],
+  aliases?: ToolAliases,
+  withheld: readonly string[] = [],
+): string[] {
+  const uncalled: string[] = [];
+  // A call to any of these (by name or alias), successful or not.
+  const invoked = (names: string[]) => checkNoToolCalled(names, toolCalls, aliases) !== null;
+  for (const failure of failures) {
+    const rule =
+      failure.kind === "function"
+        ? evaluators?.find((e) => e.kind === "function" && e.name === failure.name)?.rule
+        : undefined;
+    if (!rule) return [];
+    if (rule.no_tool_called && rule.no_tool_called.length > 0 && invoked(rule.no_tool_called)) return [];
+    for (const name of rule.all_tools_called ?? []) {
+      if (checkAllToolsCalled([name], toolCalls, aliases) === null) continue;
+      if (invoked([name]) || withheld.includes(name)) return [];
+      uncalled.push(name);
+    }
+    const any = rule.any_tool_called ?? [];
+    if (any.length > 0 && checkAnyToolCalled(any, toolCalls, aliases) !== null) {
+      if (invoked(any) || any.every((t) => withheld.includes(t))) return [];
+      uncalled.push(any.length === 1 ? any[0] : `one of ${any.join(", ")}`);
+    }
+  }
+  return [...new Set(uncalled)];
+}
+
+/** The repair turn for {@link uncalledRequiredTools}: names the tools, then the step again. */
+export function requiredToolsRepairInstruction(uncalled: string[], instruction: string): string {
+  const listed = uncalled.map((t) => `- ${t}`).join("\n");
+  return (
+    `This step requires these tools, and your previous attempt finished without calling them:\n${listed}\n\n` +
+    `Do the step again: call each listed tool, use what it returns, then return the complete output.` +
+    `\n\n---\n\n${instruction}`
+  );
 }
 
 /** The output fields of `nodeId` that some `{ expr }` in the workflow reads. */
