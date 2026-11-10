@@ -132,6 +132,8 @@ describe("ClaudeCodeHarness over the tool bridge", () => {
     expect(createSdkMcpServer).not.toHaveBeenCalled();
     expect(seen.cfg.type).toBe("stdio");
     expect(seen.cfg.args).toContain("tool-bridge");
+    // Loaded up front, not deferred behind ToolSearch (dogfood run 42884113267).
+    expect(seen.cfg.alwaysLoad).toBe(true);
     // Read-only filtering holds through the bridge.
     expect(seen.listed).toEqual(["get_thread"]);
     expect(seen.responses[1]).toMatchObject({ ok: false, error: { code: "unknown_tool" } });
