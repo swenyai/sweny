@@ -784,7 +784,7 @@ describe("Zod schemas", () => {
         nodes: { a: { name: "A", instruction: "Do A", model: "claude-haiku-4-5" } },
         edges: [],
       };
-      const result = workflowZ.parse(raw);
+      const result = workflowZ.parse(raw) as Workflow;
       expect(result.model).toBe("claude-opus-4-6");
       expect(result.nodes.a.model).toBe("claude-haiku-4-5");
     });

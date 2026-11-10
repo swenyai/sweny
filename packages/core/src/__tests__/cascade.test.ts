@@ -170,7 +170,7 @@ describe("spec: Zod parsing of rules/context", () => {
       rules: ["W-rule"],
       context: ["W-ctx"],
     };
-    const w = workflowZ.parse(raw);
+    const w = workflowZ.parse(raw) as Workflow;
     expect(w.rules).toEqual(["W-rule"]);
     expect(w.context).toEqual(["W-ctx"]);
     expect(w.nodes.a.rules).toEqual(["N-rule"]);
