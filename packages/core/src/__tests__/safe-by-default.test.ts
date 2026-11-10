@@ -28,6 +28,7 @@ import { loadAndValidateWorkflow, validateParsed } from "../loader.js";
 import { upgradeWorkflowFile } from "../cli/workflow-upgrade.js";
 import { WORKFLOW_TEMPLATES } from "../cli/templates.js";
 import { execute } from "../executor.js";
+import { buildSystemPrompt, buildWorkflow, refineWorkflow } from "../workflow-builder.js";
 import { createSkillMap, github } from "../skills/index.js";
 import type { Claude, Node, NodeResult, Skill, Tool, Workflow } from "../types.js";
 
@@ -454,6 +455,15 @@ describe("bundled templates are safe by default", () => {
       }
     });
 
+    it("every output pinned to an issue or PR pins its repository too", () => {
+      const wf = load(template.yaml);
+      for (const [nodeId, node] of Object.entries(wf.nodes)) {
+        for (const out of node.outputs ?? []) {
+          if (out.number !== undefined) expect(out.target, `${nodeId} ${out.type}`).toEqual({ input: "repo" });
+        }
+      }
+    });
+
     it("no node holds an agent credential", () => {
       const wf = load(template.yaml);
       for (const node of Object.values(wf.nodes)) expect(node.agent_env ?? []).toEqual([]);
@@ -476,7 +486,7 @@ describe("pr-review never approves", () => {
     const wf = load(template.yaml);
     expect(wf.safe_outputs?.allow).toEqual(["comment"]);
     const outputs = Object.values(wf.nodes).flatMap((n) => n.outputs ?? []);
-    expect(outputs).toEqual([{ type: "comment", max: 1, number: { input: "pr_number" } }]);
+    expect(outputs).toEqual([{ type: "comment", max: 1, number: { input: "pr_number" }, target: { input: "repo" } }]);
   });
 
   it("never tells the agent to approve, and the github skill has no approve tool", () => {
@@ -527,6 +537,42 @@ describe("every workflow file we ship or link loads with zero warnings", () => {
     expect(r.workflow.spec_version).toBe("2");
     expect(r.warnings).toBeUndefined();
   });
+
+  /** The nodes in each shipped file that may write. Every other node is read-only. */
+  const SHIPPED_WRITERS: Record<string, string[]> = {
+    "file-ops.yml": ["write", "delete"],
+    "monitor.yml": ["compare-baseline"],
+    "data-sync.yml": [],
+    "triage.yml": ["implement", "create_pr", "notify"],
+    "implement.yml": ["implement", "create_pr", "notify"],
+    "seed-content.yml": ["generate", "validate"],
+  };
+
+  it("the writers table covers every shipped file", () => {
+    expect(Object.keys(SHIPPED_WRITERS).sort()).toEqual(files.map((f) => f.split("/").pop()!).sort());
+  });
+
+  it.each(files)("%s: writes only from the nodes in the table, each declaring write itself", (file) => {
+    const r = loadAndValidateWorkflow(file);
+    if (!r.ok) throw new Error(r.errors.map((e) => e.message).join("; "));
+    const wf = r.workflow;
+    const writers = Object.entries(wf.nodes)
+      .filter(([, node]) => resolveNodePermissions(node, wf).access === "write")
+      .map(([nodeId]) => nodeId);
+    expect(writers.sort()).toEqual([...SHIPPED_WRITERS[file.split("/").pop()!]].sort());
+    for (const nodeId of writers) expect(ownAccess(wf.nodes[nodeId]), nodeId).toBe("write");
+  });
+
+  it.each(["triage.yml", "implement.yml"])(
+    "%s: notify writes only its notification (no shell, network, subagents)",
+    (name) => {
+      const r = loadAndValidateWorkflow(join(__dirname, "..", "workflows", name));
+      if (!r.ok) throw new Error(r.errors.map((e) => e.message).join("; "));
+      const notify = r.workflow.nodes.notify;
+      expect(notify.skills.sort()).toEqual(["notification", "slack"]);
+      expect(resolveNodePermissions(notify, r.workflow).deny.sort()).toEqual(["net", "shell", "subagent"]);
+    },
+  );
 });
 
 // ─── Approve directives in old review workflows ──────────────────
@@ -608,5 +654,51 @@ describe("a review node told to approve", () => {
 
   it("no bundled template warns", () => {
     for (const t of WORKFLOW_TEMPLATES) expect(approveDirectiveWarnings(load(t.yaml)), t.id).toEqual([]);
+  });
+});
+
+// ─── AI-generated workflows ──────────────────────────────────────
+
+describe("workflows the builder generates", () => {
+  const generated = {
+    id: "gen",
+    name: "Generated",
+    description: "",
+    entry: "a",
+    nodes: { a: { name: "A", instruction: "Look at the repo.", skills: [] } },
+    edges: [],
+  };
+  const claudeReturning = (data: Record<string, unknown>): Claude => ({
+    async run() {
+      return { status: "success", data, toolCalls: [] } as NodeResult;
+    },
+    async evaluate() {
+      throw new Error("no routing");
+    },
+    async ask() {
+      return "";
+    },
+  });
+
+  it("a new workflow is the current spec version, whatever the model said, so it starts read-only", async () => {
+    for (const data of [generated, { ...generated, spec_version: "1" }]) {
+      const wf = await buildWorkflow("explain the repo", { claude: claudeReturning(data), skills: [] });
+      expect(wf.spec_version).toBe(String(CURRENT_SPEC_VERSION));
+      expect(resolveNodePermissions(wf.nodes.a, wf).access).toBe("read");
+    }
+  });
+
+  it("a refined workflow keeps the version it had", async () => {
+    const v1 = { ...generated } as Workflow;
+    const refined = await refineWorkflow(v1, "rename it", {
+      claude: claudeReturning({ ...generated, spec_version: "2" }),
+      skills: [],
+    });
+    expect(refined.spec_version).toBeUndefined();
+    expect(resolveNodePermissions(refined.nodes.a, refined).access).toBe("write");
+  });
+
+  it("the builder prompt says nodes are read-only unless they declare a write", () => {
+    expect(buildSystemPrompt([])).toMatch(/read-only unless they declare otherwise/);
   });
 });

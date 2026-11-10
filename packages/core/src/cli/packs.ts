@@ -1027,6 +1027,7 @@ nodes:
       - type: comment
         max: 1
         number: { input: pr_number }
+        target: { input: repo }
     max_turns: 4
     output:
       type: object

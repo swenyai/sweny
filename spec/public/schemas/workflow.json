@@ -326,9 +326,24 @@
           "description": "Max writes of this type from this node per run. Default 1."
         },
         "target": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Pinned target (GitHub owner/repo, Linear team id). GitHub default: GITHUB_REPOSITORY."
+          "description": "Pinned target (GitHub owner/repo, Linear team id), or { input: <name> } to take it from a run input. GitHub default: GITHUB_REPOSITORY. An output that pins number never takes its GitHub repository from the agent.",
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "object",
+              "required": ["input"],
+              "additionalProperties": false,
+              "properties": {
+                "input": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          ]
         },
         "title_prefix": {
           "type": "string",

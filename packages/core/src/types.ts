@@ -645,8 +645,12 @@ export interface SafeOutputDeclaration {
   via?: string;
   /** Max writes of this type from this node per run. Default 1. */
   max?: number;
-  /** Pinned target (GitHub `owner/repo`, Linear team id). GitHub default: `GITHUB_REPOSITORY`. */
-  target?: string;
+  /**
+   * Pinned target (GitHub `owner/repo`, Linear team id), or `{ input: <name> }`
+   * to take it from a run input. GitHub default: `GITHUB_REPOSITORY`. An output
+   * pinned to an issue (`number`) never takes its GitHub repository from the agent (#598).
+   */
+  target?: SafeOutputTarget;
   /** Prepended to issue / PR titles that do not already start with it. */
   title_prefix?: string;
   /** issue / pr: labels always added. label: the only labels the agent may add. */
@@ -664,6 +668,9 @@ export interface SafeOutputDeclaration {
   /** issue_state only: the one change this output may make. Default: either. */
   state?: SafeOutputState;
 }
+
+/** A pinned target: a literal (`owner/repo`, team id), or the name of a run input that holds one. */
+export type SafeOutputTarget = string | { input: string };
 
 /** A pinned issue / PR: a literal number or identifier, or the name of a run input that holds one. */
 export type SafeOutputPin = string | number | { input: string };

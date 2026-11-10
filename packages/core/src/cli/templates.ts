@@ -116,7 +116,8 @@ inputs:
     required: true
 
 # Safe by default (spec_version 2): every node is read-only. The review is one
-# comment, a safe output pinned to pr_number, which sweny posts after
+# comment, a safe output pinned to pr_number in repo (else GITHUB_REPOSITORY),
+# never a repository the agent names, which sweny posts after
 # post-review. It never approves, merges, or pushes.
 permissions: read
 safe_outputs:
@@ -163,6 +164,7 @@ nodes:
       - type: comment
         max: 1
         number: { input: pr_number }
+        target: { input: repo }
 
 edges:
   - from: fetch-diff
@@ -233,10 +235,12 @@ nodes:
       - type: label
         max: 1
         number: { input: issue_number }
+        target: { input: repo }
         labels: [bug, feature, question, chore, P0, P1, P2, P3, needs-triage]
       - type: comment
         max: 1
         number: { input: issue_number }
+        target: { input: repo }
 
 edges:
   - from: classify
@@ -553,15 +557,11 @@ nodes:
       just report that no alert was needed.
     skills:
       - notification
-    # Write only for the notification tools: no built-in tools that change anything.
+    # Write only for the notification tools (all the notification skill holds):
+    # no built-in tools that change anything.
     permissions:
       access: write
       deny: [shell, write, edit, net, subagent]
-    tools:
-      allow:
-        - notify_webhook
-        - notify_discord
-        - notify_teams
 
 edges:
   - from: check-sources

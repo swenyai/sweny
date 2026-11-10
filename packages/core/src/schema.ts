@@ -366,7 +366,7 @@ export const safeOutputDeclarationZ = z
     type: z.enum(SAFE_OUTPUT_TYPES),
     via: z.string().min(1).optional(),
     max: z.number().int().min(1).max(SAFE_OUTPUT_MAX_CEILING).optional(),
-    target: z.string().min(1).optional(),
+    target: z.union([z.string().min(1), z.object({ input: z.string().min(1) }).strict()]).optional(),
     title_prefix: z.string().min(1).max(64).optional(),
     labels: z.array(z.string().min(1)).min(1).optional(),
     expires: z.string().regex(SAFE_OUTPUT_EXPIRES_PATTERN).optional(),
@@ -1186,9 +1186,17 @@ export const workflowJsonSchema = {
           description: "Max writes of this type from this node per run. Default 1.",
         },
         target: {
-          type: "string",
-          minLength: 1,
-          description: "Pinned target (GitHub owner/repo, Linear team id). GitHub default: GITHUB_REPOSITORY.",
+          description:
+            "Pinned target (GitHub owner/repo, Linear team id), or { input: <name> } to take it from a run input. GitHub default: GITHUB_REPOSITORY. An output that pins number never takes its GitHub repository from the agent.",
+          oneOf: [
+            { type: "string", minLength: 1 },
+            {
+              type: "object",
+              required: ["input"],
+              additionalProperties: false,
+              properties: { input: { type: "string", minLength: 1 } },
+            },
+          ],
         },
         title_prefix: {
           type: "string",
