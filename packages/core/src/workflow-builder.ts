@@ -96,10 +96,7 @@ export function buildSystemPrompt(skills: Skill[], existingWorkflow?: Workflow):
  * adds a `summary` key from the text response. We strip `summary`
  * and any other non-workflow keys before parsing.
  */
-export function extractWorkflow(
-  data: Record<string, unknown>,
-  specVersion: string | undefined = String(CURRENT_SPEC_VERSION),
-): Workflow {
+export function extractWorkflow(data: Record<string, unknown>, keep?: Pick<Workflow, "spec_version">): Workflow {
   // Remove keys added by ClaudeClient that aren't part of the workflow schema.
   // The spec version is ours to set, never the model's (#598): a new workflow is
   // current (read-only by default), a refined one keeps the version it had.
@@ -108,6 +105,8 @@ export function extractWorkflow(
     spec_version: _modelVersion,
     ...body
   } = data as { summary?: unknown; spec_version?: unknown } & Record<string, unknown>;
+  // `keep` (a refine) holds the version the workflow had, possibly none; a build gets the current one.
+  const specVersion = keep ? keep.spec_version : String(CURRENT_SPEC_VERSION);
   const rest = specVersion === undefined ? body : { spec_version: specVersion, ...body };
 
   // workflowZ.parse throws a ZodError on invalid input
@@ -224,5 +223,5 @@ export async function refineWorkflow(
     throw new Error(`Claude failed to refine workflow: ${result.data.error ?? "unknown error"}`);
   }
 
-  return extractWorkflow(result.data, workflow.spec_version);
+  return extractWorkflow(result.data, { spec_version: workflow.spec_version });
 }
