@@ -157,8 +157,8 @@ edges:
 `;
 
 describe("spec v1 -> v2 migration", () => {
-  it("the built-in registry reads v2 natively", () => {
-    expect(CURRENT_SPEC_VERSION).toBe(2);
+  it("the built-in registry reads v3 natively", () => {
+    expect(CURRENT_SPEC_VERSION).toBe(3);
   });
 
   it("declares the v1 write on each node that relied on the default, and nothing else", () => {
@@ -168,7 +168,7 @@ describe("spec v1 -> v2 migration", () => {
     if (!r.ok) return;
     expect(JSON.stringify(V1)).toBe(before); // pure
     const nodes = r.workflow.nodes as Record<string, Record<string, unknown>>;
-    expect(r.workflow.spec_version).toBe("2");
+    expect(r.workflow.spec_version).toBe("3");
     expect(nodes.a.permissions).toBe("write");
     expect(nodes.b.permissions).toBe("write");
     expect(nodes.c.permissions).toEqual({ deny: ["shell"], access: "write" });
@@ -211,11 +211,13 @@ describe("spec v1 -> v2 migration", () => {
     }
   });
 
-  it("a v2 file is not migrated", () => {
+  it("a v2 file only takes the identity v2 -> v3 step", () => {
     const r = migrateWorkflow({ ...V1, spec_version: "2" });
     if (!r.ok) throw new Error(r.message);
-    expect(r.applied).toEqual([]);
+    expect(r.applied.map((m) => [m.from, m.to, m.identity])).toEqual([[2, 3, true]]);
+    expect(r.changed).toBe(false);
     expect(r.notes).toEqual([]);
+    expect(r.workflow).toEqual({ ...V1, spec_version: "3" });
   });
 });
 
@@ -271,11 +273,11 @@ describe("sweny workflow upgrade to v2", () => {
       const r = upgradeWorkflowFile(f.path);
       expect(r.status).toBe("upgraded");
       if (r.status !== "upgraded") return;
-      expect([r.from, r.to]).toEqual([1, 2]);
+      expect([r.from, r.to]).toEqual([1, 3]);
       expect(r.notes.map((n) => n.nodeId)).toEqual(["a", "b", "c", "f"]);
 
       const text = readFileSync(f.path, "utf-8");
-      expect(text.startsWith('# My workflow\nspec_version: "2"\n')).toBe(true);
+      expect(text.startsWith('# My workflow\nspec_version: "3"\n')).toBe(true);
       expect(text.match(/# sweny workflow upgrade: /g)).toHaveLength(4);
       // The comment sits on the line right above the key it explains.
       const lines = text.split("\n");
@@ -310,7 +312,7 @@ describe("sweny workflow upgrade to v2", () => {
       expect(r.status).toBe("upgraded");
       if (r.status === "upgraded") expect(r.notes.filter((n) => n.warning)).toHaveLength(3);
       const out = JSON.parse(readFileSync(f.path, "utf-8"));
-      expect(out.spec_version).toBe("2");
+      expect(out.spec_version).toBe("3");
       expect(out.nodes.a.permissions).toBe("write");
     } finally {
       f.cleanup();
@@ -428,9 +430,9 @@ describe("bundled templates are safe by default", () => {
   });
 
   describe.each(WORKFLOW_TEMPLATES.map((t) => [t.id, t] as const))("%s", (id, template) => {
-    it("is spec_version 2 and loads without migration", () => {
+    it("is spec_version 2 and loads unchanged as 3 (the v2 -> v3 step is identity)", () => {
       expect(parseYaml(template.yaml).spec_version).toBe("2");
-      expect(load(template.yaml).spec_version).toBe("2");
+      expect(load(template.yaml).spec_version).toBe("3");
     });
 
     it("writes only from the nodes in the table, and each of those declares write itself", () => {
@@ -505,6 +507,7 @@ describe("the journal hash binds the version the policy runs as", () => {
     ["missing", undefined, "1", "write"],
     ['"1"', "1", "1", "write"],
     ['"2"', "2", "2", "read"],
+    ['"3"', "3", "3", "read"],
   ])("spec_version %s: hashed as %s, default access %s", (_label, declared, hashed, access) => {
     const wf = declared === undefined ? base : { ...base, spec_version: declared };
     expect(String(effectiveSpecVersion(wf))).toBe(hashed);
@@ -534,7 +537,7 @@ describe("every workflow file we ship or link loads with zero warnings", () => {
   it.each(files)("%s", (file) => {
     const r = loadAndValidateWorkflow(file);
     if (!r.ok) throw new Error(r.errors.map((e) => e.message).join("; "));
-    expect(r.workflow.spec_version).toBe("2");
+    expect(r.workflow.spec_version).toBe("3");
     expect(r.warnings).toBeUndefined();
   });
 

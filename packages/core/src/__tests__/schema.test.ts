@@ -1186,8 +1186,8 @@ describe("workflowJsonSchema", () => {
     expect(edgeProps.max_iterations.minimum).toBe(1);
   });
 
-  it("node items require name and instruction", () => {
+  it("node items require name; agent nodes an instruction", () => {
     expect((workflowJsonSchema.properties.nodes.additionalProperties as any).required).toContain("name");
-    expect((workflowJsonSchema.properties.nodes.additionalProperties as any).required).toContain("instruction");
+    expect((workflowJsonSchema.$defs as any).AgentNodeRules.required).toContain("instruction");
   });
 });

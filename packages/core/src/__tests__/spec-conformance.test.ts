@@ -1040,10 +1040,19 @@ describe("spec: JSON Schema", () => {
     expect(workflowJsonSchema.required).toContain("entry");
   });
 
-  it("node requires name and instruction", () => {
+  it("node requires name, and an agent node an instruction (a map node has none, spec v3)", () => {
     const nodeSchema = (workflowJsonSchema.properties.nodes as any).additionalProperties;
-    expect(nodeSchema.required).toContain("name");
-    expect(nodeSchema.required).toContain("instruction");
+    expect(nodeSchema.required).toEqual(["name"]);
+    expect(nodeSchema.else).toEqual({ $ref: "#/$defs/AgentNodeRules" });
+    expect(nodeSchema.then).toEqual({ $ref: "#/$defs/MapNodeRules" });
+    expect((workflowJsonSchema.$defs as any).AgentNodeRules.required).toEqual(["instruction"]);
+    expect((workflowJsonSchema.$defs as any).MapNodeRules.required).toEqual([
+      "kind",
+      "name",
+      "key",
+      "workflow",
+      "result",
+    ]);
   });
 
   it("edge requires from and to", () => {
