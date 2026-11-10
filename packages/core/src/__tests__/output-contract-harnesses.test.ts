@@ -67,7 +67,7 @@ const EXPECTED_ERROR =
   "output schema violation: " +
   "findings[1].title: required but missing; " +
   "findings[1].owner: not allowed (additionalProperties: false); " +
-  'findings[1].severity: expected one of ["low","medium","high"], got "urgent"';
+  'findings[1].severity: expected one of ["low","medium","high"]';
 
 const claudeFakes = createClaudeSdkFake();
 const codexFakes = createCodexProcessFake();
@@ -86,8 +86,11 @@ afterEach(async () => {
   active = undefined;
 });
 
-/** A harness over its fake, and the prompts the agent got in the last node run (its first is sweny's). */
-type Make = () => Promise<{ h: AgentHarness; fakes: HarnessFakes; prompts: () => string[] }>;
+/**
+ * A harness over its fake; the prompt that started its latest agent run (sweny's); and the agent
+ * turns since the reset, in-harness correction turns included.
+ */
+type Make = () => Promise<{ h: AgentHarness; fakes: HarnessFakes; lastPrompt: () => string; turns: () => number }>;
 
 const HARNESSES: Array<[string, Make]> = [
   [
@@ -101,7 +104,12 @@ const HARNESSES: Array<[string, Make]> = [
         authProbe: () => ({ ok: true, via: "test" }),
         sandbox: "off",
       });
-      return { h, fakes: claudeFakes, prompts: () => [claudeFakes.captured().prompt] };
+      return {
+        h,
+        fakes: claudeFakes,
+        lastPrompt: () => claudeFakes.captured().prompt,
+        turns: () => claudeFakes.query.mock.calls.length,
+      };
     },
   ],
   [
@@ -118,7 +126,12 @@ const HARNESSES: Array<[string, Make]> = [
         authProbe: () => ({ ok: true, via: "test" }),
         sandboxWrapper: null,
       });
-      return { h, fakes: codexFakes, prompts: () => [codexFakes.captured().prompt] };
+      return {
+        h,
+        fakes: codexFakes,
+        lastPrompt: () => codexFakes.captured().prompt,
+        turns: () => codexFakes.raw().length,
+      };
     },
   ],
   [
@@ -136,11 +149,16 @@ const HARNESSES: Array<[string, Make]> = [
         sandboxWrapper: null,
         sandbox: "off",
       });
-      return { h, fakes: piFakes, prompts: () => [piFakes.captured().prompt] };
+      return {
+        h,
+        fakes: piFakes,
+        lastPrompt: () => piFakes.captured().prompt,
+        turns: () => piFakes.raw().length,
+      };
     },
   ],
   [
-    // ACP also corrects in the harness, once per run, with the same contract.
+    // ACP can correct in the harness; under sweny's executor it leaves the one repair to the executor.
     "acp",
     async () => {
       acpFakes.reset();
@@ -154,7 +172,12 @@ const HARNESSES: Array<[string, Make]> = [
         cancelGraceMs: 500,
         sandboxWrapper: null,
       });
-      return { h, fakes: acpFakes, prompts: () => acpFakes.raw().at(-1)?.prompts ?? [] };
+      return {
+        h,
+        fakes: acpFakes,
+        lastPrompt: () => acpFakes.raw().at(-1)?.prompts[0] ?? "",
+        turns: () => acpFakes.raw().reduce((n, c) => n + c.prompts.length, 0),
+      };
     },
   ],
 ];
@@ -162,7 +185,7 @@ const HARNESSES: Array<[string, Make]> = [
 const REPAIR_LINES =
   "- findings[1].title: required but missing\n" +
   "- findings[1].owner: not allowed (additionalProperties: false)\n" +
-  '- findings[1].severity: expected one of ["low","medium","high"], got "urgent"';
+  '- findings[1].severity: expected one of ["low","medium","high"]';
 
 /** The agent's final answer, on the harness's structured channel when it has one, else as the final text. */
 function answer(fakes: HarnessFakes, data: unknown) {
@@ -175,9 +198,9 @@ function answer(fakes: HarnessFakes, data: unknown) {
   ]);
 }
 
-describe.each(HARNESSES)("nested output validation on %s (#573)", (label, make) => {
+describe.each(HARNESSES)("nested output validation on %s (#573)", (_label, make) => {
   it("a nested violation gets one repair request naming each path, then fails the node identically", async () => {
-    const { h, fakes, prompts } = await make();
+    const { h, fakes, lastPrompt, turns } = await make();
     active = fakes;
     answer(fakes, BAD);
     const { results } = await execute(
@@ -185,11 +208,11 @@ describe.each(HARNESSES)("nested output validation on %s (#573)", (label, make) 
       {},
       { skills: createSkillMap([]), harness: h, config: {}, logger: silent },
     );
+    // One repair loop on every harness: the first answer and sweny's one repair request, no more.
     expect(fakes.captured().invocations).toBe(2);
+    expect(turns()).toBe(2);
     // sweny's repair request, the same text whichever harness carries it.
-    expect(prompts()[0]).toContain(REPAIR_LINES);
-    // ACP's own correction turn names the same paths.
-    if (label === "acp") expect(prompts()[1]).toContain(REPAIR_LINES);
+    expect(lastPrompt()).toContain(REPAIR_LINES);
     const r = results.get("review")!;
     expect(r.status).toBe("failed");
     expect(r.data.error).toBe(EXPECTED_ERROR);
@@ -197,7 +220,7 @@ describe.each(HARNESSES)("nested output validation on %s (#573)", (label, make) 
   });
 
   it("a conforming answer passes with no repair request", async () => {
-    const { h, fakes, prompts } = await make();
+    const { h, fakes, turns } = await make();
     active = fakes;
     answer(fakes, GOOD);
     const { results } = await execute(
@@ -206,7 +229,7 @@ describe.each(HARNESSES)("nested output validation on %s (#573)", (label, make) 
       { skills: createSkillMap([]), harness: h, config: {}, logger: silent },
     );
     expect(fakes.captured().invocations).toBe(1);
-    expect(prompts()).toHaveLength(1);
+    expect(turns()).toBe(1);
     expect(results.get("review")?.status).toBe("success");
     expect(results.get("review")?.data).toMatchObject(GOOD);
   });

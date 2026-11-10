@@ -7,11 +7,18 @@ import * as fs from "node:fs";
 import { describe, it, expect } from "vitest";
 import { parse } from "yaml";
 import { execute, outputContractProblems } from "../executor.js";
-import { parseWorkflow, validateWorkflow } from "../schema.js";
+import { createRequire } from "node:module";
+import { parseWorkflow, validateWorkflow, type WorkflowWarning } from "../schema.js";
+import { validateParsed } from "../loader.js";
+import { DRAFT_06_META_SCHEMA } from "../output-contract-draft06.js";
 import {
   COUNT_OF_KEYWORD,
   ROOT_PATH,
+  MAX_OUTPUT_DEPTH,
+  MAX_OUTPUT_VALUES,
+  checkOutputContract,
   contractFailureMessage,
+  contractPaths,
   listContractProblems,
   outputContractProblems as contractProblems,
   outputSchemaError,
@@ -73,7 +80,7 @@ describe("outputContractProblems: every depth (#573)", () => {
         field: "findings",
         path: "findings[1].severity",
         kind: "invalid",
-        problem: 'expected one of ["low","medium","high"], got "urgent"',
+        problem: 'expected one of ["low","medium","high"]',
       },
     ]);
   });
@@ -111,29 +118,29 @@ describe("outputContractProblems: every depth (#573)", () => {
     ]);
   });
 
-  it("type mismatches at every depth, with the value that broke it", () => {
+  it("type mismatches at every depth, named by rule, never by value", () => {
     const data = {
       findings: [{ title: 7, severity: "low", location: { file: "a", line: "3" } }, "not an object"],
       verdict: ["pass"],
     };
     expect(check(data)).toEqual([
-      { field: "findings", path: "findings[0].title", kind: "invalid", problem: "expected string, got 7" },
-      { field: "findings", path: "findings[0].location.line", kind: "invalid", problem: 'expected integer, got "3"' },
-      { field: "findings", path: "findings[1]", kind: "invalid", problem: 'expected object, got "not an object"' },
-      { field: "verdict", path: "verdict", kind: "invalid", problem: 'expected string, got ["pass"]' },
+      { field: "findings", path: "findings[0].title", kind: "invalid", problem: "expected string" },
+      { field: "findings", path: "findings[0].location.line", kind: "invalid", problem: "expected integer" },
+      { field: "findings", path: "findings[1]", kind: "invalid", problem: "expected object" },
+      { field: "verdict", path: "verdict", kind: "invalid", problem: "expected string" },
     ]);
   });
 
-  it("other keywords keep the validator's wording plus the scalar that broke them", () => {
+  it("other keywords keep the validator's wording, without the value", () => {
     const data = { ...GOOD, findings: [{ ...GOOD.findings[0], location: { file: "a", line: 0 } }] };
     expect(check(data)).toEqual([
-      { field: "findings", path: "findings[0].location.line", kind: "invalid", problem: "must be >= 1, got 0" },
+      { field: "findings", path: "findings[0].location.line", kind: "invalid", problem: "must be >= 1" },
     ]);
   });
 
   it("reports one problem per path (a type miss is not also an enum miss)", () => {
     expect(check({ findings: [], verdict: 3 })).toEqual([
-      { field: "verdict", path: "verdict", kind: "invalid", problem: "expected string, got 3" },
+      { field: "verdict", path: "verdict", kind: "invalid", problem: "expected string" },
     ]);
   });
 
@@ -146,8 +153,8 @@ describe("outputContractProblems: every depth (#573)", () => {
       },
     };
     expect(check({ "odd key": "x", byIndex: { "0": 1 } }, schema)).toEqual([
-      { field: "odd key", path: '["odd key"]', kind: "invalid", problem: 'expected number, got "x"' },
-      { field: "byIndex", path: 'byIndex["0"]', kind: "invalid", problem: "expected string, got 1" },
+      { field: "odd key", path: '["odd key"]', kind: "invalid", problem: "expected number" },
+      { field: "byIndex", path: 'byIndex["0"]', kind: "invalid", problem: "expected string" },
     ]);
   });
 
@@ -163,7 +170,7 @@ describe("outputContractProblems: every depth (#573)", () => {
     };
     const problems = check({ version: 1, target: true, pr: {} }, schema);
     expect(problems.map((p) => p.path)).toEqual(["version", "target", "branch"]);
-    expect(problems[0].problem).toBe("expected 2, got 1");
+    expect(problems[0].problem).toBe("expected 2");
     expect(problems[2].problem).toBe("required when 'pr' is present, but missing");
   });
 
@@ -192,7 +199,7 @@ describe("outputContractProblems: every depth (#573)", () => {
       properties: { items: { type: "array", items: { $ref: "#/definitions/sev" } } },
     };
     expect(check({ items: ["low", "mid"] }, schema)).toEqual([
-      { field: "items", path: "items[1]", kind: "invalid", problem: 'expected one of ["low","high"], got "mid"' },
+      { field: "items", path: "items[1]", kind: "invalid", problem: 'expected one of ["low","high"]' },
     ]);
   });
 
@@ -204,11 +211,8 @@ describe("outputContractProblems: every depth (#573)", () => {
     expect(check({ n: 1 }, a)).toEqual([]);
   });
 
-  it("a schema that cannot be compiled is a schema problem, not an agent one", () => {
-    const problems = check({}, { type: "object", properties: { n: { type: "str" } } });
-    expect(problems).toHaveLength(1);
-    expect(problems[0]).toMatchObject({ field: "(output)", path: "(output)", kind: "schema" });
-    expect(problems[0].problem).toMatch(/^the declared output schema cannot be used: /);
+  it("a schema that cannot be compiled keeps the pre-#573 top-level check (an unknown type is not checked)", () => {
+    expect(check({ n: 1 }, { type: "object", properties: { n: { type: "str" } } })).toEqual([]);
   });
 
   it("no schema, no problems", () => {
@@ -226,10 +230,15 @@ describe("outputContractProblems: every depth (#573)", () => {
     const items = [{ state: "open" }, { state: "closed" }];
     expect(check({ items, open: 1 }, schema)).toEqual([]);
     expect(check({ items, open: 2 }, schema)).toEqual([
-      { field: "open", path: "open", kind: "invalid", problem: "is 2 but 'items' has 1 matching item(s)" },
+      {
+        field: "open",
+        path: "open",
+        kind: "invalid",
+        problem: "does not match the count: 'items' has 1 matching item(s)",
+      },
     ]);
     expect(check({ items, open: "2" }, schema)).toEqual([
-      { field: "open", path: "open", kind: "invalid", problem: 'expected integer, got "2"' },
+      { field: "open", path: "open", kind: "invalid", problem: "expected integer" },
     ]);
   });
 });
@@ -274,7 +283,7 @@ const BAD = {
 const EXPECTED_ERROR =
   "output schema violation: " +
   "findings[1].owner: not allowed (additionalProperties: false); " +
-  'findings[1].severity: expected one of ["low","medium","high"], got "urgent"';
+  'findings[1].severity: expected one of ["low","medium","high"]';
 
 describe("executor: nested violations fail the node, through the repair and retry path (#573)", () => {
   it("one repair request naming each path, then the node fails with a path-precise error", async () => {
@@ -294,7 +303,7 @@ describe("executor: nested violations fail the node, through the repair and retr
     expect(instructions).toHaveLength(2);
     expect(instructions[1]).toContain(
       "- findings[1].owner: not allowed (additionalProperties: false)\n" +
-        '- findings[1].severity: expected one of ["low","medium","high"], got "urgent"',
+        '- findings[1].severity: expected one of ["low","medium","high"]',
     );
     const r = results.get("review")!;
     expect(r.status).toBe("failed");
@@ -330,7 +339,7 @@ describe("executor: nested violations fail the node, through the repair and retr
     const r = results.get("review")!;
     expect(r.data.error).toBe(
       "output schema violation: required field(s) missing from emitted data: verdict; " +
-        "findings[0].title: expected string, got 1",
+        "findings[0].title: expected string",
     );
     expect(r.evals?.[0]?.name).toBe("output_required");
   });
@@ -368,21 +377,202 @@ describe("executor: nested violations fail the node, through the repair and retr
     expect(results.get("review")?.data).not.toHaveProperty("fail_soft");
   });
 
-  it("a schema that cannot be compiled stops the run at load, before any agent runs", async () => {
-    const { claude, instructions } = scripted([{ n: 1 }]);
-    await expect(
-      execute(
-        oneNode({ type: "object", properties: { n: { type: "str" } } }),
-        {},
-        {
-          skills: createSkillMap([]),
-          claude,
-          config: {},
-          logger: silent,
-        },
-      ),
-    ).rejects.toThrow(/INVALID_OUTPUT_SCHEMA: Node "review" declares an output schema that cannot be used: /);
-    expect(instructions).toHaveLength(0);
+  it("a schema that cannot be compiled still runs, with a warning, on the pre-#573 rules", async () => {
+    // Tuple items without $schema do not compile under 2020-12. A wrong
+    // top-level type is repaired once and then tolerated, as before #573.
+    const schema: JSONSchema = {
+      type: "object",
+      properties: { pair: { type: "array", items: [{ type: "string" }] }, n: { type: "number" } },
+      required: ["n"],
+    };
+    const warnings: string[] = [];
+    const logger: Logger = { ...silent, warn: (m: string) => void warnings.push(m) };
+    const { claude, instructions } = scripted([{ n: "x", pair: [1] }]);
+    const { results } = await execute(oneNode(schema), {}, { skills: createSkillMap([]), claude, config: {}, logger });
+    expect(results.get("review")?.status).toBe("success");
+    expect(instructions).toHaveLength(2);
+    expect(instructions[1]).toContain("- n: expected number\n");
+    expect(warnings[0]).toMatch(
+      /^ {2}OUTPUT_SCHEMA_FALLBACK: Node "review" declares an output schema the validator cannot compile/,
+    );
+  });
+
+  it("on the fallback a missing required field still fails the node", async () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: { a: { type: "string", required: true } },
+      required: ["n"],
+    };
+    const { claude } = scripted([{}]);
+    const { results } = await execute(
+      oneNode(schema),
+      {},
+      { skills: createSkillMap([]), claude, config: {}, logger: silent },
+    );
+    expect(results.get("review")?.status).toBe("failed");
+    expect(results.get("review")?.data.error).toBe(
+      "output schema violation: required field(s) missing from emitted data: n",
+    );
+  });
+
+  it("tells the harness the executor runs the one repair (no correction turn of its own)", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const claude: Claude = {
+      async run(opts): Promise<NodeResult> {
+        seen.push(opts as unknown as Record<string, unknown>);
+        return { status: "success", data: GOOD, toolCalls: [] };
+      },
+      async evaluate() {
+        return null;
+      },
+      async ask() {
+        return "";
+      },
+    };
+    const wf = oneNode(FINDINGS);
+    wf.nodes.plain = { name: "Plain", instruction: "NODE_PLAIN", skills: [] };
+    wf.edges = [{ from: "review", to: "plain" }];
+    await execute(wf, {}, { skills: createSkillMap([]), claude, config: {}, logger: silent });
+    expect(seen[0].callerRepairsOutput).toBe(true);
+    expect(seen[1]).not.toHaveProperty("callerRepairsOutput");
+  });
+
+  it("never puts an emitted value in the error, the evals, the repair request, the logs or the events", async () => {
+    const secret = "ghp_" + "a".repeat(36);
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        token: { type: "number" },
+        short: { type: "string", maxLength: 3 },
+        pick: { enum: ["a"] },
+        exact: { const: "b" },
+        url: { type: "string", pattern: "^https://" },
+        nested: { type: "array", items: { type: "object", properties: { v: { type: "integer" } } } },
+      },
+    };
+    const data = { token: secret, short: secret, pick: secret, exact: secret, url: secret, nested: [{ v: secret }] };
+    const lines: string[] = [];
+    const logger: Logger = {
+      info() {},
+      debug() {},
+      warn: (m) => void lines.push(String(m)),
+      error: (m) => void lines.push(String(m)),
+    };
+    const events: ExecutionEvent[] = [];
+    const { claude, instructions } = scripted([data]);
+    const { results } = await execute(
+      oneNode(schema),
+      {},
+      {
+        skills: createSkillMap([]),
+        claude,
+        config: {},
+        logger,
+        observer: (e) => events.push(e),
+      },
+    );
+    const r = results.get("review")!;
+    expect(r.status).toBe("failed");
+    expect(r.data.error).toBe(
+      "output schema violation: token: expected number; short: must NOT have more than 3 characters; " +
+        'pick: expected one of ["a"]; exact: expected "b"; url: must match pattern "^https://"; ' +
+        "nested[0].v: expected integer",
+    );
+    const said = [String(r.data.error), JSON.stringify(r.evals), instructions[1].split("---")[0], ...lines];
+    said.push(JSON.stringify(events.filter((e) => e.type === "node:warning")));
+    for (const text of said) expect(text).not.toContain(secret);
+  });
+
+  it("an output too deep to check fails that node, never the run (recursive $ref)", async () => {
+    const schema: JSONSchema = {
+      $defs: { link: { type: "object", properties: { next: { $ref: "#/$defs/link" } } } },
+      type: "object",
+      properties: { chain: { $ref: "#/$defs/link" } },
+    };
+    let tail: Record<string, unknown> = {};
+    const chain = tail;
+    for (let i = 0; i < 100_000; i++) {
+      const next: Record<string, unknown> = {};
+      tail.next = next;
+      tail = next;
+    }
+    const { claude } = scripted([{ chain }]);
+    const { results } = await execute(
+      oneNode(schema),
+      {},
+      {
+        skills: createSkillMap([]),
+        claude,
+        config: {},
+        logger: silent,
+      },
+    );
+    expect(results.get("review")?.status).toBe("failed");
+    expect(results.get("review")?.data.error).toBe(
+      "output schema violation: (output): not checked: the output nests deeper than 64 levels",
+    );
+  });
+
+  it("a check that throws fails that node with an output validation error, with no repair", async () => {
+    // Throws only inside the contract check, so the rest of the executor can still read it.
+    const hostile = {
+      get verdict(): string {
+        if (/outputContractProblems/.test(new Error().stack ?? "")) throw new Error("getter exploded");
+        return "pass";
+      },
+    };
+    const instructions: string[] = [];
+    const claude: Claude = {
+      async run(opts): Promise<NodeResult> {
+        instructions.push(opts.instruction);
+        return { status: "success", data: hostile as unknown as Record<string, unknown>, toolCalls: [] };
+      },
+      async evaluate() {
+        return null;
+      },
+      async ask() {
+        return "";
+      },
+    };
+    const { results } = await execute(
+      oneNode(FINDINGS),
+      {},
+      {
+        skills: createSkillMap([]),
+        claude,
+        config: {},
+        logger: silent,
+      },
+    );
+    expect(instructions).toHaveLength(1);
+    expect(results.get("review")?.status).toBe("failed");
+    expect(results.get("review")?.data.error).toBe("output validation error: getter exploded");
+    expect(results.get("review")?.evals).toEqual([
+      { name: "output_schema", kind: "value", pass: false, reasoning: "output validation error: getter exploded" },
+    ]);
+  });
+
+  it("caps the paths in the log line and the event at 20, then counts the rest", async () => {
+    const schema: JSONSchema = { type: "object", additionalProperties: { type: "string" } };
+    const data = Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`k${i}`, i]));
+    const lines: string[] = [];
+    const logger: Logger = { ...silent, warn: (m) => void lines.push(String(m)) };
+    const events: ExecutionEvent[] = [];
+    const { claude } = scripted([data]);
+    await execute(
+      oneNode(schema),
+      {},
+      {
+        skills: createSkillMap([]),
+        claude,
+        config: {},
+        logger,
+        observer: (e) => events.push(e),
+      },
+    );
+    const paths = Array.from({ length: 20 }, (_, i) => `k${i}`);
+    expect(lines[0]).toBe(`  output contract: ${[...paths, "and 5 more"].join(", ")}; asking the agent once to fix it`);
+    expect(events).toContainEqual(expect.objectContaining({ type: "node:warning", fields: [...paths, "and 5 more"] }));
   });
 
   it("a nested problem under a field an expression routes on falls through instead of failing the node", async () => {
@@ -462,7 +652,7 @@ describe("bundled workflows still pass their own contract (#573)", () => {
   });
 
   it.each(schemas)("%s: the declared output schema compiles", (_id, schema) => {
-    expect(outputContractProblems({}, schema).filter((p) => p.kind === "schema")).toEqual([]);
+    expect(outputSchemaError(schema)).toBeUndefined();
   });
 
   it("the try fixture's sample answer conforms to explain-repo's schema", () => {
@@ -506,29 +696,68 @@ describe("bundled workflows still pass their own contract (#573)", () => {
 
 // ─── Load time: validateWorkflow ─────────────────────────────────
 
-describe("validateWorkflow compiles every output schema with the same validator (#573)", () => {
-  it("reports a schema that cannot be compiled with the node id and the validator's message", () => {
-    const errors = validateWorkflow(oneNode({ type: "object", properties: { n: { type: "str" } } }));
-    expect(errors).toEqual([
-      {
-        code: "INVALID_OUTPUT_SCHEMA",
-        nodeId: "review",
-        message:
-          'Node "review" declares an output schema that cannot be used: schema is invalid: ' +
-          "data/properties/n/type must be equal to one of the allowed values, " +
-          "data/properties/n/type must be array, data/properties/n/type must match a schema in anyOf",
-      },
+describe("validateWorkflow: a schema that does not compile still loads, with a deprecation warning (#573)", () => {
+  const warn = (schema: JSONSchema) => {
+    const warnings: WorkflowWarning[] = [];
+    const errors = validateWorkflow(oneNode(schema), undefined, { warnings });
+    return { errors, warnings };
+  };
+  const message = (why: string) =>
+    `Node "review" declares an output schema the validator cannot compile (${why}). ` +
+    "Its output gets only the old top-level check (required fields, top-level types and enums). " +
+    "Deprecated: a future minor will refuse to load this workflow; fix the schema or name its draft in $schema.";
+
+  it.each<[string, JSONSchema, string]>([
+    [
+      "tuple items without $schema",
+      { type: "object", properties: { pair: { type: "array", items: [{ type: "string" }] } } },
+      "schema is invalid: data/properties/pair/items must be object,boolean",
+    ],
+    [
+      "an unresolvable $ref",
+      { type: "object", properties: { n: { $ref: "#/$defs/missing" } } },
+      "can't resolve reference #/$defs/missing from id #",
+    ],
+    [
+      "property-level required: true",
+      { type: "object", properties: { a: { type: "string", required: true } } },
+      "schema is invalid: data/properties/a/required must be array",
+    ],
+    [
+      "an unknown type",
+      { type: "object", properties: { n: { type: "str" } } },
+      "schema is invalid: data/properties/n/type must be equal to one of the allowed values, " +
+        "data/properties/n/type must be array, data/properties/n/type must match a schema in anyOf",
+    ],
+  ])("%s: no error, one warning naming the node and the validator's message", (_label, schema, why) => {
+    expect(warn(schema)).toEqual({
+      errors: [],
+      warnings: [{ code: "OUTPUT_SCHEMA_FALLBACK", nodeId: "review", message: message(why) }],
+    });
+  });
+
+  it("draft-04 and draft-06 schemas compile: no warning", () => {
+    expect(warn({ $schema: "http://json-schema.org/draft-04/schema#", type: "object" }).warnings).toEqual([]);
+    expect(warn({ $schema: "http://json-schema.org/draft-06/schema#", type: "object" }).warnings).toEqual([]);
+  });
+
+  it("without a sink, validateWorkflow returns the same errors (none) as before", () => {
+    expect(validateWorkflow(oneNode({ type: "object", properties: { n: { type: "str" } } }))).toEqual([]);
+  });
+
+  it("the loader still loads it, and carries the warning", () => {
+    const wf = oneNode({ type: "object", properties: { n: { type: "str" } } });
+    const r = validateParsed(JSON.parse(JSON.stringify(wf)));
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.warnings).toEqual([
+      expect.stringMatching(
+        /^OUTPUT_SCHEMA_FALLBACK: Node "review" declares an output schema the validator cannot compile/,
+      ),
     ]);
   });
 
-  it("an unresolvable $ref is reported too", () => {
-    const errors = validateWorkflow(oneNode({ type: "object", properties: { n: { $ref: "#/$defs/missing" } } }));
-    expect(errors.map((e) => [e.code, e.nodeId])).toEqual([["INVALID_OUTPUT_SCHEMA", "review"]]);
-    expect(errors[0].message).toMatch(/can't resolve reference #\/\$defs\/missing/);
-  });
-
-  it("a valid schema, or none, is not an error", () => {
-    expect(validateWorkflow(oneNode(FINDINGS))).toEqual([]);
+  it("a valid schema, or none, is neither an error nor a warning", () => {
+    expect(warn(FINDINGS)).toEqual({ errors: [], warnings: [] });
     const none = oneNode(FINDINGS);
     delete none.nodes.review.output;
     expect(validateWorkflow(none)).toEqual([]);
@@ -549,29 +778,58 @@ const TUPLE = {
 describe("output-contract: dialects", () => {
   it("draft-07 reads array-form items as a tuple", () => {
     expect(rows({ pair: ["a", "b"] }, { $schema: DRAFT_07, ...TUPLE })).toEqual([
-      ["pair", "pair[1]", "invalid", 'expected number, got "b"'],
+      ["pair", "pair[1]", "invalid", "expected number"],
     ]);
   });
 
-  it("2020-12, the default, rejects array-form items as a schema problem, each complaint once", () => {
-    expect(rows({ pair: ["a", "b"] }, TUPLE)).toEqual([
-      [
-        ROOT_PATH,
-        ROOT_PATH,
-        "schema",
-        "the declared output schema cannot be used: schema is invalid: data/properties/pair/items must be object,boolean",
-      ],
+  it("2020-12, the default, does not compile array-form items: the top-level fallback, each complaint once", () => {
+    expect(outputSchemaError(TUPLE)).toBe("schema is invalid: data/properties/pair/items must be object,boolean");
+    expect(rows({ pair: ["a", "b"] }, TUPLE)).toEqual([]);
+    expect(rows({ pair: "ab" }, TUPLE)).toEqual([["pair", "pair", "invalid", "expected array"]]);
+    expect(contractProblems({ pair: "ab" }, TUPLE)[0].fallback).toBe(true);
+  });
+
+  it("draft-04: id, boolean exclusiveMaximum", () => {
+    const schema = {
+      $schema: "http://json-schema.org/draft-04/schema#",
+      id: "https://example.com/d4",
+      type: "object",
+      properties: { n: { type: "number", maximum: 10, exclusiveMaximum: true } },
+      required: ["n", "q"],
+    };
+    expect(rows({ n: 10 }, schema)).toEqual([
+      ["q", "q", "missing", "required but missing"],
+      ["n", "n", "invalid", "must be < 10"],
     ]);
+    expect(rows({ n: 9, q: 1 }, schema)).toEqual([]);
+  });
+
+  it("draft-06: const and contains, on ajv's own draft-06 meta-schema", () => {
+    const schema = {
+      $schema: "http://json-schema.org/draft-06/schema#",
+      type: "object",
+      properties: { a: { type: "array", contains: { type: "string" } }, c: { const: 3 } },
+    };
+    expect(rows({ a: [1], c: 2 }, schema)).toEqual([
+      ["a", "a[0]", "invalid", "expected string"],
+      ["a", "a", "invalid", "must contain at least 1 valid item(s)"],
+      ["c", "c", "invalid", "expected 3"],
+    ]);
+  });
+
+  it("the vendored draft-06 meta-schema is ajv's copy", () => {
+    const ajvCopy = createRequire(import.meta.url)("ajv/dist/refs/json-schema-draft-06.json");
+    expect(DRAFT_06_META_SCHEMA).toEqual(ajvCopy);
   });
 
   it("2019-09 reads tuples and dependentRequired; draft-07 does not know dependentRequired", () => {
     const schema = { ...TUPLE, $schema: DRAFT_2019, dependentRequired: { pair: ["why"] } };
     expect(rows({ pair: ["a", "b"] }, schema)).toEqual([
-      ["pair", "pair[1]", "invalid", 'expected number, got "b"'],
+      ["pair", "pair[1]", "invalid", "expected number"],
       ["why", "why", "invalid", "required when 'pair' is present, but missing"],
     ]);
     expect(rows({ pair: ["a", "b"] }, { ...schema, $schema: DRAFT_07 })).toEqual([
-      ["pair", "pair[1]", "invalid", 'expected number, got "b"'],
+      ["pair", "pair[1]", "invalid", "expected number"],
     ]);
   });
 
@@ -594,13 +852,13 @@ describe("output-contract: messages per keyword", () => {
       "a union type",
       { n: true },
       { type: "object", properties: { n: { type: ["string", "number"] } } },
-      ["n", "n", "invalid", "expected string or number, got true"],
+      ["n", "n", "invalid", "expected string or number"],
     ],
     [
-      "a null scalar keeps its value",
+      "a rule on null keeps only the wording",
       { n: null },
       { type: "object", properties: { n: { not: { type: "null" } } } },
-      ["n", "n", "invalid", "must NOT be valid, got null"],
+      ["n", "n", "invalid", "must NOT be valid"],
     ],
     [
       "an array keeps only the wording",
@@ -624,13 +882,13 @@ describe("output-contract: messages per keyword", () => {
       "a value of exactly 80 characters is shown whole",
       { s: 1 },
       { type: "object", properties: { s: { const: "x".repeat(78) } } },
-      ["s", "s", "invalid", `expected "${"x".repeat(78)}", got 1`],
+      ["s", "s", "invalid", `expected "${"x".repeat(78)}"`],
     ],
     [
       "a longer value is cut to 77 characters and an ellipsis",
       { s: 1 },
       { type: "object", properties: { s: { const: "x".repeat(79) } } },
-      ["s", "s", "invalid", `expected "${"x".repeat(76)}..., got 1`],
+      ["s", "s", "invalid", `expected "${"x".repeat(76)}...`],
     ],
   ])("%s", (_label, data, schema, row) => {
     expect(rows(data, schema)).toEqual([row]);
@@ -672,9 +930,9 @@ describe("output-contract: paths", () => {
       o: { deep: { v: 1 } },
     };
     expect(rows(data, schema)).toEqual([
-      ["m", "m[1][1]", "invalid", 'expected number, got "x"'],
-      ["l", "l[10]", "invalid", 'expected number, got "x"'],
-      ["o", "o.deep.v", "invalid", "expected string, got 1"],
+      ["m", "m[1][1]", "invalid", "expected number"],
+      ["l", "l[10]", "invalid", "expected number"],
+      ["o", "o.deep.v", "invalid", "expected string"],
     ]);
   });
 });
@@ -688,24 +946,153 @@ describe("output-contract: inputs", () => {
     }
   });
 
-  it("no schema (or one that is not an object) checks nothing; an array schema is a schema problem", () => {
+  it("no schema (or one that is not an object) checks nothing; an array schema falls back to checking nothing", () => {
     expect(contractProblems({ a: 1 }, undefined)).toEqual([]);
     expect(rows({ a: 1 }, "x")).toEqual([]);
-    expect(rows({}, [])).toEqual([
-      [
-        ROOT_PATH,
-        ROOT_PATH,
-        "schema",
-        "the declared output schema cannot be used: schema is invalid: data must be object,boolean",
-      ],
+    expect(rows({}, [])).toEqual([]);
+    expect(outputSchemaError([] as unknown as JSONSchema)).toBe("schema is invalid: data must be object,boolean");
+  });
+
+  it("the fallback: required, top-level type (number finite, integer, null, object, union) and enum only", () => {
+    // `$ref` to nowhere: the schema does not compile, so only the top level is read.
+    const schema = {
+      type: "object",
+      properties: {
+        bad: { $ref: "#/$defs/nope" },
+        num: { type: "number" },
+        int: { type: "integer" },
+        nul: { type: "null" },
+        obj: { type: "object" },
+        arr: { type: "array", items: { type: "string" } },
+        bool: { type: "boolean" },
+        str: { type: "string" },
+        union: { type: ["string", "null"] },
+        pick: { enum: ["a", "b"] },
+        typed: { type: "string", enum: ["x"] },
+        free: {},
+        flag: true,
+      },
+      required: ["num", "absent", 3],
+    };
+    const ok = {
+      num: 1,
+      int: 2,
+      nul: null,
+      obj: {},
+      arr: [1],
+      bool: false,
+      str: "s",
+      union: null,
+      pick: "a",
+      typed: "x",
+    };
+    expect(rows({ ...ok, bad: "anything", free: 1, flag: 1 }, schema)).toEqual([
+      ["absent", "absent", "missing", "required but missing"],
     ]);
+    const wrong = {
+      num: Infinity,
+      int: 1.5,
+      nul: 0,
+      obj: [],
+      arr: {},
+      bool: "no",
+      str: 1,
+      union: 1,
+      pick: "c",
+      typed: "y",
+    };
+    expect(rows(wrong, schema)).toEqual([
+      ["absent", "absent", "missing", "required but missing"],
+      ["num", "num", "invalid", "expected number"],
+      ["int", "int", "invalid", "expected integer"],
+      ["nul", "nul", "invalid", "expected null"],
+      ["obj", "obj", "invalid", "expected object"],
+      ["arr", "arr", "invalid", "expected array"],
+      ["bool", "bool", "invalid", "expected boolean"],
+      ["str", "str", "invalid", "expected string"],
+      ["union", "union", "invalid", "expected string or null"],
+      ["pick", "pick", "invalid", 'expected one of ["a","b"]'],
+      ["typed", "typed", "invalid", 'expected one of ["x"]'],
+    ]);
+    expect(contractProblems(wrong, schema as JSONSchema).every((p) => p.fallback === true)).toBe(true);
+  });
+
+  it("the fallback still checks x-sweny-count-of, marked as fallback", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        bad: { $ref: "#/$defs/nope" },
+        items: { type: "array" },
+        n: { type: "integer", [COUNT_OF_KEYWORD]: { array: "items" } },
+      },
+    };
+    expect(contractProblems({ items: [{}], n: 2 }, schema as JSONSchema)).toEqual([
+      {
+        field: "n",
+        path: "n",
+        kind: "invalid",
+        problem: "does not match the count: 'items' has 1 matching item(s)",
+        fallback: true,
+      },
+    ]);
+    expect(rows({ items: [{}], n: "2" }, schema)).toEqual([["n", "n", "invalid", "expected integer"]]);
+  });
+
+  it("output deeper than the cap, or bigger, is a problem in itself, checked without recursion", () => {
+    expect(MAX_OUTPUT_DEPTH).toBe(64);
+    expect(MAX_OUTPUT_VALUES).toBe(100_000);
+    const nest = (levels: number) => {
+      const root: Record<string, unknown> = {};
+      let cur = root;
+      for (let i = 0; i < levels; i++) {
+        const next: Record<string, unknown> = {};
+        cur.next = next;
+        cur = next;
+      }
+      return root;
+    };
+    expect(rows(nest(64), { type: "object" })).toEqual([]);
+    expect(rows(nest(65), { type: "object" })).toEqual([
+      [ROOT_PATH, ROOT_PATH, "invalid", "not checked: the output nests deeper than 64 levels"],
+    ]);
+    expect(rows({ l: Array.from({ length: 99_998 }, () => 1) }, { type: "object" })).toEqual([]);
+    expect(rows({ l: Array.from({ length: 99_999 }, () => 1) }, { type: "object" })).toEqual([
+      [ROOT_PATH, ROOT_PATH, "invalid", "not checked: the output holds more than 100000 values"],
+    ]);
+  });
+
+  it("checkOutputContract returns the problems, or why the check could not run", () => {
+    expect(checkOutputContract({ n: "x" }, { type: "object", properties: { n: { type: "number" } } })).toEqual({
+      problems: [{ field: "n", path: "n", kind: "invalid", problem: "expected number" }],
+    });
+    const hostile = Object.defineProperty({}, "n", {
+      enumerable: true,
+      get() {
+        throw new Error("no");
+      },
+    });
+    expect(checkOutputContract(hostile, { type: "object" })).toEqual({ error: "no" });
+    const odd = Object.defineProperty({}, "n", {
+      enumerable: true,
+      get() {
+        throw "a string";
+      },
+    });
+    expect(checkOutputContract(odd, { type: "object" })).toEqual({ error: "a string" });
+    const many = Array.from({ length: 21 }, (_, i) => ({
+      field: "f",
+      path: `p${i}`,
+      kind: "invalid" as const,
+      problem: "x",
+    }));
+    expect(contractPaths(many)).toEqual([...Array.from({ length: 20 }, (_, i) => `p${i}`), "and 1 more"]);
   });
 
   it("a summary the schema only requires is kept; one it does not name is dropped", () => {
     expect(rows({ summary: "s" }, { type: "object", required: ["summary"] })).toEqual([]);
     expect(rows({ summary: "s" }, { type: "object", additionalProperties: false })).toEqual([]);
     expect(rows({ summary: 1 }, { type: "object", properties: { summary: { type: "string" } } })).toEqual([
-      ["summary", "summary", "invalid", "expected string, got 1"],
+      ["summary", "summary", "invalid", "expected string"],
     ]);
   });
 
@@ -739,7 +1126,7 @@ describe("output-contract: x-sweny-count-of", () => {
     const items = [{}, "x", null, 3, []];
     expect(rows({ items, n: 2 }, counted({ array: "items" }))).toEqual([]);
     expect(rows({ items, n: 3 }, counted({ array: "items" }))).toEqual([
-      ["n", "n", "invalid", "is 3 but 'items' has 2 matching item(s)"],
+      ["n", "n", "invalid", "does not match the count: 'items' has 2 matching item(s)"],
     ]);
   });
 
@@ -754,7 +1141,7 @@ describe("output-contract: x-sweny-count-of", () => {
     ];
     expect(rows({ items, n: 1 }, counted(spec))).toEqual([]);
     expect(rows({ items, n: 0 }, counted(spec))).toEqual([
-      ["n", "n", "invalid", "is 0 but 'items' has 1 matching item(s)"],
+      ["n", "n", "invalid", "does not match the count: 'items' has 1 matching item(s)"],
     ]);
   });
 
@@ -779,7 +1166,7 @@ describe("output-contract: x-sweny-count-of", () => {
 
   it("boolean property schemas next to it are fine", () => {
     expect(rows({ items: [{}], n: 5, b: 1 }, counted({ array: "items" }, { b: true }))).toEqual([
-      ["n", "n", "invalid", "is 5 but 'items' has 1 matching item(s)"],
+      ["n", "n", "invalid", "does not match the count: 'items' has 1 matching item(s)"],
     ]);
   });
 });
@@ -803,9 +1190,11 @@ describe("output-contract: listing and the node error", () => {
     expect(contractFailureMessage([p("a", "missing"), p("b", "missing")])).toBe(
       "output schema violation: required field(s) missing from emitted data: a, b",
     );
-    expect(contractFailureMessage([p("x.y"), p("a", "missing"), p("(output)", "schema", "cannot")])).toBe(
+    expect(contractFailureMessage([p("x.y"), p("a", "missing"), p("(output)", "invalid", "cannot")])).toBe(
       "output schema violation: required field(s) missing from emitted data: a; x.y: bad; (output): cannot",
     );
+    const missing = Array.from({ length: 22 }, (_, i) => p(`m${i}`, "missing"));
+    expect(contractFailureMessage(missing)).toMatch(/: m0, m1, .*, m19, and 2 more$/);
     expect(contractFailureMessage([p("x[0]")])).toBe("output schema violation: x[0]: bad");
   });
 

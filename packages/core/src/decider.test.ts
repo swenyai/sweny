@@ -759,6 +759,54 @@ describe("routable state", () => {
     expect(trace.edges[0]).toMatchObject({ from: "check", to: "handle_low", rung: "decider" });
   });
 
+  it("a routed field that breaks maximum, pattern or const is sent as null too, not only a mistyped one (#573)", async () => {
+    const srv = await fakeServer({ json: confident("handle_low") });
+    const workflow = wf({
+      output: {
+        type: "object",
+        properties: {
+          count: { type: "number", maximum: 10 },
+          level: { type: "string", enum: ["high", "low"], pattern: "^h" },
+          code: { type: "integer", const: 3 },
+          ok: { type: "boolean" },
+        },
+      },
+    });
+    workflow.edges.splice(
+      0,
+      2,
+      {
+        from: "check",
+        to: "handle_high",
+        when: { expr: "check.count > 5 && check.level == 'high' && check.code == 3 && check.ok" },
+        description: "an urgent alert",
+      },
+      { from: "check", to: "handle_low", when: { expr: "check.count <= 5" }, description: "a quiet alert" },
+    );
+    const claude = new MockClaude({
+      workflow,
+      responses: {
+        check: { data: { count: 11, level: "low", code: 2, ok: true } },
+        handle_high: {},
+        handle_low: {},
+        done: {},
+      },
+    });
+    const { results } = await execute(
+      workflow,
+      {},
+      { skills: createSkillMap([]), claude, config: {}, env: {}, logger: silent, decider: op(srv.baseUrl) },
+    );
+    expect(results.get("check")?.status).toBe("success");
+    expect(srv.seen).toHaveLength(1);
+    const state: string = srv.seen[0].body.state;
+    expect(state).toContain('"count": null');
+    expect(state).toContain('"level": null');
+    expect(state).toContain('"code": null');
+    expect(state).toContain('"ok": true');
+    expect(results.has("handle_low")).toBe(true);
+  });
+
   it("sends only declared typed fields, fenced and redacted; never free text, input, env or instructions", async () => {
     const srv = await fakeServer({ json: confident("handle_high") });
     const { logger, lines } = capture();

@@ -550,8 +550,18 @@ describe("structured output by prompt, parse, validate and retry", () => {
       "Your last reply did not match the required output:\n" +
         "- findings[1].title: required but missing\n" +
         "- findings[1].owner: not allowed (additionalProperties: false)\n" +
-        '- findings[1].severity: expected one of ["low","high"], got "urgent"\n',
+        '- findings[1].severity: expected one of ["low","high"]\n',
     );
+    expect(r.degraded.some((d) => d.startsWith("structured_output"))).toBe(false);
+  });
+
+  it("runs no correction turn of its own when the caller repairs the output (#573: one repair loop)", async () => {
+    const { h } = harness();
+    fakes.scriptWith({ steps: [{ kind: "final", text: JSON.stringify({ ok: true }) }] });
+    const r = await h.run(req({ outputSchema: schema, callerRepairsOutput: true }));
+    expect(r.status).toBe("success");
+    expect(cap().prompts).toHaveLength(1);
+    expect(r.data).toMatchObject({ ok: true });
     expect(r.degraded.some((d) => d.startsWith("structured_output"))).toBe(false);
   });
 
@@ -565,7 +575,7 @@ describe("structured output by prompt, parse, validate and retry", () => {
     fakes.scriptWith({ steps: [{ kind: "final", text: JSON.stringify({ items: [1, "two"] }) }] });
     const r = await h.run(req({ outputSchema: nested }));
     expect(cap().prompts).toHaveLength(2);
-    expect(cap().prompts[1]).toContain('- items[1]: expected integer, got "two"\n');
+    expect(cap().prompts[1]).toContain("- items[1]: expected integer\n");
     expect(r.degraded.some((d) => d.startsWith("structured_output"))).toBe(true);
   });
 
