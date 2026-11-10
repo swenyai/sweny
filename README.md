@@ -263,16 +263,11 @@ Drift
 <summary>Sample output: pr-risk-review</summary>
 
 ```text
-Risk: high (size m, 6 files)
+Risk: high (size m, 6 files, no test touched)
+Areas: auth (src/auth/session.ts), data-migration (db/migrations/0041_add_index.sql), dependencies (package-lock.json)
 
-- The session cookie is set without the secure flag (src/auth/session.ts @@ -40,6 +40,7 @@ `secure: false,`)
-- A data migration adds an index without CONCURRENTLY (db/migrations/0041_add_index.sql @@ -0,0 +1,3 @@ `CREATE INDEX idx_orders_user ON orders (user_id);`)
-- No test file was touched.
-
-Where to look
-- cookie flags in src/auth/session.ts
-- whether 0041 needs a concurrent index build
-
+- src/auth/session.ts @@ -40,6 +40,7 @@ `secure: false,`: Sets the secure option to false.
+- db/migrations/0041_add_index.sql @@ -0,0 +1,3 @@ `CREATE INDEX idx_orders_user ON orders (user_id);`: Creates index idx_orders_user on orders.user_id.
 Not read: package-lock.json (no patch from GitHub)
 Read-only risk triage. No code was changed.
 ```

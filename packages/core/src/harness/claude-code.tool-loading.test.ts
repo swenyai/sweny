@@ -71,8 +71,10 @@ function fakeClaudeCode({ prompt, options }: { prompt: string; options: any }) {
       additions: 10,
       deletions: 2,
       size: "xs",
-      tests_touched: false,
+      test_files: [],
+      test_file_count: 0,
       source_touched: true,
+      risky_area_count: 0,
       risky_areas: [],
     };
     yield {
