@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/599-strict-sandbox-default] # TEMP #599 probe: remove before the PR
   pull_request:
     branches: [main]
 
