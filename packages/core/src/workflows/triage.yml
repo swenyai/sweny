@@ -1,3 +1,4 @@
+spec_version: "2"
 id: triage
 name: Alert Triage
 workflow_type: monitor
@@ -807,6 +808,12 @@ nodes:
     skills:
       - slack
       - notification
+    # #598: write only for the notification. The slack and notification skills
+    # hold nothing but notification tools; no shell, network or subagents.
+    # File writes stay for a notification written to a file.
+    permissions:
+      access: write
+      deny: [shell, net, subagent]
 edges:
   - from: gather
     to: investigate

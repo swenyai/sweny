@@ -23,6 +23,7 @@ import {
   type WorkflowError,
   type WorkflowWarning,
 } from "./schema.js";
+import { approveDirectiveWarnings } from "./node-policy.js";
 import {
   DEFAULT_MIGRATION_CONFIG,
   migrateWorkflow,
@@ -100,6 +101,7 @@ export function validateParsed(raw: unknown, options: LoaderOptions = {}): Loade
   }
   raw = migrated.workflow;
   const warnings = migrated.applied.length > 0 ? [migrationWarning(migrated.from, migrated.to, options.filePath)] : [];
+  for (const note of migrated.notes) if (note.warning) warnings.push(note.warning);
 
   // Detect legacy `verify:` blocks (renamed to `eval:` in v0.2.0) before the
   // Zod parse. workflowZ is intentionally non-strict at the top level, so a
@@ -140,5 +142,6 @@ export function validateParsed(raw: unknown, options: LoaderOptions = {}): Loade
   }
 
   warnings.push(...schemaWarnings.map((w) => `${w.code}: ${w.message}`));
+  warnings.push(...approveDirectiveWarnings(parsed));
   return warnings.length > 0 ? { ok: true, workflow: parsed, warnings } : { ok: true, workflow: parsed };
 }

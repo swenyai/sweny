@@ -1,8 +1,12 @@
+spec_version: "2"
 id: monitor-example
 name: URL Change Monitor (example)
 description: Watch a set of URLs for content or status changes and alert when something changes.
 workflow_type: monitor
 entry: check-sources
+
+# Safe by default (spec_version 2): every node is read-only except
+# compare-baseline, which saves the baseline file.
 
 nodes:
   check-sources:
@@ -46,6 +50,10 @@ nodes:
       Write the current snapshot back to .sweny/monitor-baseline.json so
       the next run has something to compare against. Report which URLs
       changed, if any.
+    # Write only to save the baseline file: no shell, network, or subagents.
+    permissions:
+      access: write
+      deny: [shell, net, subagent]
     output:
       type: object
       properties:

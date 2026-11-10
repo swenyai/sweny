@@ -6,6 +6,8 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { triageWorkflow } from "../../workflows/index.js";
+import { TESTED_CODEX_VERSION } from "../../harness/codex.js";
+import { CODEX_AUTH_HINT } from "../../harness/auth.js";
 
 // First-run contract (#379 #381 #382 #384), exercised through the built CLI.
 // No workflow here ever reaches an LLM: every case fails or finishes before
@@ -39,13 +41,13 @@ function sandbox(opts: { login?: boolean } = {}) {
     fs.mkdirSync(path.join(home, ".claude"));
     fs.writeFileSync(path.join(home, ".claude", ".credentials.json"), "{}");
   }
-  const run = (args: string[]) => {
+  const run = (args: string[], extraEnv: Record<string, string> = {}) => {
     const r = spawnSync("node", [CLI_BIN, ...args], {
       cwd,
       encoding: "utf-8",
       timeout: 30_000,
       // Deliberately minimal: no tokens, no API keys. stdin is a pipe (non-TTY).
-      env: { PATH: process.env.PATH ?? "", HOME: home, NO_COLOR: "1", FORCE_COLOR: "0" },
+      env: { PATH: process.env.PATH ?? "", HOME: home, NO_COLOR: "1", FORCE_COLOR: "0", ...extraEnv },
     });
     return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", timedOut: r.error != null };
   };
@@ -145,7 +147,12 @@ describe.runIf(HAS_BUILD)("missing skill credentials (#381)", () => {
     expect(r.status).toBe(0);
     const parsed = JSON.parse(r.stdout);
     expect(parsed.valid).toBe(true);
-    expect(parsed.warnings).toEqual(['skill "github" needs GITHUB_TOKEN (set it in .env)']);
+    const needs = (parsed.warnings as string[]).filter((w) => w.includes("needs"));
+    expect(needs).toEqual(['skill "github" needs GITHUB_TOKEN (set it in .env)']);
+    // #598: a v1 file also says, once per node, that the node writes only because nothing limits it.
+    for (const id of ["a", "b", "c"]) {
+      expect((parsed.warnings as string[]).filter((w) => w.startsWith(`Node "${id}" can write`))).toHaveLength(1);
+    }
   });
 });
 
@@ -224,6 +231,57 @@ describe.runIf(HAS_BUILD)("sweny check (#382)", () => {
     const r = sb.run(["check"]);
     expect(r.status).toBe(1);
     expect(flat(r.stdout + r.stderr)).toMatch(/GITHUB_TOKEN/);
+  });
+});
+
+// #532: check renders the agent's own diagnosis, even when its run gate fails.
+describe.runIf(HAS_BUILD)("sweny check diagnoses every agent (#532)", () => {
+  /** A fake `codex` on its own PATH dir: prints a version, says it is not logged in. */
+  function fakeCodexDir(): string {
+    const bin = tmp("bin");
+    const exe = path.join(bin, "codex");
+    fs.writeFileSync(
+      exe,
+      [
+        "#!/bin/sh",
+        `if [ "$1" = "--version" ]; then echo "codex-cli ${TESTED_CODEX_VERSION}"; exit 0; fi`,
+        'echo "Not logged in" >&2',
+        "exit 1",
+        "",
+      ].join("\n"),
+    );
+    fs.chmodSync(exe, 0o755);
+    return bin;
+  }
+
+  it("codex with no credential: renders the CLI and auth lines, then exits 1", () => {
+    const sb = sandbox();
+    expect(sb.run(["new", "--template", "explain-repo", "--yes"]).status).toBe(0);
+    fs.appendFileSync(path.join(sb.cwd, ".sweny.yml"), "\ncoding-agent-provider: codex\n");
+    const bin = fakeCodexDir();
+    const r = sb.run(["check"], { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}` });
+    // The real output, for the PR and for anyone reading the CI log.
+    console.log(`--- sweny check sample (#532) ---\n${r.stdout}${r.stderr}--- end sample ---`);
+    const out = flat(r.stdout + r.stderr);
+    expect(r.status).toBe(1);
+    expect(out).toContain(`✓ Agent CLI (codex) ${TESTED_CODEX_VERSION} (${path.join(bin, "codex")})`);
+    expect(out).toContain(flat(`✗ Agent auth (codex) ${CODEX_AUTH_HINT}`));
+    // The run gate's old success line is gone, and no ANSI under NO_COLOR.
+    expect(out).not.toMatch(/Agent \(codex\) ready/);
+    expect(r.stdout).not.toMatch(/\x1b\[/);
+  });
+
+  it("SWENY_ASCII draws the same box with ASCII glyphs", () => {
+    const sb = sandbox();
+    expect(sb.run(["new", "--template", "explain-repo", "--yes"]).status).toBe(0);
+    fs.appendFileSync(path.join(sb.cwd, ".sweny.yml"), "\ncoding-agent-provider: codex\n");
+    const bin = fakeCodexDir();
+    const r = sb.run(["check"], { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`, SWENY_ASCII: "1" });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/^ {2}\+-+\+$/m);
+    expect(r.stdout).toMatch(/\| {2}\+ {2}Agent CLI \(codex\)/);
+    expect(r.stdout).toMatch(/\| {2}x {2}Agent auth \(codex\)/);
+    expect(r.stdout).not.toMatch(/[│╭✓✗]/);
   });
 });
 

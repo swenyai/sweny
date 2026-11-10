@@ -152,6 +152,14 @@ export interface HarnessRunRequest extends ClaudeRunRequest {
 export interface HarnessRunResult extends NodeResult {
   harness: HarnessInfo;
   degraded: string[];
+  /**
+   * Names of every tool the agent was given for this run, as the agent itself
+   * listed them (Claude Code: the init message; MCP tools as
+   * `mcp__<server>__<tool>`). The executor repairs a skipped required tool
+   * only when it is on this list. Absent when the harness does not report it,
+   * and then no such repair happens. Never journaled.
+   */
+  agentTools?: string[];
 }
 
 export interface HarnessCompleteRequest {
@@ -174,6 +182,26 @@ export interface HarnessCompleteRequest {
   onUsage?: (usage: NodeUsage) => void;
 }
 
+/**
+ * One line of `sweny check` for the agent (#532): the CLI and its version, a
+ * credential, a stored login, an upstream probe. `detail` names credentials,
+ * never their values.
+ */
+export interface HarnessCheck {
+  name: string;
+  status: "ok" | "fail" | "skip";
+  detail: string;
+}
+
+export interface HarnessDiagnoseOptions {
+  /** Where credentials are read from (default: `process.env`). */
+  env?: Record<string, string | undefined>;
+  /** Timeout for each probe (default: 5000 ms). */
+  timeoutMs?: number;
+  /** Stored-login probe override (Claude Code, Codex). Default: the adapter's own file probe. */
+  hasLogin?: () => boolean;
+}
+
 export interface AgentHarness {
   readonly id: HarnessId;
   readonly capabilities: HarnessCapabilities;
@@ -182,6 +210,13 @@ export interface AgentHarness {
   /** Logger the adapter reports to; core reuses it for routing parse warnings. */
   readonly logger?: Logger;
   preflight(): Promise<{ ok: true; version: string } | { ok: false; reason: string }>;
+  /**
+   * `sweny check` (#532): each thing this agent needs, checked and reported
+   * line by line. Read-only and cheap: CLI version and status commands, env
+   * and file presence, and an upstream request only where one costs no model
+   * tokens. Never a model call. Optional; `sweny check` reports its absence.
+   */
+  diagnose?(opts?: HarnessDiagnoseOptions): Promise<HarnessCheck[]>;
   run(req: HarnessRunRequest): Promise<HarnessRunResult>;
   /** One completion, no tools, no MCP. null = failed (callers fail closed). */
   complete(req: HarnessCompleteRequest): Promise<string | null>;

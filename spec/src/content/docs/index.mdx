@@ -61,7 +61,7 @@ The reference implementation is [`@sweny-ai/core`](https://github.com/swenyai/sw
 
 ## Versioning
 
-Every workflow file declares the spec version it was written against with a top-level [`spec_version`](/workflow#spec-version) field, a positive integer string such as `"1"`. A file without the field is version 1. This document describes version 1.
+Every workflow file declares the spec version it was written against with a top-level [`spec_version`](/workflow#spec-version) field, a positive integer string such as `"2"`. A file without the field is version 1. This document describes version 2, which changed one default: a node that declares no `permissions` and no `outputs`, in a workflow that declares no `permissions`, is `read` (in version 1 it was `write`).
 
 - **Non-breaking additions** (new optional fields, new event types) are additive to the current version and do not change `spec_version`.
 - **Breaking changes** (field removals, semantic changes) bump `spec_version` and ship with a migration from the previous version.

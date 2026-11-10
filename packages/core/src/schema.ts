@@ -367,7 +367,7 @@ export const safeOutputDeclarationZ = z
     type: z.enum(SAFE_OUTPUT_TYPES),
     via: z.string().min(1).optional(),
     max: z.number().int().min(1).max(SAFE_OUTPUT_MAX_CEILING).optional(),
-    target: z.string().min(1).optional(),
+    target: z.union([z.string().min(1), z.object({ input: z.string().min(1) }).strict()]).optional(),
     title_prefix: z.string().min(1).max(64).optional(),
     labels: z.array(z.string().min(1)).min(1).optional(),
     expires: z.string().regex(SAFE_OUTPUT_EXPIRES_PATTERN).optional(),
@@ -533,6 +533,7 @@ export interface WorkflowError {
     | "UNBOUNDED_CYCLE"
     | "AMBIGUOUS_EDGES"
     | "UNSUPPORTED_EVAL_POLICY"
+    | "DUPLICATE_EVALUATOR"
     | "INVALID_INLINE_SKILL"
     | "EDGE_ITERATIONS_EXCEEDED"
     | "RETRY_MAX_EXCEEDED"
@@ -857,6 +858,23 @@ export function validateWorkflow(
         message: `Node "${nodeId}" declares eval_policy "${node.eval_policy}", which is reserved but not yet implemented; use "all_pass" (the only supported policy in v1.0)`,
         nodeId,
       });
+    }
+  }
+
+  // Evaluator names are a node's eval keys: results, retry preambles, routes
+  // (`node.evals.<name>.pass`) and the required-tool repair look a verdict up
+  // by name, so two evaluators with one name would make that lookup ambiguous.
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    const seen = new Set<string>();
+    for (const e of node.eval ?? []) {
+      if (seen.has(e.name)) {
+        errors.push({
+          code: "DUPLICATE_EVALUATOR",
+          message: `Node "${nodeId}" declares two evaluators named "${e.name}"; evaluator names must be unique within a node`,
+          nodeId,
+        });
+      }
+      seen.add(e.name);
     }
   }
 
@@ -1222,9 +1240,17 @@ export const workflowJsonSchema = {
           description: "Max writes of this type from this node per run. Default 1.",
         },
         target: {
-          type: "string",
-          minLength: 1,
-          description: "Pinned target (GitHub owner/repo, Linear team id). GitHub default: GITHUB_REPOSITORY.",
+          description:
+            "Pinned target (GitHub owner/repo, Linear team id), or { input: <name> } to take it from a run input. GitHub default: GITHUB_REPOSITORY. An output that pins number never takes its GitHub repository from the agent.",
+          oneOf: [
+            { type: "string", minLength: 1 },
+            {
+              type: "object",
+              required: ["input"],
+              additionalProperties: false,
+              properties: { input: { type: "string", minLength: 1 } },
+            },
+          ],
         },
         title_prefix: {
           type: "string",
@@ -1273,7 +1299,7 @@ export const workflowJsonSchema = {
       type: "string",
       pattern: "^[1-9][0-9]*$",
       description:
-        "Workflow spec version as a positive integer string. Absent means 1. Older versions are migrated in memory on load; newer than the CLI supports is refused. Run `sweny workflow upgrade <file>` to rewrite a file at the current version.",
+        "Workflow spec version as a positive integer string. Absent means 1. Version 2 is safe by default: a node that declares no permissions and no outputs, in a workflow that declares no permissions, is read-only. Version 1 files are migrated in memory on load, keeping write on such nodes with one warning each; newer than the CLI supports is refused. Run `sweny workflow upgrade <file>` to rewrite a file at the current version.",
     },
     entry: { type: "string", minLength: 1, description: "ID of the entry node" },
     rules: {
@@ -1308,7 +1334,8 @@ export const workflowJsonSchema = {
     },
     permissions: {
       $ref: "#/$defs/Permissions",
-      description: "Default and ceiling for every node's permissions. Absent: write.",
+      description:
+        "Default and ceiling for every node's permissions. Absent: read (spec_version 2), write (spec_version 1).",
     },
     safe_outputs: {
       type: "object",
@@ -1542,7 +1569,7 @@ export const workflowJsonSchema = {
           permissions: {
             $ref: "#/$defs/Permissions",
             description:
-              "What this node's agent may do. Absent: read when the node declares outputs, else the workflow's permissions, else write.",
+              "What this node's agent may do. Absent: read when the node declares outputs, else the workflow's permissions, else read (spec_version 2) or write (spec_version 1).",
           },
           outputs: {
             type: "array",

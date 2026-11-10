@@ -8,6 +8,7 @@
 
 import type { Workflow, Skill, Claude, Logger } from "./types.js";
 import { workflowZ, validateWorkflow, workflowJsonSchema } from "./schema.js";
+import { CURRENT_SPEC_VERSION } from "./migrations.js";
 
 // ─── Public interface ─────────────────────────────────────────────
 
@@ -78,6 +79,7 @@ export function buildSystemPrompt(skills: Skill[], existingWorkflow?: Workflow):
     "- Use a natural-language `when` only for a fuzzy condition no declared field can express",
     "- Put safety conditions (anything that gates a write, a PR or an issue) in expressions, never in natural language",
     "- Every node must be reachable from the entry node",
+    "- Nodes are read-only unless they declare otherwise (spec_version 2). A node that files issues, comments or opens PRs declares `outputs` (comment, issue, pr, label, issue_state) and stays read-only; any other node that must change something declares `permissions: write`, narrowed with `deny` to the built-in tool classes it does not need",
     "- Return ONLY the workflow JSON object — no markdown fences, no explanation",
   ];
 
@@ -94,9 +96,18 @@ export function buildSystemPrompt(skills: Skill[], existingWorkflow?: Workflow):
  * adds a `summary` key from the text response. We strip `summary`
  * and any other non-workflow keys before parsing.
  */
-export function extractWorkflow(data: Record<string, unknown>): Workflow {
-  // Remove keys added by ClaudeClient that aren't part of the workflow schema
-  const { summary: _summary, ...rest } = data as { summary?: unknown } & Record<string, unknown>;
+export function extractWorkflow(data: Record<string, unknown>, keep?: Pick<Workflow, "spec_version">): Workflow {
+  // Remove keys added by ClaudeClient that aren't part of the workflow schema.
+  // The spec version is ours to set, never the model's (#598): a new workflow is
+  // current (read-only by default), a refined one keeps the version it had.
+  const {
+    summary: _summary,
+    spec_version: _modelVersion,
+    ...body
+  } = data as { summary?: unknown; spec_version?: unknown } & Record<string, unknown>;
+  // `keep` (a refine) holds the version the workflow had, possibly none; a build gets the current one.
+  const specVersion = keep ? keep.spec_version : String(CURRENT_SPEC_VERSION);
+  const rest = specVersion === undefined ? body : { spec_version: specVersion, ...body };
 
   // workflowZ.parse throws a ZodError on invalid input
   const parsed = workflowZ.parse(rest);
@@ -212,5 +223,5 @@ export async function refineWorkflow(
     throw new Error(`Claude failed to refine workflow: ${result.data.error ?? "unknown error"}`);
   }
 
-  return extractWorkflow(result.data);
+  return extractWorkflow(result.data, { spec_version: workflow.spec_version });
 }

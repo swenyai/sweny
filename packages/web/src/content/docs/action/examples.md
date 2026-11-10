@@ -111,7 +111,6 @@ jobs:
           # Issue tracking
           issue-tracker-provider: linear
           linear-api-key: ${{ secrets.LINEAR_API_KEY }}
-          linear-team-id: ${{ vars.LINEAR_TEAM_ID }}
 
           # Notifications
           notification-provider: slack
@@ -123,7 +122,7 @@ jobs:
           investigation-depth: standard
 ```
 
-Secrets needed: `CLAUDE_CODE_OAUTH_TOKEN`, `DD_API_KEY`, `DD_APP_KEY`, `LINEAR_API_KEY`, `SLACK_WEBHOOK_URL`. Variable: `LINEAR_TEAM_ID`.
+Secrets needed: `CLAUDE_CODE_OAUTH_TOKEN`, `DD_API_KEY`, `DD_APP_KEY`, `LINEAR_API_KEY`, `SLACK_WEBHOOK_URL`.
 
 ## Implement from a Linear issue
 

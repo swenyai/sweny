@@ -1,13 +1,20 @@
+spec_version: "2"
 id: file-ops
 name: File Operations
 description: Write a file, read it back, then delete it
 entry: write
+# Safe by default (spec_version 2): read is read-only; write and delete each
+# declare the one write they need.
 nodes:
   write:
     name: Write File
     instruction: >-
       Create a file called "hello.txt" in the current directory with the content "Hello from SWEny!".
       Use the available tools to write the file.
+    # Write only to create the file: no shell, edits, network, or subagents.
+    permissions:
+      access: write
+      deny: [shell, edit, net, subagent]
   read:
     name: Read File
     instruction: >-
@@ -18,6 +25,10 @@ nodes:
     instruction: >-
       Delete the file "hello.txt" that was created earlier.
       Confirm the file has been removed.
+    # Deleting a file needs the shell; no network or subagents.
+    permissions:
+      access: write
+      deny: [net, subagent]
 edges:
   - from: write
     to: read

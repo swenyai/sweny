@@ -1,0 +1,73 @@
+# Demo capture (#537): run the explain-repo starter on THIS repo for real, then
+# convert the recorded run into the `sweny try` fixture and upload it as an artifact.
+#
+# Manual only. Never on push, never on a schedule: each run spends up to the
+# max-cost cap below. The owner triggers it after review:
+#   gh workflow run capture-demo.yml -R swenyai/sweny
+# then downloads the `try-fixture` artifact and commits it as
+# packages/core/src/cli/try-fixture.json (see the runbook in the PR that added this).
+#
+# Read-only token, fail-closed agent sandbox, no PR comment, no failure issue.
+# The agent sees only this public checkout.
+name: Capture demo
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capture-demo
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The starter's own YAML, written the way `sweny new` writes it, so the captured
+      # run is of the template users get. Only the workflow file is kept.
+      - name: Write the explain-repo starter
+        run: |
+          npx -y @sweny-ai/core@latest new --template explain-repo --yes </dev/null
+          rm -f .env .sweny.yml
+          test -f .sweny/workflows/explain-repo.yml
+
+      # First-party action on its moving release tag: the v5 path every user runs, and
+      # a CLI new enough to record per-tool counts. zizmor's pin rule is waived inline.
+      - uses: swenyai/sweny@v5 # zizmor: ignore[unpinned-uses]
+        with:
+          workflow: .sweny/workflows/explain-repo.yml
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          max-cost: "0.50" # USD for the whole run, harness-reported; a crossing halts it
+          pr-comment: "false"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SWENY_SANDBOX: strict # fail closed instead of running the agent unsandboxed
+
+      # Same CLI the Action just installed. The secrets are in this step's env only so the
+      # capture scrubs their values from the answer; they are never written anywhere.
+      - name: Convert the recorded run to a try fixture
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          sweny try --capture latest --repo "$REPO" --out try-fixture.json
+          {
+            echo '### Captured fixture'
+            echo
+            echo "Download the try-fixture artifact and commit it as packages/core/src/cli/try-fixture.json."
+            echo
+            jq '{illustrative, captured_at, workflow, sample_repo, harness, policy, nodes: (.nodes | map_values({duration_ms, tool_calls: (.tool_calls | add // 0), usage}))}' try-fixture.json | sed 's/^/    /'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: try-fixture
+          path: try-fixture.json
+          if-no-files-found: error

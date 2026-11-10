@@ -891,7 +891,7 @@ describe("write stage: issue_state", () => {
     const bare = opts({ ...pinned, env: {}, intents: [reopen({ state: "close", target: "evil/repo" })] });
     expect((await applySafeOutputs(bare.o)).receipts[0]).toMatchObject({
       status: "refused",
-      reason: "close needs a pinned repository",
+      reason: "pinned output needs a trusted repository",
     });
     expect(bare.gh.calls).toEqual([]);
     // A different repo than the resolved one is refused.
@@ -1115,5 +1115,67 @@ describe("issue_state: workflow validation", () => {
     expect(codes).toEqual(["UNSUPPORTED_OUTPUT"]);
     const via = validateWorkflow(wf([{ type: "issue_state", state: "reopen", via: "sentry" }])).map((e) => e.code);
     expect(via).toEqual(["UNSUPPORTED_OUTPUT"]);
+  });
+});
+
+describe("a pinned output's repository comes only from trusted sources (#598)", () => {
+  const pr = (target?: string) =>
+    intent({ type: "comment", body: "Review", title: undefined, ...(target ? { target } : {}) });
+
+  it("locally (no GITHUB_REPOSITORY, no declared target): an agent-named repo is refused", async () => {
+    const { o, gh } = opts({
+      declarations: [{ type: "comment", number: { input: "pr_number" } }],
+      intents: [pr("victim/other")],
+      input: { pr_number: 5 },
+      env: {},
+    });
+    expect((await applySafeOutputs(o)).receipts[0]).toMatchObject({
+      status: "refused",
+      reason: "pinned output needs a trusted repository",
+    });
+    expect(gh.calls).toEqual([]);
+  });
+
+  it("in Actions: an agent-named repo other than GITHUB_REPOSITORY is refused", async () => {
+    const { o, gh } = opts({
+      declarations: [{ type: "comment", number: { input: "pr_number" } }],
+      intents: [pr("victim/other")],
+      input: { pr_number: 5 },
+    });
+    expect((await applySafeOutputs(o)).receipts[0]).toMatchObject({
+      status: "refused",
+      reason: "target outside the declared target",
+    });
+    expect(gh.calls).toEqual([]);
+  });
+
+  it("a target bound to the run's repo input pins the repository, locally too", async () => {
+    const decl = { type: "comment" as const, number: { input: "pr_number" }, target: { input: "repo" } };
+    const ok = opts({ declarations: [decl], intents: [pr()], input: { repo: "acme/web", pr_number: 5 }, env: {} });
+    expect((await applySafeOutputs(ok.o)).receipts[0]).toMatchObject({ status: "applied", target: "acme/web" });
+    expect(ok.gh.calls[0].input).toEqual({ repo: "acme/web", issue_number: 5, body: "Review" });
+
+    const evil = opts({
+      declarations: [decl],
+      intents: [pr("victim/other")],
+      input: { repo: "acme/web", pr_number: 5 },
+      env: {},
+    });
+    expect((await applySafeOutputs(evil.o)).receipts[0]).toMatchObject({
+      status: "refused",
+      reason: "target outside the declared target",
+    });
+    expect(evil.gh.calls).toEqual([]);
+  });
+
+  it("an empty bound input falls back to GITHUB_REPOSITORY, then refuses", async () => {
+    const decl = { type: "comment" as const, number: { input: "pr_number" }, target: { input: "repo" } };
+    const ci = opts({ declarations: [decl], intents: [pr()], input: { repo: "", pr_number: 5 } });
+    expect((await applySafeOutputs(ci.o)).receipts[0]).toMatchObject({ status: "applied", target: "acme/api" });
+    const local = opts({ declarations: [decl], intents: [pr()], input: { repo: " ", pr_number: 5 }, env: {} });
+    expect((await applySafeOutputs(local.o)).receipts[0]).toMatchObject({
+      status: "refused",
+      reason: "pinned output needs a trusted repository",
+    });
   });
 });
