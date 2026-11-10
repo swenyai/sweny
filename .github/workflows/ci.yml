@@ -306,7 +306,9 @@ jobs:
           srt_settings="$RUNNER_TEMP/srt-check.json"
           echo '{"network":{"allowedDomains":[],"deniedDomains":[]},"filesystem":{"denyRead":[],"allowRead":[],"allowWrite":[],"denyWrite":[]}}' > "$srt_settings"
           srt --settings "$srt_settings" -- true
-          sweny workflow validate examples/monitor.yml
+          # The Action installs the released CLI, which can lag the repo's spec_version, so validate a file every release reads.
+          printf 'id: setup-check\nname: Setup check\nentry: a\nnodes:\n  a:\n    name: A\n    instruction: Say hello.\n    skills: []\nedges: []\n' > "$RUNNER_TEMP/setup-check.yml"
+          sweny workflow validate "$RUNNER_TEMP/setup-check.yml"
 
   workflow-lint:
     name: Workflow lint
