@@ -1160,6 +1160,41 @@ const fixtures: Fixture[] = [
     input: { id: "d", name: "D", entry: "a", nodes: { a: { ...baseNode(), route_by } }, edges: [] },
     expected,
   })),
+  // ── output_grounded (#580): function-only, strict config ─────────
+  ...(
+    [
+      ["function evaluator with an empty output_grounded", "function", {}, true],
+      [
+        "function evaluator with a full output_grounded",
+        "function",
+        {
+          paths: ["a"],
+          ids: ["b"],
+          patterns: ["url"],
+          allow: ["X-1"],
+          tools: ["t"],
+          inputs: false,
+          context: true,
+          stale: true,
+        },
+        true,
+      ],
+      ["output_grounded on a value evaluator", "value", {}, false],
+      ["output_grounded with an unknown key", "function", { nope: 1 }, false],
+      ["output_grounded with an empty paths list", "function", { paths: [] }, false],
+      ["output_grounded with a non-boolean stale", "function", { stale: "yes" }, false],
+    ] as [string, string, Record<string, unknown>, boolean][]
+  ).map(([name, kind, output_grounded, expected]): Fixture => ({
+    name: `#580 ${name}`,
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: { ...baseNode(), eval: [{ name: "g", kind, rule: { output_grounded } }] } },
+      edges: [],
+    },
+    expected,
+  })),
 ];
 
 describe("Zod ↔ JSON Schema conformance", () => {
