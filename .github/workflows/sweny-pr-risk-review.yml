@@ -1,0 +1,40 @@
+# Dogfood (#537): the bundled pr-risk-review pack, installed the way
+# `sweny new --template pr-risk-review` writes it, plus the repo's own limits:
+# a per-run spend cap, a fail-closed agent sandbox, and no run for dependabot.
+# Workflow: .sweny/workflows/pr-risk-review.yml (a copy of the pack; keep in sync
+# with packages/core/src/cli/packs.ts RISK_YAML). Read-only: the one review
+# comment is a safe output that sweny applies, updated in place on later runs.
+name: SWEny PR risk review
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write # the one review comment, updated in place
+
+concurrency:
+  group: sweny-pr-risk-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  risk:
+    # Fork PRs get a read-only token and no secrets; dependabot PRs get no repo secrets either.
+    if: >
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: swenyai/sweny@v5
+        with:
+          workflow: .sweny/workflows/pr-risk-review.yml
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          input: '{"repo": "${{ github.repository }}", "pr_number": ${{ github.event.pull_request.number }}}'
+          max-cost: "0.50" # USD per run, harness-reported; a crossing halts the run
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SWENY_SANDBOX: strict # fail closed instead of running the agent unsandboxed
