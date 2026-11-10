@@ -143,7 +143,7 @@ describe("collectCredentials", () => {
     expect(keys).toContain("DD_APP_KEY");
     expect(keys).toContain("DD_SITE");
     expect(keys).toContain("LINEAR_API_KEY");
-    expect(keys).toContain("LINEAR_TEAM_ID");
+    expect(keys).not.toContain("LINEAR_TEAM_ID");
     expect(keys).toContain("SLACK_BOT_TOKEN");
   });
 
@@ -762,7 +762,7 @@ describe("collectCredentialsForSkills", () => {
     expect(keys).toContain("ANTHROPIC_API_KEY");
     expect(keys).toContain("GITHUB_TOKEN");
     expect(keys).toContain("LINEAR_API_KEY");
-    expect(keys).toContain("LINEAR_TEAM_ID");
+    expect(keys).not.toContain("LINEAR_TEAM_ID");
   });
 
   it("deduplicates credentials across skills", () => {

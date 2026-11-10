@@ -16,6 +16,7 @@ import {
   JournalLockedError,
   JournalMismatchError,
   JournalVersionError,
+  JournalWriteError,
   REDACTED,
   RunJournal,
   acquireRunLock,
@@ -88,7 +89,9 @@ describe("hashing", () => {
 
   it("workflowHashOf binds the effective spec_version", () => {
     const wf = { id: "w", entry: "a", nodes: {}, edges: [] } as unknown as Workflow;
-    expect(workflowHashOf(wf)).toBe(canonicalHash({ ...wf, spec_version: String(CURRENT_SPEC_VERSION) }));
+    // Absent runs as v1 (#598), so it hashes as v1, not as the current version.
+    expect(workflowHashOf(wf)).toBe(canonicalHash({ ...wf, spec_version: "1" }));
+    expect(workflowHashOf(wf)).not.toBe(canonicalHash({ ...wf, spec_version: String(CURRENT_SPEC_VERSION) }));
     expect(workflowHashOf({ ...wf, spec_version: "1" } as Workflow)).toBe(canonicalHash({ ...wf, spec_version: "1" }));
   });
 
@@ -1892,5 +1895,469 @@ describe("journal: second-pass edges", () => {
     await call(j, fake, "github_create_issue", { repo: "o/r", title: "T" });
     const applied = rawRecords(j.file).find((r) => r.type === "output:applied")!;
     expect(applied.output).toStrictEqual({ id: 1, x: { b: { c: { id: 5 } } } });
+  });
+});
+
+// ─── Third pass: provider lookups, receipts, reconcile and the journal's own lifecycle ───
+
+/** A pending write whose intent was journaled at `at`, so a lookup reaches back from just before it. */
+function pendingAt(key: string, at: string, over: { allowRepeatWrites?: boolean } = {}) {
+  const r = pendingJournal({ pending: [key], ...over });
+  r.plan.intents.set(key, { ...r.plan.intents.get(key)!, at } as never);
+  return r;
+}
+const fullPage = (created: (i: number) => string, body = "other") =>
+  Array.from({ length: 100 }, (_, i) => ({ number: 1000 - i, id: i + 1, body, created_at: created(i) }));
+
+describe("journal: provider lookup edges", () => {
+  const issueArgs = { repo: "o/r", title: "T" };
+  const issueKey = keyOf("github_create_issue", issueArgs);
+  const commentArgs = { repo: "o/r", issue_number: 7, body: "hi" };
+  const commentKey = keyOf("github_add_comment", commentArgs);
+
+  it("a listed item whose body is not a string is not a hit", async () => {
+    const fake = fakeProvider(
+      "github",
+      { github_create_issue: { number: 1 } },
+      { github_list_issues: [{ number: 3, body: null }] },
+    );
+    await call(pendingJournal({ pending: [issueKey] }).j, fake, "github_create_issue", issueArgs);
+    expect(fake.writes).toHaveLength(1);
+  });
+
+  it("reads all 30 pages before it gives up", async () => {
+    const fake = fakeProvider(
+      "github",
+      { github_create_issue: {} },
+      { github_list_issues: fullPage(() => "2999-01-01") },
+    );
+    await expect(
+      call(pendingJournal({ pending: [issueKey] }).j, fake, "github_create_issue", issueArgs),
+    ).rejects.toThrow("(too many issues to search (more than 3000))");
+    expect(fake.reads).toHaveLength(30);
+  });
+
+  it("a listing that is not a list cannot confirm the write", async () => {
+    const issues = fakeProvider("github", { github_create_issue: {} }, { github_list_issues: { items: [] } });
+    await expect(
+      call(pendingJournal({ pending: [issueKey] }).j, issues, "github_create_issue", issueArgs),
+    ).rejects.toThrow(
+      "cannot confirm whether github_create_issue was applied before the crash (issue list unavailable); " +
+        "check the target, then resume with --allow-repeat-writes to send it again",
+    );
+    const comments = fakeProvider("github", { github_add_comment: {} }, { github_list_issue_comments: null });
+    await expect(
+      call(pendingJournal({ pending: [commentKey] }).j, comments, "github_add_comment", commentArgs),
+    ).rejects.toThrow("(comment list unavailable)");
+    expect(issues.writes).toHaveLength(0);
+    expect(comments.writes).toHaveLength(0);
+  });
+
+  it("lists comments from five minutes before the intent was journaled", async () => {
+    const fake = fakeProvider("github", { github_add_comment: {} }, { github_list_issue_comments: [] });
+    await call(pendingAt(commentKey, "2026-01-01T00:10:00.000Z").j, fake, "github_add_comment", commentArgs);
+    expect(fake.reads).toStrictEqual([
+      {
+        tool: "github_list_issue_comments",
+        args: { repo: "o/r", issue_number: 7, since: "2026-01-01T00:05:00.000Z", page: 1 },
+      },
+    ]);
+    // An intent without a usable time lists everything.
+    const all = fakeProvider("github", { github_add_comment: {} }, { github_list_issue_comments: [] });
+    await call(pendingJournal({ pending: [commentKey] }).j, all, "github_add_comment", commentArgs);
+    expect(all.reads[0].args).toStrictEqual({ repo: "o/r", issue_number: 7, page: 1 });
+  });
+
+  it("an issue page whose oldest entry predates the write ends the search: the write is absent", async () => {
+    // Newest first; only the last entry decides, whatever the others say.
+    const page = fullPage((i) => (i === 99 ? "2026-01-01T00:00:00.000Z" : "2026-01-01T00:20:00.000Z"));
+    const fake = fakeProvider("github", { github_create_issue: { number: 1 } }, { github_list_issues: page });
+    await call(pendingAt(issueKey, "2026-01-01T00:10:00.000Z").j, fake, "github_create_issue", issueArgs);
+    expect(fake.reads).toHaveLength(1);
+    expect(fake.writes).toHaveLength(1);
+  });
+
+  it("an issue page reaching back exactly to the lookup start reads on", async () => {
+    const pages = [fullPage(() => "2026-01-01T00:05:00.000Z"), []];
+    const fake = fakeProvider(
+      "github",
+      { github_create_issue: { number: 1 } },
+      { github_list_issues: (a: Record<string, unknown>) => pages[Number(a.page) - 1] },
+    );
+    await call(pendingAt(issueKey, "2026-01-01T00:10:00.000Z").j, fake, "github_create_issue", issueArgs);
+    expect(fake.reads.map((r) => r.args.page)).toStrictEqual([1, 2]);
+    expect(fake.writes).toHaveLength(1);
+  });
+
+  it("comment pages are oldest first: an old page never ends the search", async () => {
+    const pages = [fullPage(() => "2020-01-01T00:00:00.000Z"), [{ id: 9, body: `x ${markerToken(commentKey)}` }]];
+    const fake = fakeProvider(
+      "github",
+      { github_add_comment: {} },
+      { github_list_issue_comments: (a: Record<string, unknown>) => pages[Number(a.page) - 1] },
+    );
+    const out = await call(
+      pendingAt(commentKey, "2026-01-01T00:10:00.000Z").j,
+      fake,
+      "github_add_comment",
+      commentArgs,
+    );
+    expect(out).toStrictEqual({});
+    expect(fake.reads).toHaveLength(2);
+    expect(fake.writes).toHaveLength(0);
+  });
+
+  it("a listing tool that is not read-only is never called; search is the fallback", async () => {
+    const fake = fakeProvider(
+      "github",
+      { github_create_issue: {}, github_list_issues: [] },
+      { github_search_issues: { items: [] } },
+    );
+    await expect(
+      call(pendingJournal({ pending: [issueKey] }).j, fake, "github_create_issue", issueArgs),
+    ).rejects.toThrow("(not in GitHub search, which can lag a just-made write)");
+    expect(fake.reads.map((r) => r.tool)).toStrictEqual(["github_search_issues"]);
+  });
+
+  it("linear: a missing result list or a hit without a description cannot confirm", async () => {
+    const args = { teamId: "t", title: "T" };
+    const key = keyOf("linear_create_issue", args);
+    for (const [result, why] of [
+      [null, "(search returned no result list)"],
+      [{}, "(search returned no result list)"],
+      [{ searchIssues: { nodes: [null] } }, "(search hits carry no description to check for the marker)"],
+      [{ searchIssues: { nodes: [{ id: "x", description: null }] } }, "(search hits carry no description"],
+    ] as const) {
+      const fake = fakeProvider("linear", { linear_create_issue: {} }, { linear_search_issues: result });
+      await expect(
+        call(pendingJournal({ pending: [key] }).j, fake, "linear_create_issue", args),
+        JSON.stringify(result),
+      ).rejects.toThrow(why);
+      expect(fake.writes).toHaveLength(0);
+    }
+  });
+
+  it("linear comments: a missing list cannot confirm; a comment without a body is not a hit", async () => {
+    const args = { issueId: "i", body: "c" };
+    const key = keyOf("linear_add_comment", args);
+    for (const result of [null, { issue: {} }, { issue: { comments: {} } }]) {
+      const fake = fakeProvider("linear", { linear_add_comment: {} }, { linear_list_comments: result });
+      await expect(
+        call(pendingJournal({ pending: [key] }).j, fake, "linear_add_comment", args),
+        JSON.stringify(result),
+      ).rejects.toThrow("(comment list unavailable)");
+    }
+    const fake = fakeProvider(
+      "linear",
+      { linear_add_comment: { commentCreate: { comment: { id: "new" } } } },
+      { linear_list_comments: { issue: { comments: { nodes: [{ id: "c1", body: null }] } } } },
+    );
+    await call(pendingJournal({ pending: [key] }).j, fake, "linear_add_comment", args);
+    expect(fake.writes).toHaveLength(1);
+  });
+});
+
+describe("journal: receipts and refusals", () => {
+  const appliedOutput = async (output: unknown) => {
+    const fake = fakeProvider("github", { github_create_issue: output });
+    const { j } = pendingJournal();
+    await call(j, fake, "github_create_issue", { repo: "o/r", title: "T" });
+    return rawRecords(j.file).find((r) => r.type === "output:applied" || r.type === "output:refused")!;
+  };
+
+  it("a receipt keeps nothing of an output that is not an object", async () => {
+    expect((await appliedOutput("done")).output).toBeNull();
+    expect((await appliedOutput([{ id: 1 }])).output).toBeNull();
+  });
+
+  it("only the top-level output is read as a refusal", async () => {
+    const r = await appliedOutput({ number: 5, inner: { refused: true, reason: "r", id: 2 } });
+    expect(r.type).toBe("output:applied");
+    expect(r.output).toStrictEqual({ number: 5, inner: { id: 2 } });
+  });
+
+  it("a transient refusal keeps its transient flag in the receipt", async () => {
+    const r = await appliedOutput({ refused: true, transient: true, reason: "rate limited" });
+    expect(r.type).toBe("output:refused");
+    expect(r.output).toStrictEqual({ refused: true, reason: "rate limited", transient: true });
+    expect(r.retry).toBe(true);
+  });
+
+  it("a transient refusal is retried only when it names nothing it produced", async () => {
+    const retry = async (extra: Record<string, unknown>) =>
+      (await appliedOutput({ refused: true, transient: true, reason: "r", ...extra })).retry === true;
+    expect(await retry({})).toBe(true);
+    for (const k of ["number", "identifier", "id", "html_url", "url", "reused"]) {
+      expect(await retry({ [k]: 1 }), k).toBe(false);
+    }
+    expect(await retry({ id: undefined, url: null })).toBe(true);
+    expect(await retry({ items: [{}, { id: 3 }] })).toBe(false);
+    expect(await retry({ items: [{}, {}] })).toBe(true);
+    // Too deep to tell counts as naming something: at depth 9, not at depth 8.
+    const nest = (n: number): Record<string, unknown> => (n === 0 ? {} : { a: nest(n - 1) });
+    expect(await retry(nest(8))).toBe(true);
+    expect(await retry(nest(9))).toBe(false);
+    const arrays = (n: number): unknown => (n === 0 ? [] : [arrays(n - 1)]);
+    expect(await retry({ a: arrays(7) })).toBe(true);
+    expect(await retry({ a: arrays(8) })).toBe(false);
+  });
+
+  it("a write refused in an earlier attempt replays its refusal and says so", async () => {
+    const args = { repo: "o/r", title: "T" };
+    const key = keyOf("github_create_issue", args);
+    const replay = async (output: unknown) => {
+      const fake = fakeProvider("github", { github_create_issue: { number: 1 } });
+      const r = pendingJournal();
+      r.plan.refusals.set(key, rec("output:refused", { node: NODE, iteration: 0, key, tool: "x", output }) as never);
+      const got = await call(r.j, fake, "github_create_issue", args);
+      expect(fake.writes).toHaveLength(0);
+      expect(r.info).toHaveBeenCalledWith(
+        "  run journal: github_create_issue was refused in an earlier attempt; not re-sent",
+        { node: NODE },
+      );
+      return got;
+    };
+    expect(await replay({ refused: true, reason: "quota", number: 3 })).toStrictEqual({
+      reason: "quota",
+      number: 3,
+      refused: true,
+    });
+    expect(await replay(undefined)).toStrictEqual({ reason: "the tool refused the write", refused: true });
+    expect(await replay("odd")).toStrictEqual({ reason: "the tool refused the write", refused: true });
+  });
+});
+
+describe("journal: reconcile", () => {
+  const args = { repo: "o/r", title: "T" };
+  const key = keyOf("github_create_issue", args);
+  const ctx = { config: {}, logger: { info() {}, warn() {}, error() {}, debug() {} } };
+  const listing = (items: unknown) =>
+    fakeProvider("github", { github_create_issue: { number: 1 } }, { github_list_issues: items });
+
+  it("a run that is not resumed has nothing to reconcile", async () => {
+    const j = RunJournal.create({ runId: RUN, cwd: tmp() });
+    const fake = listing([]);
+    expect(await j.reconcile(NODE, 0, fake.skill, "github_create_issue", args, ctx)).toBe("absent");
+    expect(fake.reads).toStrictEqual([]);
+  });
+
+  it("a journaled receipt is applied without a lookup", async () => {
+    const fake = listing([]);
+    const { j } = pendingJournal({ receipts: { [key]: { number: 9 } } });
+    expect(await j.reconcile(NODE, 0, fake.skill, "github_create_issue", args, ctx)).toBe("applied");
+    expect(fake.reads).toStrictEqual([]);
+  });
+
+  it("a standing refusal is absent without a lookup; a transient one is looked up", async () => {
+    for (const [retry, reads] of [
+      [undefined, 0],
+      [true, 1],
+    ] as const) {
+      const fake = listing([]);
+      const r = pendingJournal({ pending: [key] });
+      r.plan.refusals.set(key, rec("output:refused", { node: NODE, iteration: 0, key, tool: "x", retry }) as never);
+      expect(await r.j.reconcile(NODE, 0, fake.skill, "github_create_issue", args, ctx)).toBe("absent");
+      expect(fake.reads, String(retry)).toHaveLength(reads);
+    }
+  });
+
+  it("looks only at writes with an intent, or in a checkpointed write stage", async () => {
+    const none = listing([]);
+    expect(await pendingJournal().j.reconcile(NODE, 0, none.skill, "github_create_issue", args, ctx)).toBe("absent");
+    expect(none.reads).toStrictEqual([]);
+    const staged = listing([]);
+    expect(
+      await pendingJournal({ checkpointed: true }).j.reconcile(NODE, 0, staged.skill, "github_create_issue", args, ctx),
+    ).toBe("absent");
+    expect(staged.reads).toHaveLength(1);
+  });
+
+  it("a write found on the provider is journaled as recovered and replayed, never re-sent", async () => {
+    const fake = listing([{ number: 5, title: "x", body: `b ${markerToken(key)}` }]);
+    const r = pendingJournal({ pending: [key] });
+    expect(await r.j.reconcile(NODE, 0, fake.skill, "github_create_issue", args, ctx)).toBe("applied");
+    expect(r.info).toHaveBeenCalledWith("  run journal: github_create_issue found on the provider; not re-sent", {
+      node: NODE,
+    });
+    expect(rawRecords(r.j.file).at(-1)).toMatchObject({
+      type: "output:applied",
+      node: NODE,
+      iteration: 0,
+      key,
+      tool: "github_create_issue",
+      output: { number: 5 },
+      recovered: true,
+    });
+    expect(await r.j.reconcile(NODE, 0, fake.skill, "github_create_issue", args, ctx)).toBe("applied");
+    expect(await call(r.j, fake, "github_create_issue", args)).toStrictEqual({ number: 5 });
+    expect(fake.writes).toHaveLength(0);
+    expect(fake.reads).toHaveLength(1);
+  });
+
+  it("an unconfirmable pending write is unknown, unless repeats are allowed; an absent one is absent", async () => {
+    const crowded = () => listing({ not: "a list" });
+    expect(
+      await pendingJournal({ pending: [key] }).j.reconcile(NODE, 0, crowded().skill, "github_create_issue", args, ctx),
+    ).toBe("unknown");
+    expect(
+      await pendingJournal({ pending: [key], allowRepeatWrites: true }).j.reconcile(
+        NODE,
+        0,
+        crowded().skill,
+        "github_create_issue",
+        args,
+        ctx,
+      ),
+    ).toBe("absent");
+    expect(
+      await pendingJournal({ checkpointed: true }).j.reconcile(
+        NODE,
+        0,
+        crowded().skill,
+        "github_create_issue",
+        args,
+        ctx,
+      ),
+    ).toBe("absent");
+    expect(
+      await pendingJournal({ pending: [key] }).j.reconcile(
+        NODE,
+        0,
+        listing([]).skill,
+        "github_create_issue",
+        args,
+        ctx,
+      ),
+    ).toBe("absent");
+  });
+});
+
+describe("journal: lifecycle edges", () => {
+  const writeError = (fn: () => void): Error => {
+    let err: unknown;
+    try {
+      fn();
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(JournalWriteError);
+    return err as Error;
+  };
+  const tail = "; the run stopped so a resume cannot lose spend or repeat a write";
+
+  it("an append before begin fails for want of a key, and logs it", () => {
+    const error = vi.fn();
+    const j = RunJournal.create({ runId: RUN, cwd: tmp(), logger: { info() {}, warn() {}, error, debug() {} } });
+    const err = writeError(() => j.nodeStart("a", 1));
+    expect(err.message).toBe(`run journal: no signing key for this run${tail}`);
+    expect(error).toHaveBeenCalledWith(`  run journal: no signing key for this run${tail}`);
+  });
+
+  it("a state dir inside the workspace fails with the location error's own words", () => {
+    const cwd = tmp();
+    process.env.SWENY_STATE_DIR = join(cwd, ".state");
+    const j = RunJournal.create({ runId: RUN, cwd });
+    const err = writeError(() => j.begin(beginInfo()));
+    expect(err.message).toMatch(/^run journal: the run journal's state dir .* resolves inside the workspace /);
+    expect(err.message).not.toContain("could not set up");
+  });
+
+  it("a setup failure after the lock is taken releases the lock and names the cause", () => {
+    const cwd = tmp();
+    const dir = journalDir(cwd, RUN);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "key"), "left over");
+    const j = RunJournal.create({ runId: RUN, cwd });
+    const err = writeError(() => j.begin(beginInfo()));
+    expect(err.message).toContain(
+      `run journal: could not set up the run's journal in ${dir}; set SWENY_STATE_DIR to a writable dir, ` +
+        `or pass --no-journal (the run then cannot be resumed) (`,
+    );
+    expect(existsSync(join(dir, "lock"))).toBe(false);
+  });
+
+  it("a head file that cannot be replaced fails the append", () => {
+    const j = RunJournal.create({ runId: RUN, cwd: tmp() });
+    j.begin(beginInfo());
+    rmSync(join(j.dir, "head.json"));
+    mkdirSync(join(j.dir, "head.json", "x"), { recursive: true });
+    const err = writeError(() => j.nodeStart("a", 1));
+    expect(err.message).toContain(`run journal: could not write the head file in ${j.dir} (`);
+  });
+
+  it("before the first record lands, the head already says seq 0", () => {
+    const j = RunJournal.create({
+      runId: RUN,
+      cwd: tmp(),
+      faults: {
+        beforeAppend() {
+          throw new Error("killed");
+        },
+      },
+    });
+    expect(() => j.begin(beginInfo())).toThrow("killed");
+    const head = JSON.parse(readFileSync(join(j.dir, "head.json"), "utf-8"));
+    expect(head).toMatchObject({ v: 1, run_id: RUN, seq: 0, record: null });
+  });
+
+  it("journals the decider's mode at start, and a resume hands it back", () => {
+    const j = RunJournal.create({ runId: RUN, cwd: tmp() });
+    j.begin(beginInfo({ decider: { mode: "off", reason: "no key" } }));
+    expect(records(j)[0].decider).toStrictEqual({ mode: "off", reason: "no key" });
+    expect(j.deciderResume()).toBeUndefined();
+    const { j: resumed } = resumeFrom([matchingStart(beginInfo(), { decider: { mode: "on" } })]);
+    expect(resumed.deciderResume()).toStrictEqual({ mode: "on" });
+  });
+
+  it("a route record carries its rung and decider counters only when given", () => {
+    const { j } = pendingJournal();
+    j.route("a", "b", "decider", { calls: 1, failures: 0, open: false });
+    j.route("b", null);
+    const [withRung, plain] = rawRecords(j.file).slice(-2);
+    expect(withRung).toMatchObject({ type: "route", from: "a", to: "b", rung: "decider" });
+    expect(withRung.decider).toStrictEqual({ calls: 1, failures: 0, open: false });
+    expect("rung" in plain || "decider" in plain).toBe(false);
+  });
+
+  it("usage without tokens or cost is not journaled; an unsandboxed visit is journaled once", () => {
+    const { j } = pendingJournal();
+    j.usage("a", 1, 0, { numTurns: 3 }, false);
+    j.uncontained("a", 1);
+    j.uncontained("a", 1);
+    j.uncontained("a", 2);
+    expect(rawRecords(j.file).map((r) => r.type)).toStrictEqual(["agent:unsandboxed", "agent:unsandboxed"]);
+  });
+
+  it("names every earlier unsandboxed node, and nothing when there were none", () => {
+    expect(RunJournal.create({ runId: RUN, cwd: tmp() }).degraded()).toStrictEqual([]);
+    expect(pendingJournal().j.degraded()).toStrictEqual([]);
+    const r = pendingJournal();
+    r.plan.unsandboxed.push("a", "b");
+    expect(r.j.degraded()).toStrictEqual([
+      "journal_unsandboxed: an earlier attempt ran a, b without an enforced sandbox, so its " +
+        "journaled spend and write records could have been edited by that agent",
+    ]);
+  });
+
+  it("hands back the journaled spend by kind, as copies", () => {
+    const r = pendingJournal();
+    r.plan.priorSpend = {
+      tokens: 3,
+      costUsd: 0.5,
+      byKind: { node: { tokens: 1, costUsd: 0.25 }, judge: { tokens: 2, costUsd: 0.25 } },
+    };
+    const p = r.j.priorSpend()!;
+    expect(p).toStrictEqual(r.plan.priorSpend);
+    expect(p.byKind!.node).not.toBe(r.plan.priorSpend.byKind!.node);
+  });
+
+  it("a replayed visit carries the rung that routed it", () => {
+    const { j } = resumeFrom([
+      matchingStart(),
+      nodeStart("a"),
+      nodeEnd("a", ok()),
+      rec("route", { from: "a", to: null, rung: "expr" }),
+    ]);
+    expect(j.replay("a", 1)).toMatchObject({ kind: "complete", next: null, rung: "expr" });
   });
 });

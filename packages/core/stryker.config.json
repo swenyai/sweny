@@ -10,7 +10,8 @@
     "src/journal.ts",
     "src/agent-env.ts",
     "src/node-policy.ts",
-    "src/harness/policy.ts"
+    "src/harness/policy.ts",
+    "src/output-contract.ts"
   ],
   "coverageAnalysis": "perTest",
   "incremental": true,

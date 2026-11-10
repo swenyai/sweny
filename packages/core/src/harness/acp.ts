@@ -71,7 +71,9 @@ import {
 import type {
   AgentHarness,
   HarnessCapabilities,
+  HarnessCheck,
   HarnessCompleteRequest,
+  HarnessDiagnoseOptions,
   HarnessId,
   HarnessInfo,
   HarnessRunRequest,
@@ -84,7 +86,8 @@ import { policyGate, resolveHarnessPolicy, TOOL_CLASSES, type HarnessPolicyMode 
 import { gitCredentialPolicy } from "../git-credentials.js";
 import { buildNodePrompt, reportCompletionUsage } from "./prompts.js";
 import { makeAbort } from "./abort.js";
-import { parseToolResultContent, schemaMismatches, summarizeToolError, tryParseJSON } from "./parse.js";
+import { parseToolResultContent, summarizeToolError, tryParseJSON } from "./parse.js";
+import { checkOutputContract, listContractProblems } from "../output-contract.js";
 import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
 import {
   defaultSandboxWrapper,
@@ -96,6 +99,7 @@ import {
 import { TOKEN_ENV } from "./tool-bridge/protocol.js";
 import { translateDenyNames } from "./codex.js";
 import { RPC_ERROR, RpcError, RpcPeer, splitCommandLine } from "./acp-rpc.js";
+import { diagnoseEnv } from "./diagnose.js";
 
 export { ACP_CAPABILITIES };
 
@@ -402,14 +406,41 @@ export class AcpHarness implements AgentHarness {
    */
   async preflight(): Promise<{ ok: true; version: string } | { ok: false; reason: string }> {
     const found = resolveExecutable(this.agent.command, overlaidProcessEnv(this.envOverlay, this.authVars), this.cwd);
-    if (!found) {
-      const example = [this.agent.command, ...this.agent.args].join(" ");
-      return {
-        ok: false,
-        reason: `ACP agent command "${this.agent.command}" was not found on PATH (or is not executable). Install the agent and check that \`${example}\` starts an ACP server.`,
-      };
-    }
+    if (!found) return { ok: false, reason: this.notFoundReason() };
     return { ok: true, version: this.agentVersion };
+  }
+
+  private notFoundReason(): string {
+    const example = [this.agent.command, ...this.agent.args].join(" ");
+    return `ACP agent command "${this.agent.command}" was not found on PATH (or is not executable). Install the agent and check that \`${example}\` starts an ACP server.`;
+  }
+
+  /**
+   * `sweny check` (#532): the command resolves (the way {@link preflight}
+   * does), and the operator-named auth vars are set. The agent is not started
+   * (same reason as `preflight`), so its version and its own login are
+   * reported on the first run. No credential value is printed.
+   */
+  async diagnose(opts: HarnessDiagnoseOptions = {}): Promise<HarnessCheck[]> {
+    const env = diagnoseEnv(opts.env, this.envOverlay, this.authVars);
+    const cliName = `Agent CLI (${this.id})`;
+    const found = resolveExecutable(this.agent.command, env, this.cwd);
+    const cli: HarnessCheck = found
+      ? { name: cliName, status: "ok", detail: `${found} (the agent reports its version when a run starts)` }
+      : { name: cliName, status: "fail", detail: this.notFoundReason() };
+    const authName = `Agent auth (${this.id})`;
+    const missing = this.authVars.filter((v) => !env[v]?.trim());
+    const auth: HarnessCheck =
+      this.authVars.length === 0
+        ? {
+            name: authName,
+            status: "skip",
+            detail: "ACP agents handle their own login; the agent reports a missing one when a run starts",
+          }
+        : missing.length > 0
+          ? { name: authName, status: "fail", detail: `Missing: ${missing.join(", ")}` }
+          : { name: authName, status: "ok", detail: `set: ${this.authVars.join(", ")}` };
+    return [cli, auth];
   }
 
   /**
@@ -931,18 +962,25 @@ export class AcpHarness implements AgentHarness {
       const basePrompt = buildNodePrompt(req.instruction, req.context, req.outputSchema);
       const schema = req.outputSchema;
       const retry = { asked: false };
-      // One correction turn when the answer does not match the declared output.
+      // The same check, at every depth, that sweny's executor applies to every
+      // harness's output (output-contract.ts). A check that cannot run asks nothing.
+      const mismatches = (text: string): string[] => {
+        const checked = checkOutputContract(tryParseJSON(text, schema, { warn() {} }), schema);
+        return "problems" in checked ? listContractProblems(checked.problems) : [];
+      };
+      // One correction turn when the answer does not match the declared output,
+      // unless the caller (sweny's executor) runs the one repair itself: one repair loop on every harness.
       const followUp = (turn: Turn): string | undefined => {
-        if (!schema || retry.asked) return undefined;
-        const parsed = tryParseJSON(turn.text, schema, { warn() {} });
-        const problems = schemaMismatches(parsed, schema);
+        if (!schema || retry.asked || req.callerRepairsOutput) return undefined;
+        const problems = mismatches(turn.text);
         if (problems.length === 0) return undefined;
         retry.asked = true;
         this.logger.info(
           `  acp: the answer does not match the output shape (${problems.join("; ")}); asking once more`,
         );
         return [
-          `Your last reply did not match the required output: ${problems.join("; ")}.`,
+          "Your last reply did not match the required output:",
+          ...problems.map((line) => `- ${line}`),
           "Reply again, ending with ONLY a JSON object that matches this schema:",
           "```json",
           JSON.stringify(schema, null, 2),
@@ -994,8 +1032,7 @@ export class AcpHarness implements AgentHarness {
       const result = this.toResult(conv, schema, req.timeoutMs);
       if (result.status === "success" && schema && retry.asked) {
         const last = conv.turns.at(-1)?.text ?? "";
-        const left = schemaMismatches(tryParseJSON(last, schema, { warn() {} }), schema);
-        if (left.length > 0) {
+        if (mismatches(last).length > 0) {
           extraDegraded.push(`structured_output: the answer still did not match the declared output after one retry`);
         }
       }

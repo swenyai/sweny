@@ -11,13 +11,23 @@
  * keys a migration renamed (they are added at the end of their map), and
  * formatting of arrays whose length a migration changed (rewritten whole).
  * JSON files carry no comments and are rewritten with 2-space indentation.
+ *
+ * Migration notes (#598): each spot a migration made explicit for the author
+ * to review gets a comment above its key (YAML), and is returned in `notes`
+ * so the CLI can print it (YAML and JSON).
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { isMap, parseDocument, type Document } from "yaml";
+import { isMap, isScalar, parseDocument, type Document } from "yaml";
 
-import { DEFAULT_MIGRATION_CONFIG, migrateWorkflow, type MigrationConfig, type RawWorkflow } from "../migrations.js";
+import {
+  DEFAULT_MIGRATION_CONFIG,
+  migrateWorkflow,
+  type MigrationConfig,
+  type MigrationNote,
+  type RawWorkflow,
+} from "../migrations.js";
 import { validateParsed } from "../loader.js";
 
 export type UpgradeResult =
@@ -29,6 +39,8 @@ export type UpgradeResult =
       to: number;
       /** Migration descriptions applied, in order. Empty when only `spec_version` was stamped. */
       steps: string[];
+      /** What the migrations made explicit for the author to review (also written as YAML comments). */
+      notes: MigrationNote[];
       /** The full text that was (or, for dry-run, would be) written. */
       content: string;
     };
@@ -71,6 +83,20 @@ function applyDiff(doc: Document, at: (string | number)[], old: unknown, next: u
   }
   if (at.length === 0) doc.contents = doc.createNode(next);
   else doc.setIn(at, next);
+}
+
+/** Put `comment` on its own line above the key at `at`. No-op when the key is not in a block map. */
+function commentAbove(doc: Document, at: (string | number)[], comment: string): void {
+  if (at.length === 0) return;
+  const parent = at.length === 1 ? doc.contents : doc.getIn(at.slice(0, -1), true);
+  if (!isMap(parent)) return;
+  // A flow map (`{ deny: [shell] }`) has no room for a comment line: put it above the map's own key.
+  if (parent.flow) return commentAbove(doc, at.slice(0, -1), comment);
+  const last = at[at.length - 1];
+  const pair = parent.items.find((p) => (isScalar(p.key) ? p.key.value : p.key) === last);
+  if (!pair) return;
+  if (!isScalar(pair.key)) pair.key = doc.createNode(pair.key);
+  if (isScalar(pair.key)) pair.key.commentBefore = ` ${comment}`;
 }
 
 function setSpecVersion(doc: Document, version: string): void {
@@ -140,6 +166,7 @@ export function upgradeWorkflowFile(filePath: string, options: UpgradeOptions = 
   let out: string;
   if (doc) {
     applyDiff(doc, [], withoutSpecVersion(raw), withoutSpecVersion(migrated.workflow));
+    for (const note of migrated.notes) commentAbove(doc, note.path, note.comment);
     setSpecVersion(doc, versionText);
     out = doc.toString();
   } else {
@@ -152,6 +179,7 @@ export function upgradeWorkflowFile(filePath: string, options: UpgradeOptions = 
     from: migrated.from,
     to: migrated.to,
     steps: migrated.applied.map((m) => m.description),
+    notes: migrated.notes,
     content: out,
   };
 }

@@ -101,7 +101,7 @@ describe("ClaudeCodeHarness and native none", () => {
     ...over,
   });
 
-  it("the node query carries tools: [] and settingSources: [] with the value set, and no tools key without it", async () => {
+  it("the node query carries tools: [] and settingSources: [] with the value set, and the policy's allow-list without it", async () => {
     mockQuery.mockReturnValue(stream());
     const h = new mod.ClaudeCodeHarness({ logger: logger() });
     await h.run({ instruction: "x", context: {}, tools: [], policy: policy({ nativeNone: true }) });
@@ -111,7 +111,8 @@ describe("ClaudeCodeHarness and native none", () => {
     mockQuery.mockReturnValue(stream());
     await h.run({ instruction: "x", context: {}, tools: [], policy: policy() });
     const without = mockQuery.mock.calls[1][0].options;
-    expect("tools" in without).toBe(false);
+    // Without it, the least-privilege built-in list for a write node (never every built-in).
+    expect(without.tools).toEqual(mod.claudeCodeBuiltinTools({ readOnly: false }));
     // settingSources: [] is every node's default since #497; native none adds only tools: [].
     expect(without.settingSources).toEqual([]);
   });

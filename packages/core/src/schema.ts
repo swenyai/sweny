@@ -42,6 +42,7 @@ import { sourceZ } from "./sources.js";
 import { resolveNodePermissions } from "./node-policy.js";
 import { workflowInputsZ, WORKFLOW_INPUT_TYPES } from "./inputs.js";
 import { checkExpression, isWhenExpression, WHEN_EXPR_MAX_LENGTH } from "./when.js";
+import { outputSchemaError } from "./output-contract.js";
 
 // Studio and other schema-only consumers label edges without importing the root entry.
 export { isWhenExpression, whenLabel } from "./when.js";
@@ -390,7 +391,7 @@ export const safeOutputDeclarationZ = z
     type: z.enum(SAFE_OUTPUT_TYPES),
     via: z.string().min(1).optional(),
     max: z.number().int().min(1).max(SAFE_OUTPUT_MAX_CEILING).optional(),
-    target: z.string().min(1).optional(),
+    target: z.union([z.string().min(1), z.object({ input: z.string().min(1) }).strict()]).optional(),
     title_prefix: z.string().min(1).max(64).optional(),
     labels: z.array(z.string().min(1)).min(1).optional(),
     expires: z.string().regex(SAFE_OUTPUT_EXPIRES_PATTERN).optional(),
@@ -556,6 +557,7 @@ export interface WorkflowError {
     | "UNBOUNDED_CYCLE"
     | "AMBIGUOUS_EDGES"
     | "UNSUPPORTED_EVAL_POLICY"
+    | "DUPLICATE_EVALUATOR"
     | "INVALID_INLINE_SKILL"
     | "EDGE_ITERATIONS_EXCEEDED"
     | "RETRY_MAX_EXCEEDED"
@@ -570,6 +572,23 @@ export interface WorkflowError {
     | "DUPLICATE_EDGE";
   message: string;
   nodeId?: string;
+}
+
+/**
+ * A finding that does not stop the workflow loading (#573): something that
+ * works today and is deprecated. `OUTPUT_SCHEMA_FALLBACK`: a node's `output`
+ * schema does not compile, so its output keeps the pre-#573 top-level check;
+ * a future minor will refuse to load it.
+ */
+export interface WorkflowWarning {
+  code: "OUTPUT_SCHEMA_FALLBACK";
+  message: string;
+  nodeId: string;
+}
+
+export interface ValidateWorkflowOptions {
+  /** Receives warning-level findings. They never appear in the returned errors. */
+  warnings?: WorkflowWarning[];
 }
 
 /**
@@ -589,6 +608,7 @@ export interface WorkflowError {
 export function validateWorkflow(
   workflow: Workflow | z.infer<typeof workflowZ>,
   knownSkills?: Set<string>,
+  options: ValidateWorkflowOptions = {},
 ): WorkflowError[] {
   const errors: WorkflowError[] = [];
   const nodeIds = new Set(Object.keys(workflow.nodes));
@@ -830,6 +850,23 @@ export function validateWorkflow(
     }
   }
 
+  // Output schemas compile with the validator the executor checks outputs
+  // with (#573). One that does not compile still loads, as it did before: a
+  // warning, and the node keeps the pre-#573 top-level check. Deprecated.
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    const why = outputSchemaError(node.output);
+    if (why !== undefined) {
+      options.warnings?.push({
+        code: "OUTPUT_SCHEMA_FALLBACK",
+        message:
+          `Node "${nodeId}" declares an output schema the validator cannot compile (${why}). ` +
+          `Its output gets only the old top-level check (required fields, top-level types and enums). ` +
+          `Deprecated: a future minor will refuse to load this workflow; fix the schema or name its draft in $schema.`,
+        nodeId,
+      });
+    }
+  }
+
   // Reject eval policies that are reserved in the vocabulary but not yet
   // implemented. The Zod schema accepts the whole EVAL_POLICIES enum (the
   // published JSON schema advertises them as reserved), but only `all_pass`
@@ -845,6 +882,23 @@ export function validateWorkflow(
         message: `Node "${nodeId}" declares eval_policy "${node.eval_policy}", which is reserved but not yet implemented; use "all_pass" (the only supported policy in v1.0)`,
         nodeId,
       });
+    }
+  }
+
+  // Evaluator names are a node's eval keys: results, retry preambles, routes
+  // (`node.evals.<name>.pass`) and the required-tool repair look a verdict up
+  // by name, so two evaluators with one name would make that lookup ambiguous.
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    const seen = new Set<string>();
+    for (const e of node.eval ?? []) {
+      if (seen.has(e.name)) {
+        errors.push({
+          code: "DUPLICATE_EVALUATOR",
+          message: `Node "${nodeId}" declares two evaluators named "${e.name}"; evaluator names must be unique within a node`,
+          nodeId,
+        });
+      }
+      seen.add(e.name);
     }
   }
 
@@ -1231,9 +1285,17 @@ export const workflowJsonSchema = {
           description: "Max writes of this type from this node per run. Default 1.",
         },
         target: {
-          type: "string",
-          minLength: 1,
-          description: "Pinned target (GitHub owner/repo, Linear team id). GitHub default: GITHUB_REPOSITORY.",
+          description:
+            "Pinned target (GitHub owner/repo, Linear team id), or { input: <name> } to take it from a run input. GitHub default: GITHUB_REPOSITORY. An output that pins number never takes its GitHub repository from the agent.",
+          oneOf: [
+            { type: "string", minLength: 1 },
+            {
+              type: "object",
+              required: ["input"],
+              additionalProperties: false,
+              properties: { input: { type: "string", minLength: 1 } },
+            },
+          ],
         },
         title_prefix: {
           type: "string",
@@ -1282,7 +1344,7 @@ export const workflowJsonSchema = {
       type: "string",
       pattern: "^[1-9][0-9]*$",
       description:
-        "Workflow spec version as a positive integer string. Absent means 1. Older versions are migrated in memory on load; newer than the CLI supports is refused. Run `sweny workflow upgrade <file>` to rewrite a file at the current version.",
+        "Workflow spec version as a positive integer string. Absent means 1. Version 2 is safe by default: a node that declares no permissions and no outputs, in a workflow that declares no permissions, is read-only. Version 1 files are migrated in memory on load, keeping write on such nodes with one warning each; newer than the CLI supports is refused. Run `sweny workflow upgrade <file>` to rewrite a file at the current version.",
     },
     entry: { type: "string", minLength: 1, description: "ID of the entry node" },
     rules: {
@@ -1317,7 +1379,8 @@ export const workflowJsonSchema = {
     },
     permissions: {
       $ref: "#/$defs/Permissions",
-      description: "Default and ceiling for every node's permissions. Absent: write.",
+      description:
+        "Default and ceiling for every node's permissions. Absent: read (spec_version 2), write (spec_version 1).",
     },
     safe_outputs: {
       type: "object",
@@ -1551,7 +1614,7 @@ export const workflowJsonSchema = {
           permissions: {
             $ref: "#/$defs/Permissions",
             description:
-              "What this node's agent may do. Absent: read when the node declares outputs, else the workflow's permissions, else write.",
+              "What this node's agent may do. Absent: read when the node declares outputs, else the workflow's permissions, else read (spec_version 2) or write (spec_version 1).",
           },
           outputs: {
             type: "array",

@@ -1,0 +1,355 @@
+id: weekly-digest
+name: Weekly Repo Digest
+description: What changed in this repo in the last week (commits, merged PRs, issues opened and closed, risky files touched), delivered to an issue or Slack.
+workflow_type: generic
+entry: collect
+
+inputs:
+  days:
+    type: number
+    description: How many days back to look.
+    default: 7
+  repo:
+    type: string
+    description: owner/repo. Leave empty to use GITHUB_REPOSITORY or the origin remote.
+    default: ""
+  deliver:
+    type: string
+    description: Where the digest goes. issue files one issue per week, slack posts one message, none only returns it.
+    enum: [issue, slack, none]
+    default: issue
+
+# Ceiling (#365): write only for the Slack post in publish. The digest issue is
+# a safe output, applied by sweny after publish, at most one per run.
+permissions: write
+safe_outputs:
+  allow: [issue]
+  max: 1
+
+nodes:
+  collect:
+    name: Collect the Week
+    instruction: |
+      Gather facts about the last N days, where N is context.input.days
+      (default 7). The repo is context.input.repo; if empty, read the origin
+      remote URL from .git/config in the checkout.
+      Compute the window as UTC dates: until is today, since is N days ago.
+
+      1. Commits on the default branch in the window:
+         github_list_recent_commits (use per_page 100 and drop commits older
+         than the window).
+      2. Pull requests merged in the window:
+         github_search_issues with "is:pr is:merged merged:>=SINCE".
+      3. Issues opened and issues closed in the window:
+         github_search_issues with "is:issue created:>=SINCE" and
+         "is:issue closed:>=SINCE".
+      4. Files touched, with churn: github_list_pr_files for each merged PR
+         (at most 20, newest first), and sum additions plus deletions per
+         path. Keep the 15 paths with the most churn.
+
+      Only read. Report only what the tools returned. A quiet week is a
+      valid result.
+    skills: [github]
+    permissions: read
+    tools:
+      allow:
+        - github_list_recent_commits
+        - github_search_issues
+        - github_list_pr_files
+    max_turns: 30
+    output:
+      type: object
+      properties:
+        repo:
+          type: string
+        window:
+          type: object
+          properties:
+            since:
+              type: string
+            until:
+              type: string
+          required: [since, until]
+        commits:
+          type: object
+          properties:
+            count:
+              type: number
+            authors:
+              type: array
+              items:
+                type: string
+            highlights:
+              type: array
+              items:
+                type: object
+                properties:
+                  sha:
+                    type: string
+                  title:
+                    type: string
+                  author:
+                    type: string
+                required: [sha, title]
+          required: [count, authors, highlights]
+        prs_merged:
+          type: array
+          items:
+            type: object
+            properties:
+              number:
+                type: number
+              title:
+                type: string
+              author:
+                type: string
+              url:
+                type: string
+            required: [number, title]
+        issues_opened:
+          type: array
+          items:
+            type: object
+            properties:
+              number:
+                type: number
+              title:
+                type: string
+              url:
+                type: string
+            required: [number, title]
+        issues_closed:
+          type: array
+          items:
+            type: object
+            properties:
+              number:
+                type: number
+              title:
+                type: string
+              url:
+                type: string
+            required: [number, title]
+        files_touched:
+          type: array
+          items:
+            type: object
+            properties:
+              path:
+                type: string
+              lines_changed:
+                type: number
+            required: [path, lines_changed]
+      required: [repo, window, commits, prs_merged, issues_opened, issues_closed, files_touched]
+    eval:
+      - name: queried_the_repo
+        kind: function
+        rule:
+          any_tool_called:
+            - github_list_recent_commits
+            - github_search_issues
+      - name: collect_is_read_only
+        kind: function
+        rule:
+          no_tool_called:
+            - github_create_issue
+            - github_add_comment
+            - github_create_pr
+      - name: window_is_dated
+        kind: value
+        rule:
+          output_required:
+            - window.since
+            - window.until
+            - commits.count
+          output_matches:
+            - path: window.since
+              matches: "^[0-9]{4}-[0-9]{2}-[0-9]{2}"
+            - path: window.until
+              matches: "^[0-9]{4}-[0-9]{2}-[0-9]{2}"
+            - path: commits.highlights[*].sha
+              matches: "^[0-9a-f]{7,40}$"
+
+  analyze:
+    name: Flag Risky Files and Write the Headline
+    instruction: |
+      From the collected facts, decide what a reader who skims for 30
+      seconds needs to know. Do not call any tool; only read the previous
+      step's output.
+
+      Risky files are paths in files_touched that deserve a second look:
+      authentication or permissions code, database migrations, CI or deploy
+      config, dependency manifests and lockfiles, infrastructure as code,
+      secrets or environment config, and any file with very high churn.
+      Give each one a category and a one-line reason. If none qualify,
+      return an empty list.
+
+      Write a one-sentence headline that states the most important change of
+      the week. If nothing happened, say it was a quiet week.
+      Copy the counts exactly from the collected facts; never estimate.
+      watch_next is at most 3 short items a maintainer should look at next
+      week (for example, a risky file that changed without a test).
+    permissions: read
+    max_turns: 5
+    output:
+      type: object
+      properties:
+        headline:
+          type: string
+        quiet_week:
+          type: boolean
+        stats:
+          type: object
+          properties:
+            commits:
+              type: number
+            prs_merged:
+              type: number
+            issues_opened:
+              type: number
+            issues_closed:
+              type: number
+          required: [commits, prs_merged, issues_opened, issues_closed]
+        risky_files:
+          type: array
+          items:
+            type: object
+            properties:
+              path:
+                type: string
+              category:
+                type: string
+                enum: [auth, data, ci, deps, infra, config, churn]
+              reason:
+                type: string
+            required: [path, category, reason]
+        watch_next:
+          type: array
+          items:
+            type: string
+      required: [headline, quiet_week, stats, risky_files, watch_next]
+    eval:
+      - name: analyze_calls_no_tools
+        kind: function
+        rule:
+          no_tool_called:
+            - github_create_issue
+            - github_add_comment
+            - github_create_pr
+            - slack_send_message
+            - notify_webhook
+      - name: digest_shape
+        kind: value
+        rule:
+          output_required:
+            - headline
+            - stats.commits
+            - stats.prs_merged
+          output_matches:
+            - path: quiet_week
+              in: [true, false]
+            - path: risky_files[*].category
+              in: [auth, data, ci, deps, infra, config, churn]
+
+  publish:
+    name: Deliver the Digest
+    instruction: |
+      Deliver the digest according to context.input.deliver (default issue).
+      Build the body in markdown: the headline, a stats line (commits, PRs
+      merged, issues opened and closed), the merged PRs and closed issues as
+      short bullet lists with links, the risky files with their reasons, and
+      the watch_next items. Keep it under 40 lines.
+
+      - issue: first call github_search_issues for an open issue labelled
+        sweny-digest whose title is "Weekly digest SINCE to UNTIL". If one
+        exists, do not request another. Otherwise request it with
+        emit_output: type issue, that title, the body, and dedupe_key
+        "weekly-digest-SINCE". sweny files it after this step and adds the
+        sweny-digest label.
+      - slack: call slack_send_message once with the body as mrkdwn.
+      - none: request nothing; just return the body.
+
+      delivered means the issue was requested or the Slack message was sent.
+    skills: [github, slack]
+    # Write only for slack_send_message (no safe output covers Slack). The
+    # issue is a declared output: capped at one, labelled, title-prefixed.
+    permissions: write
+    tools:
+      allow:
+        - github_search_issues
+        - slack_send_message
+    outputs:
+      - type: issue
+        max: 1
+        title_prefix: "Weekly digest "
+        labels: [sweny-digest]
+    max_turns: 8
+    output:
+      type: object
+      properties:
+        destination:
+          type: string
+          enum: [issue, slack, none]
+        delivered:
+          type: boolean
+        url:
+          type: string
+        body:
+          type: string
+      required: [destination, delivered, body]
+    eval:
+      - name: destination_is_valid
+        kind: value
+        rule:
+          output_required:
+            - body
+          output_matches:
+            - path: destination
+              in: [issue, slack, none]
+      - name: delivery_never_writes_github_directly
+        kind: function
+        rule:
+          no_tool_called:
+            - github_create_pr
+            - github_add_comment
+            - github_create_issue
+
+
+  quiet:
+    name: Nothing to Report
+    instruction: |
+      The week had no commits, merged PRs, or issues opened or closed, so there is nothing worth a digest. Do not call any tool and deliver nothing. Return
+      delivered false and one short sentence saying why.
+    permissions: read
+    max_turns: 2
+    output:
+      type: object
+      properties:
+        delivered:
+          type: boolean
+        reason:
+          type: string
+      required: [delivered, reason]
+    eval:
+      - name: quiet_delivers_nothing
+        kind: function
+        rule:
+          no_tool_called:
+            - github_create_issue
+            - github_add_comment
+            - github_create_pr
+            - slack_send_message
+            - notify_webhook
+
+# Quiet weeks (#474): sweny decides on the counts, with no model call. A week
+# with any activity is delivered; an empty one routes to quiet and nothing is
+# sent, so the digest is never noise.
+edges:
+  - from: collect
+    to: analyze
+  - from: analyze
+    to: publish
+    when:
+      expr: "analyze.stats.commits > 0 || analyze.stats.prs_merged > 0 || analyze.stats.issues_opened > 0 || analyze.stats.issues_closed > 0"
+  - from: analyze
+    to: quiet

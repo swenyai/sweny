@@ -123,8 +123,14 @@ describe("dependency-drift quiet weeks (#474)", () => {
 });
 
 describe("pr-risk-review is not quiet-routed (#474)", () => {
-  it("every PR gets its comment", () => {
-    for (const e of load("pr-risk-review").edges) expect(e.when).toBeUndefined();
+  it("every PR gets its comment: each route ends at a comment node, and low is the default", () => {
+    const wf = load("pr-risk-review");
+    // The level routes (pr-risk-evidence.test.ts) branch only after assess, and every branch comments.
+    expect(wf.edges.filter((e) => e.when !== undefined).every((e) => e.from === "assess")).toBe(true);
+    const ends = Object.keys(wf.nodes).filter((id) => !wf.edges.some((e) => e.from === id));
+    expect(ends.sort()).toEqual(["comment-high", "comment-low", "comment-medium"]);
+    for (const id of ends) expect(wf.nodes[id].outputs?.map((o) => o.type)).toEqual(["comment"]);
+    expect(wf.edges.find((e) => e.from === "assess" && e.when === undefined)?.to).toBe("comment-low");
   });
 });
 

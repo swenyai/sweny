@@ -11,7 +11,8 @@
 
 import { query, createSdkMcpServer, tool as sdkTool, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { createRequire } from "node:module";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import * as path from "node:path";
 import type {
   Claude,
   Tool,
@@ -46,7 +47,9 @@ import {
 import type {
   AgentHarness,
   HarnessCapabilities,
+  HarnessCheck,
   HarnessCompleteRequest,
+  HarnessDiagnoseOptions,
   HarnessInfo,
   HarnessRunRequest,
   HarnessRunResult,
@@ -68,7 +71,8 @@ import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
 import { parseToolResultContent, summarizeToolError, tryParseJSON } from "./parse.js";
 import { makeAbort } from "./abort.js";
 import { runStateRoot } from "../journal.js";
-import { claudeCodeAuth, type AuthProbe } from "./auth.js";
+import { claudeCodeAuth, detectClaudeCodeLogin, type AuthProbe } from "./auth.js";
+import { diagnoseClaudeCode, diagnoseEnv } from "./diagnose.js";
 
 export { buildEvaluatePrompt, CLAUDE_CODE_CAPABILITIES };
 export { parseToolResultContent, summarizeToolError, makeAbort };
@@ -79,9 +83,14 @@ let cachedSdkVersion: string | undefined;
 function claudeSdkVersion(): string {
   if (cachedSdkVersion !== undefined) return cachedSdkVersion;
   try {
-    const req = createRequire(import.meta.url);
-    const pkg = req("@anthropic-ai/claude-agent-sdk/package.json") as { version?: unknown };
-    cachedSdkVersion = typeof pkg.version === "string" ? pkg.version : "unknown";
+    // The SDK's `exports` map has no "./package.json", so read it next to the entry file (the package root).
+    const entry = createRequire(import.meta.url).resolve("@anthropic-ai/claude-agent-sdk");
+    const pkg = JSON.parse(readFileSync(path.join(path.dirname(entry), "package.json"), "utf-8")) as {
+      name?: unknown;
+      version?: unknown;
+    };
+    cachedSdkVersion =
+      pkg.name === "@anthropic-ai/claude-agent-sdk" && typeof pkg.version === "string" ? pkg.version : "unknown";
   } catch {
     cachedSdkVersion = "unknown";
   }
@@ -114,9 +123,10 @@ export const CLASSIFICATION_DISALLOWED_TOOLS = [
 /**
  * Built-in tools disallowed for a node run with `readOnly: true` (dry run,
  * #380): everything that can edit the workspace, shell out (and so reach
- * `gh`, `curl`, `git push`), spawn a subagent that could, or fetch an
- * arbitrary URL (a GET can still trigger a webhook or exfiltrate data).
- * Read, Grep, Glob and WebSearch stay available for analysis.
+ * `gh`, `curl`, `git push`), spawn a subagent that could, fetch an arbitrary
+ * URL (a GET can still trigger a webhook or exfiltrate data) or search the web
+ * (a query is an egress channel that can carry repo data out). Read, Grep and
+ * Glob stay available for analysis.
  */
 export const READ_ONLY_DISALLOWED_TOOLS = [
   "Bash",
@@ -127,6 +137,7 @@ export const READ_ONLY_DISALLOWED_TOOLS = [
   "Task",
   "Agent",
   "WebFetch",
+  "WebSearch",
 ] as const;
 
 /**
@@ -194,6 +205,59 @@ export function compileClaudeCodeDeny(policy: NodePolicy, legacy: readonly strin
       ...(policy.readOnly ? READ_ONLY_DISALLOWED_TOOLS : []),
     ]),
   ];
+}
+
+/**
+ * The only Claude Code built-in tools a node may get, by policy. Every node
+ * reads and searches the checkout, and a read-only node gets nothing else: no
+ * web search or fetch, since either can carry repo data out. A write node adds
+ * the shell, file-edit and web built-ins (its `tools.deny` classes and
+ * `disallowed_tools` names then leave the list). No node gets the subagent
+ * tools (Task, Agent) by default: nothing shows a subagent is held to its
+ * parent's `tools`, so the default must not depend on it.
+ *
+ * Passed as the SDK's `tools` option, which "Specif[ies] the base set of
+ * available built-in tools" (sdk.d.ts); `allowedTools` only auto-approves
+ * ("To restrict which tools are available, use the `tools` option instead").
+ * Anything not named here never reaches a node: agent-to-agent messaging
+ * (SendMessage, ListAgents), scheduling (Cron*, ScheduleWakeup), remote
+ * triggers, notifications, worktrees, design sync, Skill, Workflow and
+ * ToolSearch (added back only while a server defers its tools, see
+ * {@link runQuery}). Dogfood run 42890468912 listed 23 tools for a read-only
+ * node that needed two.
+ */
+export const CLAUDE_READ_ONLY_BUILTIN_TOOLS = ["Read", "Grep", "Glob"] as const;
+export const CLAUDE_WRITE_BUILTIN_TOOLS = [
+  "Read",
+  "Grep",
+  "Glob",
+  ...CLAUDE_TOOLS_BY_CLASS.shell,
+  ...CLAUDE_TOOLS_BY_CLASS.write,
+  ...CLAUDE_TOOLS_BY_CLASS.edit,
+  ...CLAUDE_TOOLS_BY_CLASS.net,
+] as const;
+
+/**
+ * The built-in allow-list for one node: the policy's list minus every name the
+ * compiled deny list removes. Path-scoped rules (`Read(//dir/**)`) narrow a
+ * tool, they do not remove it, so they are not matched here.
+ */
+export function claudeCodeBuiltinTools(policy: { readOnly: boolean }, deny: readonly string[] = []): string[] {
+  const denied = new Set(deny);
+  const base: readonly string[] = policy.readOnly ? CLAUDE_READ_ONLY_BUILTIN_TOOLS : CLAUDE_WRITE_BUILTIN_TOOLS;
+  return base.filter((t) => !denied.has(t));
+}
+
+/**
+ * Env vars the harness itself sets on the agent (not passed through from the
+ * parent): `ENABLE_TOOL_SEARCH`, see {@link ClaudeCodeHarness} runQuery.
+ */
+export const CLAUDE_CODE_HARNESS_VARS = ["ENABLE_TOOL_SEARCH"] as const;
+
+/** CI: a truthy `CI` (not "", "0", "false", "no", "off"), or GitHub Actions itself. */
+function runningInCi(env: Record<string, string | undefined> = process.env): boolean {
+  const ci = (env.CI ?? "").trim().toLowerCase();
+  return env.GITHUB_ACTIONS === "true" || !["", "0", "false", "no", "off"].includes(ci);
 }
 
 /** How sweny resolves which credentials reach the Claude Code subprocess. */
@@ -473,6 +537,23 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
   }
 
   /**
+   * `sweny check` (#532): the Agent SDK sweny ships with, then the credential
+   * line `sweny check` always printed (a stored login, an API key or gateway
+   * probe that lists models, or the auth mode). The env is the one
+   * {@link preflight} reads: the caller's `env` / `envRemove` applied.
+   */
+  async diagnose(opts: HarnessDiagnoseOptions = {}): Promise<HarnessCheck[]> {
+    const env = diagnoseEnv(opts.env, this.envOverlay, AGENT_AUTH_VARS);
+    const sdk: HarnessCheck = {
+      name: "Agent CLI (claude)",
+      status: "ok",
+      detail: `Claude Agent SDK ${claudeSdkVersion()} (installed with sweny)`,
+    };
+    const hasLogin = opts.hasLogin ?? (() => detectClaudeCodeLogin({ env }));
+    return [sdk, ...(await diagnoseClaudeCode({ env, hasLogin, timeoutMs: opts.timeoutMs }))];
+  }
+
+  /**
    * Run a node. Runs {@link policyGate} (always `degraded: []` for Claude
    * Code), compiles the policy to native options, and tags the result with the
    * harness id and version.
@@ -572,7 +653,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     gitCredentials?: string[];
     /** Collects what this run cannot honor, for `HarnessRunResult.degraded`. */
     degraded?: string[];
-  }): Promise<NodeResult> {
+  }): Promise<NodeResult & Pick<HarnessRunResult, "agentTools">> {
     const {
       instruction,
       context,
@@ -700,12 +781,19 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     const useBridge = this.toolBridge && tools.length > 0;
     const sdkTools = useBridge ? [] : tools.map((t) => coreToolToSdkTool(t, this.defaultContext));
 
-    // Create in-process MCP server
+    // Create in-process MCP server. `alwaysLoad`: Claude Code defers every MCP
+    // server's tools behind ToolSearch by default and starts MCP servers
+    // without waiting, so a node's skill tools were not on the model's first
+    // turn and it could answer without them (dogfood run 42884113267: the
+    // pr-risk-review scope node called only StructuredOutput). These are the
+    // few tools the node was given to do its job; they load up front, and the
+    // query waits for the server before the first turn.
     const mcpServer = useBridge
       ? undefined
       : createSdkMcpServer({
           name: "sweny-core",
           tools: sdkTools,
+          alwaysLoad: true,
         });
     let bridge: ToolBridge | undefined;
 
@@ -730,6 +818,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     // Fail closed: a stream that ends with no terminal `result` message
     // (subprocess died, stream truncated) is not a success.
     let sawResult = false;
+    // The tool names the agent was given (init message), for the executor's repair rule.
+    let agentTools: string[] | undefined;
 
     // Timeout / abort wiring (back-compat: only armed when requested).
     // A single AbortController drives both an optional caller signal and an
@@ -742,6 +832,13 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       const allMcpServers: Record<string, any> = mcpWithheld(!!readOnly, agentAccess)
         ? {}
         : { ...this.defaultMcpServers, ...opts.mcpServers, ...this.mcpServers };
+      // A server the node's own skills declare (stdio or http) carries tools the
+      // node's checks require, so it loads up front like sweny-core below
+      // (Claude Code otherwise defers them behind ToolSearch). An explicit
+      // `alwaysLoad` in the server config wins.
+      for (const name of Object.keys(opts.mcpServers ?? {})) {
+        if (allMcpServers[name]) allMcpServers[name] = { alwaysLoad: true, ...allMcpServers[name] };
+      }
       if (useBridge) {
         // Only `tools` (already allow/deny and dry-run filtered by the
         // executor) are exposed. Under readOnly it is still the only MCP
@@ -752,10 +849,26 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
           logger: this.logger,
           ...(this.toolBridgeShim ? { shimCommand: this.toolBridgeShim } : {}),
         });
-        allMcpServers["sweny-core"] = bridge.mcpServer;
+        // Same reason as the in-process server: the node's tools load up front.
+        allMcpServers["sweny-core"] = { ...bridge.mcpServer, alwaysLoad: true };
       } else if (sdkTools.length > 0) {
         allMcpServers["sweny-core"] = mcpServer;
       }
+      // Deterministic tool loading: when every server loads its tools up front
+      // (sweny-core always does; a node's skill servers do unless they opt out),
+      // tool search has nothing to defer, so it is off and ToolSearch is not on
+      // the list. `ENABLE_TOOL_SEARCH=false` is the bundled CLI's switch (its
+      // own docs: "To turn it off ... set `ENABLE_TOOL_SEARCH` to `false`"; CLI
+      // 0.3.319 drops ToolSearch from the init tool list with it). A client-level
+      // server not marked alwaysLoad keeps tool search, and ToolSearch, so its
+      // deferred tools stay reachable.
+      const defers = Object.entries(allMcpServers).some(
+        ([name, cfg]) => name !== "sweny-core" && cfg?.alwaysLoad !== true,
+      );
+      if (!defers) env.ENABLE_TOOL_SEARCH = "false";
+      const builtinTools = opts.nativeNone
+        ? []
+        : [...claudeCodeBuiltinTools({ readOnly: !!readOnly }, disallowedTools), ...(defers ? ["ToolSearch"] : [])];
 
       stream = query({
         prompt,
@@ -783,10 +896,13 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
           strictMcpConfig: true,
           settingSources: [],
           ...(disallowedTools && disallowedTools.length > 0 ? { disallowedTools } : {}),
-          // permissions.native: none. `tools: []` removes every built-in tool whatever its
-          // name; `settingSources: []` loads no user, project or local settings, CLAUDE.md or skills
-          // (already the default above since #497; kept so the policy value states its whole contract).
-          ...(opts.nativeNone ? { tools: [], settingSources: [] } : {}),
+          // Least privilege: only the built-ins this node's policy names (see
+          // CLAUDE_WRITE_BUILTIN_TOOLS). permissions.native: none passes `tools: []`,
+          // which removes every built-in tool whatever its name.
+          tools: builtinTools,
+          // `settingSources: []` loads no user, project or local settings, CLAUDE.md or skills
+          // (already the default above since #497; kept so native: none states its whole contract).
+          ...(opts.nativeNone ? { settingSources: [] } : {}),
           // CC-08: ask the SDK to produce validated structured output when the
           // node declares an output schema. The SDK then returns the parsed
           // value on `result.structured_output`, which we prefer over the
@@ -796,6 +912,35 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       });
 
       for await (const message of stream) {
+        if (message.type === "system" && (message as any).subtype === "init") {
+          // What the agent was actually given: the tool names (never inputs)
+          // and, loudly, a node tool or tool server that did not make it onto
+          // the list. In CI the names go out as one warning-level line, the
+          // level the default (non-verbose) run log shows, so a failed node is
+          // diagnosable without a verbose rerun; locally they stay at info.
+          const init = message as any;
+          if (Array.isArray(init.tools)) {
+            agentTools = init.tools.filter((t: unknown): t is string => typeof t === "string");
+            const line = `  agent tools: ${init.tools.join(", ")}`;
+            if (runningInCi()) this.logger.warn(line);
+            else this.logger.info(line);
+            const listed = new Set<string>(init.tools);
+            const absent = allMcpServers["sweny-core"]
+              ? tools.map((t) => t.name).filter((n) => !listed.has(`mcp__sweny-core__${n}`))
+              : [];
+            if (absent.length > 0) {
+              this.logger.warn(`  node tools missing from the agent's tool list: ${absent.join(", ")}`);
+            }
+          }
+          const core = Array.isArray(init.mcp_servers)
+            ? init.mcp_servers.find((s: any) => s?.name === "sweny-core")
+            : undefined;
+          if (allMcpServers["sweny-core"] && core && core.status !== "connected") {
+            this.logger.warn(
+              `  sweny-core tool server is ${core.status} at start; the node's skill tools may be missing`,
+            );
+          }
+        }
         if (message.type === "tool_progress") {
           const tp = message as any;
           if (tp.tool_name && typeof tp.elapsed_time_seconds === "number") {
@@ -979,6 +1124,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       data: { summary: response, ...parsedData },
       toolCalls,
       ...(usage ? { usage } : {}),
+      ...(agentTools ? { agentTools } : {}),
     };
   }
 

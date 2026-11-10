@@ -263,3 +263,13 @@ export type { ColorRole, GlyphKey, GlyphSet, TicketBox, DiagramNodeStatus } from
 // Config file
 export { loadConfigFile } from "./cli/config-file.js";
 export type { FileConfig } from "./cli/config-file.js";
+
+// Run history and `sweny runs` / `sweny runs diff` (read-only; history is untrusted, see run-history.ts)
+export { listRuns, RUN_HISTORY_DIR } from "./cli/run-history.js";
+export type { RunRecord, RunNodeRecord, RunTotals, RunStatus, RunKindSpend } from "./cli/run-history.js";
+export { readRunAnswers, compareAnswers } from "./cli/run-answers.js";
+export type { RunAnswers, AnswersComparison, AnswerDiff } from "./cli/run-answers.js";
+export { printableRun, pickRunsForDiff, formatRunsTable } from "./cli/runs.js";
+export { sanitizeTerminal } from "./cli/terminal.js";
+// `sweny workflow validate`: skill-env warnings
+export { skillEnvWarnings } from "./cli/skill-env.js";

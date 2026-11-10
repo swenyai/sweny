@@ -50,8 +50,8 @@ export function deprecatedFlagName(spec: string): string {
 
 export function deprecationWarning(flags: readonly string[]): string {
   const list = flags.join(", ");
-  const subject = flags.length === 1 ? `${list} is deprecated` : `${list} are deprecated`;
-  return `warning: ${subject}, has no effect and will be removed in a future minor version.\n`;
+  const subject = flags.length === 1 ? `${list} is deprecated and has` : `${list} are deprecated and have`;
+  return `warning: ${subject} no effect and will be removed in a future minor version.\n`;
 }
 
 /**
