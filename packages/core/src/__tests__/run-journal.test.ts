@@ -30,9 +30,11 @@ import { createSkillMap } from "../skills/index.js";
 import {
   JOURNAL_FILE,
   JournalMismatchError,
+  NODE_RESULT_JOURNAL,
   RunJournal,
   checkRecordSequence,
   journalDir,
+  journalResult,
   markerToken,
   readJournal,
   type JournalFaults,
@@ -1515,5 +1517,147 @@ describe("a write handler's refusal in the journal (#544)", () => {
       if (transient) expect(text).toMatch(/report\s+write stage only: .*1 transient refusal\(s\) to try again/);
       else expect(text).toMatch(/report\s+write stage only: .*1 refused write\(s\), not re-sent/);
     }
+  });
+});
+
+describe("replay keeps every NodeResult field (#581)", () => {
+  /** Every field of NodeResult, set. `Required<NodeResult>` makes a new field a type error here. */
+  const FULL: Required<NodeResult> = {
+    status: "success",
+    data: { value: "a-out", nested: { n: 1 } },
+    toolCalls: [
+      { tool: "github_search_issues", input: { query: "abc" }, output: { items: [] }, status: "success" },
+      { tool: "github_create_issue", input: { title: "t" }, status: "error" },
+      { tool: "legacy_tool", input: "x" },
+    ],
+    evals: [
+      { name: "has_value", kind: "value", pass: true },
+      { name: "judge_it", kind: "judge", pass: false, reasoning: "too vague", score: 0.25 },
+    ],
+    usage: {
+      costUsd: 0.5,
+      inputTokens: 100,
+      outputTokens: 40,
+      cacheReadTokens: 7,
+      cacheCreationTokens: 3,
+      numTurns: 4,
+    },
+    skippedWrites: ["github_create_issue"],
+    harness: { id: "claude-code", version: "2.1.0" },
+    degraded: ["sandbox_off"],
+    policy: { envScope: true, sandbox: "strict", sandboxStarted: true },
+    contained: true,
+    outputs: [
+      {
+        type: "issue",
+        via: "github",
+        status: "applied",
+        reason: "created",
+        target: "acme/api",
+        ref: 42,
+        url: "https://github.test/acme/api/issues/42",
+      },
+    ],
+    budget: { scope: "node", unit: "tokens", limit: 100, spent: 140, kind: "judge" },
+  };
+
+  /** What the journal keeps of FULL: tool inputs and outputs are dropped, `contained` is excluded. */
+  const KEPT: NodeResult = {
+    ...FULL,
+    toolCalls: [
+      { tool: "github_search_issues", input: null, status: "success" },
+      { tool: "github_create_issue", input: null, status: "error" },
+      { tool: "legacy_tool", input: null },
+    ],
+  };
+  delete (KEPT as { contained?: boolean }).contained;
+
+  it("every NodeResult field is journaled or excluded with a reason", () => {
+    expect(Object.keys(NODE_RESULT_JOURNAL).sort()).toEqual(Object.keys(FULL).sort());
+    for (const [field, rule] of Object.entries(NODE_RESULT_JOURNAL)) {
+      expect(["verbatim", "reduced", "excluded"], field).toContain(rule.journal);
+      if (rule.journal === "excluded") {
+        expect((rule as { reason: string }).reason.length, field).toBeGreaterThan(20);
+      }
+    }
+    expect(Object.entries(NODE_RESULT_JOURNAL).filter(([, r]) => r.journal === "excluded")).toHaveLength(1);
+    expect(NODE_RESULT_JOURNAL.contained.journal).toBe("excluded");
+    expect(NODE_RESULT_JOURNAL.toolCalls.journal).toBe("reduced");
+  });
+
+  it("journalResult keeps every journaled field with exact values", () => {
+    expect(journalResult(FULL)).toEqual(KEPT);
+  });
+
+  it("journalResult adds no key for a field the result does not carry", () => {
+    const bare = journalResult({ status: "failed", data: undefined as never, toolCalls: undefined as never });
+    expect(bare).toEqual({ status: "failed", data: {}, toolCalls: [] });
+    expect(Object.keys(bare).sort()).toEqual(["data", "status", "toolCalls"]);
+    // Empty values are still values: an empty degraded list round-trips.
+    expect(journalResult({ status: "success", data: {}, toolCalls: [], degraded: [], skippedWrites: [] })).toEqual({
+      status: "success",
+      data: {},
+      toolCalls: [],
+      degraded: [],
+      skippedWrites: [],
+    });
+  });
+
+  /** The fake agent, except node `a` returns `a`'s result as given. */
+  function agentReturning(a: NodeResult) {
+    const base = fakeAgent();
+    const claude: Claude = {
+      ...base.claude,
+      async run(req) {
+        const r = await base.claude.run(req);
+        return /NODE:a/.test(req.instruction) ? structuredClone(a) : r;
+      },
+    };
+    return { ...base, claude };
+  }
+
+  it("a node:end record and a resume replay carry every journaled field", async () => {
+    const cwd = tmp();
+    expect(await firstRun(cwd, chain(), agentReturning(FULL), [], killAt("node:start", "b"))).toBe(true);
+
+    const end = readJournal(journalFile(cwd)).records.find((r) => r.type === "node:end" && r.node === "a")!;
+    expect(end.result).toMatchObject({
+      status: "success",
+      // evals are left out: the executor rewrites them for a node with no `eval` block (journalResult covers them).
+      usage: KEPT.usage,
+      skippedWrites: KEPT.skippedWrites,
+      harness: KEPT.harness,
+      degraded: KEPT.degraded,
+      policy: KEPT.policy,
+      outputs: KEPT.outputs,
+      budget: KEPT.budget,
+      toolCalls: KEPT.toolCalls,
+    });
+    expect(end.result).not.toHaveProperty("contained");
+
+    const agent = fakeAgent();
+    const { results } = await resumeRun(cwd, chain(), agent);
+    expect(results!.get("a")).toEqual(end.result);
+    expect(agent.calls).toEqual(["b", "c", "d"]);
+  });
+
+  it("a journal record without the newer fields still replays", async () => {
+    const cwd = tmp();
+    const old: NodeResult = {
+      status: "success",
+      data: { value: "a-out" },
+      toolCalls: [],
+      contained: true,
+      usage: { costUsd: 0.1 },
+    };
+    expect(await firstRun(cwd, chain(), agentReturning(old), [], killAt("node:start", "b"))).toBe(true);
+
+    const end = readJournal(journalFile(cwd)).records.find((r) => r.type === "node:end" && r.node === "a")!;
+    expect(end.result).not.toHaveProperty("policy");
+    expect(end.result).not.toHaveProperty("budget");
+
+    const { results } = await resumeRun(cwd, chain(), fakeAgent());
+    expect(results!.get("a")).toEqual(end.result);
+    expect(results!.get("a")).toMatchObject({ status: "success", data: { value: "a-out" }, usage: { costUsd: 0.1 } });
   });
 });

@@ -2491,9 +2491,44 @@ function namesProduced(o: unknown, depth = 0): boolean {
   );
 }
 
+/**
+ * How the journal treats each `NodeResult` field (#581). `Record<keyof NodeResult, ...>` makes a
+ * field added to the type fail the build until it is listed here as journaled or excluded, so a
+ * new field cannot silently vanish on resume replay.
+ *
+ * - `verbatim`: copied as is when present (secrets are redacted by `clean` on append).
+ * - `reduced`: journaled in a smaller form, see {@link journalResult}.
+ * - `excluded`: never journaled; the reason is part of the schema.
+ *
+ * Fields stay optional on read: a journal written before a field was journaled just replays
+ * without it. Adding a journaled field needs no record version bump.
+ */
+export const NODE_RESULT_JOURNAL = {
+  status: { journal: "verbatim" },
+  data: { journal: "verbatim" },
+  toolCalls: { journal: "reduced" }, // tool names and statuses; inputs and outputs are large and may hold secrets
+  evals: { journal: "verbatim" },
+  usage: { journal: "verbatim" },
+  skippedWrites: { journal: "verbatim" },
+  harness: { journal: "verbatim" },
+  degraded: { journal: "verbatim" },
+  policy: { journal: "verbatim" }, // booleans and a mode; the run receipt reads it for replayed nodes
+  outputs: { journal: "verbatim" },
+  budget: { journal: "verbatim" }, // a replayed node that crossed a budget must still be the node that stopped the run
+  contained: {
+    journal: "excluded",
+    reason:
+      "containment is journaled per visit as an agent:unsandboxed record; a replayed result must not assert that " +
+      "an earlier attempt was contained, and an absent flag already reads as not contained",
+  },
+} as const satisfies Record<
+  keyof NodeResult,
+  { journal: "verbatim" | "reduced" } | { journal: "excluded"; reason: string }
+>;
+
 /** What a node result needs to continue a run. Tool call inputs and outputs are dropped. */
-function journalResult(r: NodeResult): NodeResult {
-  return {
+export function journalResult(r: NodeResult): NodeResult {
+  const out: Record<string, unknown> = {
     status: r.status,
     data: r.data ?? {},
     toolCalls: (r.toolCalls ?? []).map((t) => ({
@@ -2501,11 +2536,11 @@ function journalResult(r: NodeResult): NodeResult {
       input: null,
       ...(t.status ? { status: t.status } : {}),
     })),
-    ...(r.evals ? { evals: r.evals } : {}),
-    ...(r.usage ? { usage: r.usage } : {}),
-    ...(r.skippedWrites ? { skippedWrites: r.skippedWrites } : {}),
-    ...(r.harness ? { harness: r.harness } : {}),
-    ...(r.degraded ? { degraded: r.degraded } : {}),
-    ...(r.outputs ? { outputs: r.outputs } : {}),
   };
+  const source = r as unknown as Record<string, unknown>;
+  for (const [field, rule] of Object.entries(NODE_RESULT_JOURNAL)) {
+    if (rule.journal !== "verbatim" || field in out) continue;
+    if (source[field] !== undefined) out[field] = source[field];
+  }
+  return out as unknown as NodeResult;
 }
