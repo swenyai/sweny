@@ -5,18 +5,19 @@ import type { CliConfig } from "./config.js";
 import { validateInputs } from "./config.js";
 import { findSkillEnvGaps } from "./skill-env.js";
 import { configuredSkills } from "../skills/custom-loader.js";
+import { consoleLogger } from "../types.js";
+import { createHarness, isSupportedAgent, unsupportedAgentError, type AgentHarness } from "../harness/index.js";
+import { CHECK_TIMEOUT_MS, networkErrorMessage } from "../harness/diagnose.js";
+
+// The Claude probes moved behind the harness seam (#532); these names stay importable from here.
+export { resolveCheckAuthMode, redactUrl, checkAnthropicGateway } from "../harness/diagnose.js";
+export type { CheckAuthMode } from "../harness/diagnose.js";
 
 export interface CheckResult {
   name: string;
   status: "ok" | "fail" | "skip";
   detail: string;
 }
-
-/**
- * Per-check network timeout. A hung connect must not make `sweny check` hang
- * indefinitely — the whole point of the command is fast diagnostics.
- */
-const CHECK_TIMEOUT_MS = 5000;
 
 /**
  * Run lightweight connectivity checks for all configured providers.
@@ -29,8 +30,18 @@ export interface CheckOptions {
    * (no workflows found), the legacy config-driven checks run.
    */
   scope?: ReadonlySet<string>;
-  /** A local Claude Code login exists, so no API key is required. */
+  /**
+   * Not read by the agent lines since #532: each harness probes its own stored
+   * login. Kept so existing callers compile; {@link validateCheckInputs} takes
+   * its own copy.
+   */
   claudeCodeLogin?: boolean;
+  /** The agent harness to diagnose (test seam). Default: `createHarness(codingAgentProvider)`. */
+  harness?: Pick<AgentHarness, "diagnose">;
+  /** Leave out the agent lines ({@link runCheck} renders them itself). */
+  skipAgent?: boolean;
+  /** Env the agent credentials are read from (default: `process.env`). */
+  env?: Record<string, string | undefined>;
 }
 
 export async function checkProviderConnectivity(config: CliConfig, opts: CheckOptions = {}): Promise<CheckResult[]> {
@@ -40,37 +51,7 @@ export async function checkProviderConnectivity(config: CliConfig, opts: CheckOp
   const githubChecked = { done: false }; // avoid double-checking same token
 
   // ── Coding agent ────────────────────────────────────────────────────────────
-  if (config.codingAgentProvider === "claude") {
-    const mode = resolveCheckAuthMode(config);
-    const base = config.anthropicBaseUrl;
-    if (mode === "none" && opts.claudeCodeLogin) {
-      results.push({
-        name: "Anthropic (claude agent)",
-        status: "ok",
-        detail: "Claude Code login detected",
-      });
-    } else if (mode === "none") {
-      results.push({ name: "Anthropic (claude agent)", status: "skip", detail: "No credential configured" });
-    } else if (base) {
-      // Gateway: probe the gateway, never real Anthropic with a gateway-bound key.
-      results.push(await checkAnthropicGateway(base, config, mode));
-    } else if (mode === "api-key") {
-      results.push(await checkAnthropic(config.anthropicApiKey));
-    } else {
-      // oauth or auth-token, no base URL: nothing cheap to probe, report the mode.
-      results.push({
-        name: "Anthropic (claude agent)",
-        status: "skip",
-        detail: `auth mode: ${mode}, skipping upstream API check`,
-      });
-    }
-  } else {
-    results.push({
-      name: `Coding agent (${config.codingAgentProvider})`,
-      status: "skip",
-      detail: "Connectivity check not implemented for this provider",
-    });
-  }
+  if (!opts.skipAgent) results.push(...(await checkAgent(config, opts)));
 
   // ── Observability ────────────────────────────────────────────────────────────
   for (const provider of config.observabilityProviders) {
@@ -145,85 +126,83 @@ export async function checkProviderConnectivity(config: CliConfig, opts: CheckOp
 
 // ── Provider check functions ─────────────────────────────────────────────────
 
-async function checkAnthropic(apiKey: string): Promise<CheckResult> {
-  const name = "Anthropic (claude agent)";
+/**
+ * The agent lines (#532): whatever the harness's `diagnose()` checks (CLI and
+ * version, credentials, a stored login, a cheap upstream probe), rendered
+ * like every other line. The harness owns the checks; nothing here branches
+ * on the agent.
+ */
+export async function checkAgent(
+  config: CliConfig,
+  opts: Pick<CheckOptions, "harness" | "env"> = {},
+): Promise<CheckResult[]> {
+  const agent = config.codingAgentProvider;
+  const name = `Coding agent (${agent})`;
+  if (!isSupportedAgent(agent)) return [{ name, status: "fail", detail: unsupportedAgentError(agent) }];
+  let harness: Pick<AgentHarness, "diagnose">;
   try {
-    const res = await fetch("https://api.anthropic.com/v1/models", {
-      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
-    });
-    if (res.status === 200) {
-      return { name, status: "ok", detail: "API key is valid" };
-    }
-    if (res.status === 401) {
-      return {
-        name,
-        status: "fail",
-        detail: "401 Unauthorized - check ANTHROPIC_API_KEY at https://console.anthropic.com",
-      };
-    }
-    return { name, status: "fail", detail: `Unexpected HTTP ${res.status}` };
+    harness = opts.harness ?? createHarness(agent, { logger: consoleLogger });
   } catch (err) {
-    return { name, status: "fail", detail: networkErrorMessage(err) };
+    return [{ name, status: "fail", detail: err instanceof Error ? err.message : String(err) }];
   }
+  if (!harness.diagnose) return [{ name, status: "skip", detail: "This agent has no preflight checks" }];
+  return harness.diagnose({ env: agentCheckEnv(config, opts.env ?? process.env), timeoutMs: CHECK_TIMEOUT_MS });
 }
 
-/** Which credential `sweny check` should validate, mirroring resolveAuthEnv intent. */
-export type CheckAuthMode = "oauth" | "api-key" | "auth-token" | "none";
+/** validateInputs' generic agent-auth lines; the harness's own lines replace them (#339, #532). */
+const AGENT_AUTH_ERROR_PREFIXES = ["Missing: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN", "Missing: CODEX_API_KEY"];
 
-export function resolveCheckAuthMode(
-  config: Pick<CliConfig, "anthropicApiKey" | "anthropicAuthToken" | "claudeOauthToken" | "swenyAuth">,
-): CheckAuthMode {
-  const hasKey = !!config.anthropicApiKey;
-  const hasBearer = !!config.anthropicAuthToken;
-  const hasOauth = !!config.claudeOauthToken;
-  if (config.swenyAuth === "oauth") return hasOauth ? "oauth" : "none";
-  if (config.swenyAuth === "api-key") return hasKey ? "api-key" : hasBearer ? "auth-token" : "none";
-  // auto: OAuth wins when present (today's protective behavior)
-  if (hasOauth) return "oauth";
-  if (hasKey) return "api-key";
-  if (hasBearer) return "auth-token";
-  return "none";
+export interface CheckReport {
+  /** Every line to render: the agent's first, then the providers'. */
+  results: CheckResult[];
+  /** Config errors (not the agent's): when set, no provider is probed. */
+  errors: string[];
+  /** True when `sweny check` must exit non-zero. */
+  failed: boolean;
 }
 
-/** Redact a URL to scheme + host so userinfo / query (which can carry a key) never logs. */
-export function redactUrl(raw: string): string {
-  try {
-    const u = new URL(raw);
-    return `${u.protocol}//${u.host}`;
-  } catch {
-    return "(invalid URL)";
-  }
-}
-
-export async function checkAnthropicGateway(
-  base: string,
-  config: Pick<CliConfig, "anthropicApiKey" | "anthropicAuthToken" | "claudeOauthToken">,
-  mode: CheckAuthMode,
-): Promise<CheckResult> {
-  const name = "Anthropic (gateway)";
-  const safeBase = redactUrl(base);
-  const headers: Record<string, string> = { "anthropic-version": "2023-06-01" };
-  if (mode === "api-key") {
-    headers["x-api-key"] = config.anthropicApiKey;
-  } else {
-    // auth-token or oauth against the gateway
-    headers.Authorization = `Bearer ${config.anthropicAuthToken || config.claudeOauthToken}`;
-  }
-  try {
-    const url = base.replace(/\/+$/, "") + "/v1/models";
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) });
-    // Gateways vary on whether /v1/models exists; reachable + non-auth-error is good enough.
-    if (res.ok || res.status === 404) {
-      return { name, status: "ok", detail: `gateway reachable (${safeBase}), auth mode: ${mode}` };
+/**
+ * `sweny check` end to end (#532). The agent's lines always render, even when
+ * its run gate (`preflight()`, the check `sweny workflow run` makes before any
+ * node) fails, so a broken setup sees its diagnosis. When the gate fails and
+ * no agent line already says why, its reason is added as a failed line. Config
+ * errors skip the provider probes but not the agent lines.
+ */
+export async function runCheck(
+  config: CliConfig,
+  opts: Omit<CheckOptions, "harness" | "skipAgent"> & { harness?: Pick<AgentHarness, "diagnose" | "preflight"> } = {},
+): Promise<CheckReport> {
+  const agent = config.codingAgentProvider;
+  const errors = validateCheckInputs(config, { scope: opts.scope, env: opts.env }).filter(
+    (e) => !AGENT_AUTH_ERROR_PREFIXES.some((p) => e.startsWith(p)) && e !== unsupportedAgentError(agent),
+  );
+  let harness = opts.harness;
+  if (!harness && isSupportedAgent(agent)) {
+    try {
+      harness = createHarness(agent, { logger: consoleLogger });
+    } catch {
+      // checkAgent reports the construction error as the agent's line.
     }
-    if (res.status === 401 || res.status === 403) {
-      return { name, status: "fail", detail: `${res.status} from gateway ${safeBase}, check gateway credentials` };
-    }
-    return { name, status: "fail", detail: `Unexpected HTTP ${res.status} from gateway ${safeBase}` };
-  } catch (err) {
-    return { name, status: "fail", detail: networkErrorMessage(err) };
   }
+  const results = await checkAgent(config, { harness, env: opts.env });
+  if (harness && !results.some((r) => r.status === "fail")) {
+    const pre = await harness.preflight();
+    if (!pre.ok) results.push({ name: `Agent (${agent})`, status: "fail", detail: pre.reason });
+  }
+  if (errors.length === 0) results.push(...(await checkProviderConnectivity(config, { ...opts, skipAgent: true })));
+  return { results, errors, failed: errors.length > 0 || results.some((r) => r.status === "fail") };
+}
+
+/** Env for the agent checks: the process env, with the agent settings `.sweny.yml` can also carry. */
+function agentCheckEnv(config: CliConfig, env: Record<string, string | undefined>): Record<string, string | undefined> {
+  return {
+    ...env,
+    ANTHROPIC_API_KEY: config.anthropicApiKey,
+    ANTHROPIC_AUTH_TOKEN: config.anthropicAuthToken,
+    CLAUDE_CODE_OAUTH_TOKEN: config.claudeOauthToken,
+    ANTHROPIC_BASE_URL: config.anthropicBaseUrl,
+    SWENY_AUTH: config.swenyAuth,
+  };
 }
 
 export async function checkDatadog(creds: Record<string, string>): Promise<CheckResult> {
@@ -347,20 +326,6 @@ async function checkGitHub(token: string, name: string): Promise<CheckResult> {
   } catch (err) {
     return { name, status: "fail", detail: networkErrorMessage(err) };
   }
-}
-
-function networkErrorMessage(err: unknown): string {
-  // AbortSignal.timeout fires a DOMException with name "TimeoutError"; an
-  // explicit abort surfaces as "AbortError". Either means we gave up waiting.
-  const errName = err instanceof Error ? err.name : "";
-  if (errName === "TimeoutError" || errName === "AbortError") {
-    return `Connection timed out after ${CHECK_TIMEOUT_MS}ms - host unreachable or too slow`;
-  }
-  const msg = err instanceof Error ? err.message : String(err);
-  if (/ENOTFOUND|ETIMEDOUT|ECONNREFUSED/i.test(msg)) {
-    return `Network error - check your internet connection (${msg})`;
-  }
-  return msg;
 }
 
 // ── Workflow-scoped checks ───────────────────────────────────────────────────

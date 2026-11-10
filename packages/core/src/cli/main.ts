@@ -108,12 +108,7 @@ import {
   formatCrashError,
   formatCheckResults,
 } from "./output.js";
-import {
-  checkProviderConnectivity,
-  detectClaudeCodeLogin,
-  discoverWorkflowSkillIds,
-  validateCheckInputs,
-} from "./check.js";
+import { discoverWorkflowSkillIds, runCheck } from "./check.js";
 import { registerSetupCommand } from "./setup.js";
 import { registerPublishCommand } from "./publish.js";
 import { registerSkillCommand } from "./skill.js";
@@ -191,9 +186,6 @@ program
 registerTryCommand(program);
 
 // ── sweny check ───────────────────────────────────────────────────────
-/** validateInputs' generic agent-auth lines, replaced by the harness preflight reason (#339). */
-const AGENT_AUTH_ERROR_PREFIXES = ["Missing: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN", "Missing: CODEX_API_KEY"];
-
 program
   .command("check")
   .description("Verify provider credentials and connectivity")
@@ -202,25 +194,14 @@ program
     const config = parseCliInputs({}, fileConfig);
     const workflows = discoverWorkflowSkillIds(process.cwd());
     const scope = workflows.found ? workflows.skillIds : undefined;
-    const claudeCodeLogin = detectClaudeCodeLogin();
-    let errors = validateCheckInputs(config, { scope, claudeCodeLogin });
-    // #339: the agent's own preflight (install and login), named by --agent.
-    // Its reason replaces the generic agent-auth line from validateInputs.
-    const agent = config.codingAgentProvider;
-    const pre = isSupportedAgent(agent) ? await createHarness(agent, { logger: consoleLogger }).preflight() : undefined;
-    if (pre && !pre.ok) {
-      errors = [pre.reason, ...errors.filter((e) => !AGENT_AUTH_ERROR_PREFIXES.some((p) => e.startsWith(p)))];
-    }
-    if (errors.length > 0) {
-      console.error(formatValidationErrors(errors));
-      process.exit(1);
-    }
     console.log(chalk.dim("\n  Checking provider connectivity…\n"));
-    const results = await checkProviderConnectivity(config, { scope, claudeCodeLogin });
-    if (pre?.ok) results.unshift({ name: `Agent (${agent})`, status: "ok", detail: `ready (${pre.version})` });
-    console.log(formatCheckResults(results));
-    const hasFailure = results.some((r) => r.status === "fail");
-    process.exit(hasFailure ? 1 : 0);
+    // #532: the agent's diagnosis always renders, even when its run gate fails.
+    const report = await runCheck(config, { scope });
+    console.log(
+      formatCheckResults(report.results, { color: colorEnabled(process.stdout), unicode: supportsUnicode() }),
+    );
+    if (report.errors.length > 0) console.error(formatValidationErrors(report.errors));
+    process.exit(report.failed ? 1 : 0);
   });
 
 registerSetupCommand(program);

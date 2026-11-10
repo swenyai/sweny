@@ -66,7 +66,6 @@ export const SKILL_EXTRAS: Record<string, { url?: string; hint?: string; default
   BETTERSTACK_API_TOKEN: { url: "https://betterstack.com/docs/logs/api" },
   NR_API_KEY: { url: "https://one.newrelic.com/api-keys" },
   LINEAR_API_KEY: { url: "https://linear.app/settings/api" },
-  LINEAR_TEAM_ID: { hint: "Settings > Teams > copy ID from URL" },
   JIRA_BASE_URL: { hint: "e.g. https://your-org.atlassian.net" },
   JIRA_EMAIL: { hint: "your Atlassian account email" },
   JIRA_API_TOKEN: { url: "https://id.atlassian.com/manage-profile/security/api-tokens" },
@@ -106,10 +105,8 @@ export const SKILL_CREDENTIALS: Record<string, Credential[]> = {
   ],
   betterstack: [{ key: "BETTERSTACK_API_TOKEN", url: "https://betterstack.com/docs/logs/api" }],
   newrelic: [{ key: "NR_API_KEY", url: "https://one.newrelic.com/api-keys" }],
-  linear: [
-    { key: "LINEAR_API_KEY", url: "https://linear.app/settings/api" },
-    { key: "LINEAR_TEAM_ID", hint: "Settings > Teams > copy ID from URL" },
-  ],
+  // No LINEAR_TEAM_ID: only `sweny setup linear` reads it, and it takes --team-id (#532).
+  linear: [{ key: "LINEAR_API_KEY", url: "https://linear.app/settings/api" }],
   jira: [
     { key: "JIRA_BASE_URL", hint: "e.g. https://your-org.atlassian.net" },
     { key: "JIRA_EMAIL", hint: "your Atlassian account email" },

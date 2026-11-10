@@ -11,7 +11,8 @@
 
 import { query, createSdkMcpServer, tool as sdkTool, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { createRequire } from "node:module";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import * as path from "node:path";
 import type {
   Claude,
   Tool,
@@ -46,7 +47,9 @@ import {
 import type {
   AgentHarness,
   HarnessCapabilities,
+  HarnessCheck,
   HarnessCompleteRequest,
+  HarnessDiagnoseOptions,
   HarnessInfo,
   HarnessRunRequest,
   HarnessRunResult,
@@ -68,7 +71,8 @@ import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
 import { parseToolResultContent, summarizeToolError, tryParseJSON } from "./parse.js";
 import { makeAbort } from "./abort.js";
 import { runStateRoot } from "../journal.js";
-import { claudeCodeAuth, type AuthProbe } from "./auth.js";
+import { claudeCodeAuth, detectClaudeCodeLogin, type AuthProbe } from "./auth.js";
+import { diagnoseClaudeCode, diagnoseEnv } from "./diagnose.js";
 
 export { buildEvaluatePrompt, CLAUDE_CODE_CAPABILITIES };
 export { parseToolResultContent, summarizeToolError, makeAbort };
@@ -79,9 +83,14 @@ let cachedSdkVersion: string | undefined;
 function claudeSdkVersion(): string {
   if (cachedSdkVersion !== undefined) return cachedSdkVersion;
   try {
-    const req = createRequire(import.meta.url);
-    const pkg = req("@anthropic-ai/claude-agent-sdk/package.json") as { version?: unknown };
-    cachedSdkVersion = typeof pkg.version === "string" ? pkg.version : "unknown";
+    // The SDK's `exports` map has no "./package.json", so read it next to the entry file (the package root).
+    const entry = createRequire(import.meta.url).resolve("@anthropic-ai/claude-agent-sdk");
+    const pkg = JSON.parse(readFileSync(path.join(path.dirname(entry), "package.json"), "utf-8")) as {
+      name?: unknown;
+      version?: unknown;
+    };
+    cachedSdkVersion =
+      pkg.name === "@anthropic-ai/claude-agent-sdk" && typeof pkg.version === "string" ? pkg.version : "unknown";
   } catch {
     cachedSdkVersion = "unknown";
   }
@@ -470,6 +479,23 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     const auth = this.authProbe();
     if (!auth.ok) return { ok: false, reason: auth.reason };
     return { ok: true, version: claudeSdkVersion() };
+  }
+
+  /**
+   * `sweny check` (#532): the Agent SDK sweny ships with, then the credential
+   * line `sweny check` always printed (a stored login, an API key or gateway
+   * probe that lists models, or the auth mode). The env is the one
+   * {@link preflight} reads: the caller's `env` / `envRemove` applied.
+   */
+  async diagnose(opts: HarnessDiagnoseOptions = {}): Promise<HarnessCheck[]> {
+    const env = diagnoseEnv(opts.env, this.envOverlay, AGENT_AUTH_VARS);
+    const sdk: HarnessCheck = {
+      name: "Agent CLI (claude)",
+      status: "ok",
+      detail: `Claude Agent SDK ${claudeSdkVersion()} (installed with sweny)`,
+    };
+    const hasLogin = opts.hasLogin ?? (() => detectClaudeCodeLogin({ env }));
+    return [sdk, ...(await diagnoseClaudeCode({ env, hasLogin, timeoutMs: opts.timeoutMs }))];
   }
 
   /**

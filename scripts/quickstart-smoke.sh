@@ -100,7 +100,8 @@ pass "sweny workflow diagram"
 
 # 6. sweny check with no credentials: exit 1 with the auth message, and no git noise.
 run "sweny check" 1 sweny check
-contains "sweny check" "$OUT" "Configuration Error"
+# #532: the agent's failure is a check line (glyph, name, fix), not a config error.
+contains "sweny check" "$OUT" "Agent (claude)"
 contains "sweny check" "$OUT" "Missing: ANTHROPIC_API_KEY"
 excludes "sweny check" "$OUT" "fatal:"
 excludes "sweny check" "$OUT" "not a git repository"

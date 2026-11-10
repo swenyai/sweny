@@ -13,7 +13,9 @@ export { claudeCompat, asClaude } from "./compat.js";
 export type {
   AgentHarness,
   HarnessCapabilities,
+  HarnessCheck,
   HarnessCompleteRequest,
+  HarnessDiagnoseOptions,
   HarnessId,
   HarnessInfo,
   HarnessRunRequest,
