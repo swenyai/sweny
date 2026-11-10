@@ -213,6 +213,7 @@ import {
   validateCheckInputs,
   checkProviderConnectivity,
   checkAgent,
+  runCheck,
 } from "../check.js";
 import { parseCliInputs } from "../config.js";
 
@@ -397,5 +398,80 @@ describe("checkAgent", () => {
       { env: { PATH: tmpDir(), HOME: tmpDir() } },
     );
     expect(results[0]).toMatchObject({ name: "Agent CLI (codex)", status: "fail" });
+  });
+});
+
+describe("runCheck (#532)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const harness = (lines: { name: string; status: "ok" | "fail" | "skip"; detail: string }[], pre: unknown) => ({
+    diagnose: vi.fn(async () => lines),
+    preflight: vi.fn(async () => pre as { ok: true; version: string } | { ok: false; reason: string }),
+  });
+
+  it("the gate fails but no line says why: its reason is added as a failed line, and check fails", async () => {
+    const h = harness([{ name: "Anthropic (claude agent)", status: "skip", detail: "No credential configured" }], {
+      ok: false,
+      reason: "Missing: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, for --agent claude",
+    });
+    const report = await runCheck(baseConfig(), { scope: new Set(), harness: h, env: {} });
+    expect(report.results).toEqual([
+      { name: "Anthropic (claude agent)", status: "skip", detail: "No credential configured" },
+      {
+        name: "Agent (claude)",
+        status: "fail",
+        detail: "Missing: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, for --agent claude",
+      },
+    ]);
+    expect(report.failed).toBe(true);
+    // validateInputs' generic agent-auth line is replaced by the harness's own lines.
+    expect(report.errors).toEqual([]);
+  });
+
+  it("an agent line already failed: its diagnosis stands alone, the gate is not asked", async () => {
+    const h = harness([{ name: "Agent CLI (codex)", status: "fail", detail: "codex CLI not found" }], {
+      ok: true,
+      version: "x",
+    });
+    const report = await runCheck(
+      { ...baseConfig(), codingAgentProvider: "codex" },
+      { scope: new Set(), harness: h, env: {} },
+    );
+    expect(report.results).toEqual([{ name: "Agent CLI (codex)", status: "fail", detail: "codex CLI not found" }]);
+    expect(h.preflight).not.toHaveBeenCalled();
+    expect(report.failed).toBe(true);
+  });
+
+  it("all good: the agent lines only, no duplicate 'ready' line, check passes", async () => {
+    const h = harness([{ name: "Agent CLI (pi)", status: "ok", detail: "1.0.0" }], { ok: true, version: "1.0.0" });
+    const report = await runCheck(
+      { ...baseConfig(), codingAgentProvider: "pi" },
+      { scope: new Set(), harness: h, env: {} },
+    );
+    expect(report.results).toEqual([{ name: "Agent CLI (pi)", status: "ok", detail: "1.0.0" }]);
+    expect(report.failed).toBe(false);
+  });
+
+  it("config errors still render the agent's lines and skip the provider probes", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("network must not be used");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const h = harness([{ name: "Agent CLI (pi)", status: "ok", detail: "1.0.0" }], { ok: true, version: "1.0.0" });
+    const report = await runCheck(
+      { ...baseConfig(), codingAgentProvider: "pi" },
+      { scope: new Set(["github"]), harness: h, env: {} },
+    );
+    expect(report.results).toEqual([{ name: "Agent CLI (pi)", status: "ok", detail: "1.0.0" }]);
+    expect(report.errors.some((e) => e.includes("GITHUB_TOKEN"))).toBe(true);
+    expect(report.failed).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("an unsupported agent is one failed line, not also a config error", async () => {
+    const report = await runCheck({ ...baseConfig(), codingAgentProvider: "gpt-pilot" }, { scope: new Set(), env: {} });
+    expect(report.results).toHaveLength(1);
+    expect(report.results[0]).toMatchObject({ name: "Coding agent (gpt-pilot)", status: "fail" });
+    expect(report.errors).toEqual([]);
   });
 });

@@ -38,6 +38,8 @@ export interface CheckOptions {
   claudeCodeLogin?: boolean;
   /** The agent harness to diagnose (test seam). Default: `createHarness(codingAgentProvider)`. */
   harness?: Pick<AgentHarness, "diagnose">;
+  /** Leave out the agent lines ({@link runCheck} renders them itself). */
+  skipAgent?: boolean;
   /** Env the agent credentials are read from (default: `process.env`). */
   env?: Record<string, string | undefined>;
 }
@@ -49,7 +51,7 @@ export async function checkProviderConnectivity(config: CliConfig, opts: CheckOp
   const githubChecked = { done: false }; // avoid double-checking same token
 
   // ── Coding agent ────────────────────────────────────────────────────────────
-  results.push(...(await checkAgent(config, opts)));
+  if (!opts.skipAgent) results.push(...(await checkAgent(config, opts)));
 
   // ── Observability ────────────────────────────────────────────────────────────
   for (const provider of config.observabilityProviders) {
@@ -145,6 +147,50 @@ export async function checkAgent(
   }
   if (!harness.diagnose) return [{ name, status: "skip", detail: "This agent has no preflight checks" }];
   return harness.diagnose({ env: agentCheckEnv(config, opts.env ?? process.env), timeoutMs: CHECK_TIMEOUT_MS });
+}
+
+/** validateInputs' generic agent-auth lines; the harness's own lines replace them (#339, #532). */
+const AGENT_AUTH_ERROR_PREFIXES = ["Missing: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN", "Missing: CODEX_API_KEY"];
+
+export interface CheckReport {
+  /** Every line to render: the agent's first, then the providers'. */
+  results: CheckResult[];
+  /** Config errors (not the agent's): when set, no provider is probed. */
+  errors: string[];
+  /** True when `sweny check` must exit non-zero. */
+  failed: boolean;
+}
+
+/**
+ * `sweny check` end to end (#532). The agent's lines always render, even when
+ * its run gate (`preflight()`, the check `sweny workflow run` makes before any
+ * node) fails, so a broken setup sees its diagnosis. When the gate fails and
+ * no agent line already says why, its reason is added as a failed line. Config
+ * errors skip the provider probes but not the agent lines.
+ */
+export async function runCheck(
+  config: CliConfig,
+  opts: Omit<CheckOptions, "harness" | "skipAgent"> & { harness?: Pick<AgentHarness, "diagnose" | "preflight"> } = {},
+): Promise<CheckReport> {
+  const agent = config.codingAgentProvider;
+  const errors = validateCheckInputs(config, { scope: opts.scope, env: opts.env }).filter(
+    (e) => !AGENT_AUTH_ERROR_PREFIXES.some((p) => e.startsWith(p)) && e !== unsupportedAgentError(agent),
+  );
+  let harness = opts.harness;
+  if (!harness && isSupportedAgent(agent)) {
+    try {
+      harness = createHarness(agent, { logger: consoleLogger });
+    } catch {
+      // checkAgent reports the construction error as the agent's line.
+    }
+  }
+  const results = await checkAgent(config, { harness, env: opts.env });
+  if (harness && !results.some((r) => r.status === "fail")) {
+    const pre = await harness.preflight();
+    if (!pre.ok) results.push({ name: `Agent (${agent})`, status: "fail", detail: pre.reason });
+  }
+  if (errors.length === 0) results.push(...(await checkProviderConnectivity(config, { ...opts, skipAgent: true })));
+  return { results, errors, failed: errors.length > 0 || results.some((r) => r.status === "fail") };
 }
 
 /** Env for the agent checks: the process env, with the agent settings `.sweny.yml` can also carry. */

@@ -47,7 +47,7 @@ sweny check
 
 Reads providers from `.sweny.yml` and `.env`, then tests connectivity for each one. Prints a pass/fail status per provider with actionable error messages. Exits `0` if all providers pass, `1` if any fail.
 
-The coding agent you picked (`--agent` or `coding-agent-provider`) gets its own lines, checked by its harness. None of them makes a model call or spends tokens, and no credential value is printed.
+The coding agent you picked (`--agent` or `coding-agent-provider`) gets its own lines, checked by its harness. None of them makes a model call or spends tokens, and no credential value is printed. They print even when the agent cannot run yet (a missing CLI or login), so a broken setup shows what is wrong. With `NO_COLOR` the output has no color; with `SWENY_ASCII=1` it uses ASCII glyphs and box lines.
 
 | Agent | What `sweny check` verifies |
 |-------|-----------------------------|
