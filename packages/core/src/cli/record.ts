@@ -25,6 +25,13 @@ export const RECORD_COLUMNS = 80;
 /** Lines longer than this wrap in the window, like a terminal would. */
 export const RECORD_WRAP = 96;
 
+/**
+ * Items of each list the recorded answer shows (the rest is counted in the heading). The README's
+ * first screen has a 900px budget; the real answer is longer than that, so the recording shows a
+ * summary of it. `sweny try` in a terminal shows all of it.
+ */
+export const RECORD_ANSWER_ITEMS = 2;
+
 const FONT_SIZE = 13;
 /** Width of one terminal column in the window, in px. Every segment is placed at column * CELL_W. */
 export const CELL_W = 7.85;
@@ -352,6 +359,7 @@ export async function recordTrySvg(fixture: TryFixture = loadTryFixture()): Prom
       rich: true,
       unicode: true,
       columns: RECORD_COLUMNS,
+      compactAnswer: RECORD_ANSWER_ITEMS,
       fixture,
       write: (s) => {
         out += s;

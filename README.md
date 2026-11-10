@@ -60,8 +60,8 @@ read-only dry run, output checks, timeouts, untrusted-input fencing, cleanup.
 ## Quickstart
 
 Want to see a run first? `sweny try` replays a recorded demo with no login, no credentials, no network and no
-model calls, and prints the same progress, answer, receipt and PR comment a real run does (the sample data is
-illustrative):
+model calls, and prints the same progress, answer, receipt and PR comment a real run does (labelled: illustrative sample
+data until a real run is committed, then a replay of a real run):
 
 ```bash
 npm install -g @sweny-ai/core

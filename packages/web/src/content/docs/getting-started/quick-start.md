@@ -84,7 +84,7 @@ After your first successful run in a workspace, the CLI prints this once (never 
 - [Scheduling](/action/scheduling/) puts a workflow on a cron with the [GitHub Action](/action/). The [recurring packs](/workflows/packs/) come with their trigger already written.
 
 :::note[Want to watch first?]
-`sweny try` replays a recorded demo: no login, no credentials, no network, no model calls. The data is illustrative sample data, not a real run, and it writes no files. Run `sweny try` to see the receipt before you spend anything.
+`sweny try` replays a recorded demo: no login, no credentials, no network, no model calls. The demo says what it is: illustrative sample data until a real run is committed, then "a replay of a real run on <date>". It writes no files. Run `sweny try` to see the receipt before you spend anything.
 :::
 
 ## Other ways to run it
