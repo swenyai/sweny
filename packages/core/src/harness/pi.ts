@@ -63,7 +63,9 @@ import {
 import type {
   AgentHarness,
   HarnessCapabilities,
+  HarnessCheck,
   HarnessCompleteRequest,
+  HarnessDiagnoseOptions,
   HarnessInfo,
   HarnessRunRequest,
   HarnessRunResult,
@@ -76,6 +78,7 @@ import { gitCredentialPolicy } from "../git-credentials.js";
 import { buildNodePrompt, reportCompletionUsage } from "./prompts.js";
 import { makeAbort } from "./abort.js";
 import { parseToolResultContent, summarizeToolError, tryParseJSON } from "./parse.js";
+import { cliCheck, diagnoseEnv } from "./diagnose.js";
 import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
 import {
   defaultSandboxWrapper,
@@ -517,13 +520,27 @@ export class PiHarness implements AgentHarness {
 
   /** `pi --version`, checked against {@link MIN_PI_VERSION}. Cached per instance. */
   preflight(): Promise<{ ok: true; version: string } | { ok: false; reason: string }> {
-    this.preflightResult ??= new Promise((resolve) => {
-      const { command, args } = this.piCommand;
+    this.preflightResult ??= (() => {
       // Probe the file the spawn will run: resolved on the run's PATH and cwd, then reused at spawn.
       const hostEnv = overlaidProcessEnv(this.envOverlay, PI_CREDENTIAL_VARS);
-      this.resolvedCommand = resolveExecutable(command, hostEnv, this.cwd);
+      this.resolvedCommand = resolveExecutable(this.piCommand.command, hostEnv, this.cwd);
+      return this.probeVersion(this.resolvedCommand, hostEnv).then((res) => {
+        if (res.ok) this.version = res.version;
+        return res;
+      });
+    })();
+    return this.preflightResult;
+  }
+
+  /** Run `<resolved> --version` with `hostEnv` and parse it. No caching, no side effects. */
+  private probeVersion(
+    resolved: string | undefined,
+    hostEnv: Record<string, string>,
+  ): Promise<{ ok: true; version: string } | { ok: false; reason: string }> {
+    const { command, args } = this.piCommand;
+    return new Promise((resolve) => {
       const opts = { timeout: 30_000, cwd: this.cwd, env: hostEnv };
-      execFile(this.resolvedCommand ?? command, [...args, "--version"], opts, (err, stdout, stderr) => {
+      execFile(resolved ?? command, [...args, "--version"], opts, (err, stdout, stderr) => {
         if (err) {
           const code = (err as NodeJS.ErrnoException).code;
           resolve({
@@ -545,11 +562,55 @@ export class PiHarness implements AgentHarness {
           resolve({ ok: false, reason: `pi ${m[1]} is too old; sweny needs >= ${MIN_PI_VERSION}` });
           return;
         }
-        this.version = m[1];
         resolve({ ok: true, version: m[1] });
       });
     });
-    return this.preflightResult;
+  }
+
+  /**
+   * `sweny check` (#532): the CLI and its version (resolved and parsed the way
+   * {@link preflight} does), and the provider credential a run would hand pi
+   * ({@link resolvePiProvider}), or the custom `models.json`. pi runs without
+   * its stored `auth.json`, so env is the only source. No upstream probe: pi
+   * talks to any provider, and none has one cheap, provider-neutral check.
+   * Nothing is cached and no credential value is printed.
+   */
+  async diagnose(opts: HarnessDiagnoseOptions = {}): Promise<HarnessCheck[]> {
+    const env = diagnoseEnv(opts.env, this.envOverlay, PI_CREDENTIAL_VARS);
+    const resolved = resolveExecutable(this.piCommand.command, env, this.cwd);
+    const cli = cliCheck("Agent CLI (pi)", resolved, await this.probeVersion(resolved, env));
+    return [cli, this.authCheck(env)];
+  }
+
+  private authCheck(env: Record<string, string>): HarnessCheck {
+    const name = "Agent auth (pi)";
+    const res = resolvePiProvider(env, this.model, this.provider);
+    if (res.error) return { name, status: "fail", detail: res.error };
+    const set = res.vars.filter((v) => env[v]?.trim());
+    const provider = res.provider ? `provider ${res.provider}` : "provider";
+    if (set.length > 0) return { name, status: "ok", detail: `${provider} via ${set.join(", ")}` };
+    if (this.modelsFile) {
+      return fs.existsSync(this.modelsFile)
+        ? { name, status: "ok", detail: `custom models from ${this.modelsFile} (SWENY_PI_MODELS_JSON)` }
+        : { name, status: "fail", detail: `SWENY_PI_MODELS_JSON points to a missing file: ${this.modelsFile}` };
+    }
+    if (res.provider && res.vars.length > 0) {
+      return { name, status: "fail", detail: `Missing: ${res.vars.join(" or ")} for pi ${provider}` };
+    }
+    if (res.provider) {
+      return {
+        name,
+        status: "skip",
+        detail: `${provider}: sweny does not know its credential; pi reports a missing one`,
+      };
+    }
+    return {
+      name,
+      status: "fail",
+      detail:
+        "Missing: a model provider credential for pi, such as ANTHROPIC_API_KEY or OPENAI_API_KEY " +
+        "(pi runs without its stored auth.json), or SWENY_PI_MODELS_JSON for a custom provider",
+    };
   }
 
   /** Which provider's credential this call gets ({@link resolvePiProvider}), over the env with the overlay applied. */

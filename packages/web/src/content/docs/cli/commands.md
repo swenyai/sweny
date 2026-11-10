@@ -47,6 +47,40 @@ sweny check
 
 Reads providers from `.sweny.yml` and `.env`, then tests connectivity for each one. Prints a pass/fail status per provider with actionable error messages. Exits `0` if all providers pass, `1` if any fail.
 
+The coding agent you picked (`--agent` or `coding-agent-provider`) gets its own lines, checked by its harness. None of them makes a model call or spends tokens, and no credential value is printed. They print even when the agent cannot run yet (a missing CLI or login), so a broken setup shows what is wrong. With `NO_COLOR` the output has no color; with `SWENY_ASCII=1` it uses ASCII glyphs and box lines.
+
+| Agent | What `sweny check` verifies |
+|-------|-----------------------------|
+| `claude` | The version of the agent SDK sweny bundles for Claude Code; then a stored Claude Code login, or `ANTHROPIC_API_KEY` against `GET /v1/models` (or your gateway when `ANTHROPIC_BASE_URL` is set). An OAuth or bearer token with no gateway is reported by mode, without a network call. |
+| `codex` | `codex --version` (the same binary and version floor a run uses); a credential (`CODEX_API_KEY`, `OPENAI_API_KEY`, `CODEX_ACCESS_TOKEN`, or `codex login`); `codex login status`; and, with an API key, `GET /models` on `OPENAI_BASE_URL` (default `https://api.openai.com/v1`). |
+| `pi` | `pi --version`; and the one provider credential a run would hand pi, or the `SWENY_PI_MODELS_JSON` file. No upstream probe: pi talks to many providers. |
+| `acp:<command>` | The command resolves on `PATH`. The agent is not started, so its version and login are reported when a run starts. |
+
+```text
+  Checking provider connectivity…
+
+  ╭──────────────────────────────────────────────────╮
+  │                                                  │
+  │  Provider Connectivity Check                     │
+  │                                                  │
+  ├──────────────────────────────────────────────────┤
+  │                                                  │
+  │  ✓  Agent CLI (codex)                            │
+  │       0.159.2                                    │
+  │       (/path/to/bin/codex)                       │
+  │  ✗  Agent auth (codex)                           │
+  │       Missing: OPENAI_API_KEY or CODEX_API_KEY,  │
+  │       or a Codex login (`codex login`), for      │
+  │       --agent codex                              │
+  │                                                  │
+  ├──────────────────────────────────────────────────┤
+  │                                                  │
+  │  One or more checks failed. Fix the issues       │
+  │  above before running a workflow.                │
+  │                                                  │
+  ╰──────────────────────────────────────────────────╯
+```
+
 Run this after initial setup or when rotating credentials.
 
 ## sweny setup
@@ -625,6 +659,15 @@ sweny upgrade --force
 The check asks the npm registry (`registry.npmjs.org`) for the latest `@sweny-ai/core` version and sends nothing else. After a successful check the answer is cached for 24 hours; a failed or timed-out check is not cached, so it is retried on the next command. It is skipped in CI, when stderr is not a terminal, for `sweny try`, and when `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1` is set.
 
 **Homebrew installs** are detected but not driven automatically — the command prints `brew upgrade sweny` for you to run.
+
+## Deprecated flags
+
+These flags did nothing and were removed from the docs, then restored so existing scripts and CI jobs (the `swenyai/triage` action passes most of them) keep running. They are accepted, hidden from `--help`, and have no effect. Using one prints a single warning to stderr; they will be removed in a future minor version, so drop them from your invocations.
+
+- `sweny triage`: `--cache-dir`, `--cache-ttl`, `--no-cache`, `--service-map-path`, `--gitlab-base-url`, `--linear-bug-label-id`, `--linear-triage-label-id`, `--linear-state-backlog`
+- `sweny triage` and `sweny implement`: `--output-dir`, `--linear-team-id`, `--linear-state-in-progress`, `--linear-state-peer-review`
+
+The matching environment variables and `.sweny.yml` keys are ignored too, and never raised an error.
 
 ## Global options
 

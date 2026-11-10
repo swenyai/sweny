@@ -38,8 +38,8 @@ import {
   checkSandboxSupport,
   finishAgentEnv,
   resolveExecutable,
-  overlaidProcessEnv,
   heldCredentials,
+  hasCodexLogin,
   parseList,
   reportWithheldEnv,
   resolveCodexAuthEnv,
@@ -56,7 +56,9 @@ import {
 import type {
   AgentHarness,
   HarnessCapabilities,
+  HarnessCheck,
   HarnessCompleteRequest,
+  HarnessDiagnoseOptions,
   HarnessInfo,
   HarnessRunRequest,
   HarnessRunResult,
@@ -79,6 +81,7 @@ import {
 } from "./sandbox-wrapper.js";
 import { TOKEN_ENV } from "./tool-bridge/protocol.js";
 import { codexAuth, type AuthProbe } from "./auth.js";
+import { CHECK_TIMEOUT_MS, checkOpenAI, cliCheck, diagnoseEnv, runCli } from "./diagnose.js";
 
 export { CODEX_CAPABILITIES };
 
@@ -451,12 +454,13 @@ export class CodexHarness implements AgentHarness {
   }
 
   /**
-   * `process.env` with the caller's `env` / `envRemove` applied, unscoped: where
-   * sweny reads Codex's own settings (`OPENAI_BASE_URL`) and the login probe.
-   * The scoped agent env would drop an inherited base URL.
+   * `process.env` (or `base`, for `sweny check`) with the caller's `env` /
+   * `envRemove` applied, unscoped: where sweny reads Codex's own settings
+   * (`OPENAI_BASE_URL`) and the login probe. The scoped agent env would drop
+   * an inherited base URL.
    */
-  private hostEnv(): Record<string, string> {
-    return overlaidProcessEnv(this.envOverlay, CODEX_CREDENTIAL_VARS);
+  private hostEnv(base?: Record<string, string | undefined>): Record<string, string> {
+    return diagnoseEnv(base, this.envOverlay, CODEX_CREDENTIAL_VARS);
   }
 
   /**
@@ -464,8 +468,8 @@ export class CodexHarness implements AgentHarness {
    * OPENAI_API_KEY does not count once `envRemove` names CODEX_API_KEY, since
    * the agent env no longer derives CODEX_API_KEY from it.
    */
-  private loginEnv(): Record<string, string> {
-    const env = this.hostEnv();
+  private loginEnv(base?: Record<string, string | undefined>): Record<string, string> {
+    const env = this.hostEnv(base);
     const overlay = this.envOverlay;
     if (overlay?.remove.includes("CODEX_API_KEY") && !Object.hasOwn(overlay.env, "OPENAI_API_KEY")) {
       delete env.OPENAI_API_KEY;
@@ -480,13 +484,37 @@ export class CodexHarness implements AgentHarness {
 
   /** `codex --version`, checked against {@link MIN_CODEX_VERSION}. Cached per instance. */
   private checkCli(): Promise<{ ok: true; version: string } | { ok: false; reason: string }> {
-    this.preflightResult ??= new Promise((resolve) => {
-      const { command, args } = this.codexCommand;
+    this.preflightResult ??= (() => {
       // Probe the file the spawn will run: resolved on the run's PATH and cwd, then reused at spawn.
       const hostEnv = this.hostEnv();
-      this.resolvedCommand = resolveExecutable(command, hostEnv, this.cwd);
+      this.resolvedCommand = resolveExecutable(this.codexCommand.command, hostEnv, this.cwd);
+      return this.probeVersion(this.resolvedCommand, hostEnv).then((res) => {
+        if (!res.ok) return res;
+        this.version = res.version;
+        // Newer than the tested version: the declared capabilities may no longer hold. Warn once
+        // (the result is cached per instance). Not `degraded`: that is a per-node policy report and
+        // there is no node yet; not a refusal: it would break anyone who chose `latest` on purpose.
+        if (compareVersions(res.version, TESTED_CODEX_VERSION) > 0) {
+          this.logger.warn(
+            `codex ${res.version} is newer than ${TESTED_CODEX_VERSION}, the version sweny's Codex capabilities were tested against; ` +
+              `flags and event shapes may differ. Pin @openai/codex@${TESTED_CODEX_VERSION} (action input codex-version) for the tested behavior.`,
+          );
+        }
+        return res;
+      });
+    })();
+    return this.preflightResult;
+  }
+
+  /** Run `<resolved> --version` with `hostEnv` and parse it. No caching, no side effects. */
+  private probeVersion(
+    resolved: string | undefined,
+    hostEnv: Record<string, string>,
+  ): Promise<{ ok: true; version: string } | { ok: false; reason: string }> {
+    const { command, args } = this.codexCommand;
+    return new Promise((resolve) => {
       const opts = { timeout: 30_000, cwd: this.cwd, env: hostEnv };
-      execFile(this.resolvedCommand ?? command, [...args, "--version"], opts, (err, stdout) => {
+      execFile(resolved ?? command, [...args, "--version"], opts, (err, stdout) => {
         if (err) {
           const code = (err as NodeJS.ErrnoException).code;
           resolve({
@@ -507,20 +535,84 @@ export class CodexHarness implements AgentHarness {
           resolve({ ok: false, reason: `codex ${m[1]} is too old; sweny needs >= ${MIN_CODEX_VERSION}` });
           return;
         }
-        this.version = m[1];
-        // Newer than the tested version: the declared capabilities may no longer hold. Warn once
-        // (the result is cached per instance). Not `degraded`: that is a per-node policy report and
-        // there is no node yet; not a refusal: it would break anyone who chose `latest` on purpose.
-        if (compareVersions(m[1], TESTED_CODEX_VERSION) > 0) {
-          this.logger.warn(
-            `codex ${m[1]} is newer than ${TESTED_CODEX_VERSION}, the version sweny's Codex capabilities were tested against; ` +
-              `flags and event shapes may differ. Pin @openai/codex@${TESTED_CODEX_VERSION} (action input codex-version) for the tested behavior.`,
-          );
-        }
         resolve({ ok: true, version: m[1] });
       });
     });
-    return this.preflightResult;
+  }
+
+  /**
+   * `sweny check` (#532): the CLI and its version (resolved and parsed the way
+   * {@link preflight} does), a credential ({@link codexAuth}), the CLI's own
+   * `codex login status`, and an upstream probe when an API key is set
+   * (`GET /models`: read-only, no model call, no tokens). A ChatGPT login or
+   * an access token has no cheap upstream probe, so that line is skipped.
+   * Nothing is cached and no credential value is printed.
+   */
+  async diagnose(opts: HarnessDiagnoseOptions = {}): Promise<HarnessCheck[]> {
+    const hostEnv = this.hostEnv(opts.env);
+    const env = this.loginEnv(opts.env);
+    const timeoutMs = opts.timeoutMs ?? CHECK_TIMEOUT_MS;
+    const resolved = resolveExecutable(this.codexCommand.command, hostEnv, this.cwd);
+    const pre = await this.probeVersion(resolved, hostEnv);
+    const newer =
+      pre.ok && compareVersions(pre.version, TESTED_CODEX_VERSION) > 0
+        ? `(newer than ${TESTED_CODEX_VERSION}, the version sweny is tested against)`
+        : undefined;
+    const checks: HarnessCheck[] = [cliCheck("Agent CLI (codex)", resolved, pre, newer)];
+
+    const auth = codexAuth(env, opts.hasLogin ?? (() => hasCodexLogin(env)));
+    checks.push(
+      auth.ok
+        ? { name: "Agent auth (codex)", status: "ok", detail: `via ${auth.via}` }
+        : { name: "Agent auth (codex)", status: "fail", detail: auth.reason },
+    );
+    // No credential at all: the auth line already names `codex login`; asking the CLI adds nothing.
+    if (!auth.ok) return checks;
+
+    if (pre.ok) checks.push(await this.loginStatus(resolved, hostEnv, timeoutMs, auth.via));
+
+    const keyVar = ["CODEX_API_KEY", "OPENAI_API_KEY"].find((k) => env[k]?.trim());
+    checks.push(
+      keyVar
+        ? await checkOpenAI(env[keyVar].trim(), keyVar, hostEnv.OPENAI_BASE_URL || undefined, timeoutMs)
+        : {
+            name: "OpenAI API (codex agent)",
+            status: "skip",
+            detail: `auth via ${auth.via}, skipping upstream API check`,
+          },
+    );
+    return checks;
+  }
+
+  /**
+   * `codex login status`: exit 0 when a login is stored, non-zero when not
+   * (codex-rs/cli/src/login.rs). Its output can carry a masked key, so it is
+   * classified, never printed.
+   */
+  private async loginStatus(
+    resolved: string | undefined,
+    env: Record<string, string>,
+    timeoutMs: number,
+    via: string,
+  ): Promise<HarnessCheck> {
+    const name = "Agent login (codex)";
+    const { command, args } = this.codexCommand;
+    const r = await runCli(resolved ?? command, [...args, "login", "status"], { env, cwd: this.cwd, timeoutMs });
+    if (r.code === 0) {
+      const out = `${r.stdout}\n${r.stderr}`;
+      const how = /ChatGPT/i.test(out) ? " with ChatGPT" : /API key/i.test(out) ? " with an API key" : "";
+      return { name, status: "ok", detail: `logged in${how} (codex login status)` };
+    }
+    if (r.code === null) return { name, status: "fail", detail: `codex login status did not finish: ${r.error}` };
+    // Not logged in. Fine when an env credential carries auth instead.
+    if (via !== "codex login") {
+      return { name, status: "skip", detail: `no stored login (codex login status); Codex authenticates with ${via}` };
+    }
+    return {
+      name,
+      status: "fail",
+      detail: "codex login status: not logged in, though auth.json exists. Run `codex login` again",
+    };
   }
 
   /**

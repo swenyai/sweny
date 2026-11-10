@@ -5,6 +5,8 @@ import type { NodeResult, ExecutionEvent, ExecutionTrace, TraceStep, TraceEdge, 
 import { redact } from "../journal.js";
 import { toMermaidBlock, type NodeStatus as MermaidNodeStatus } from "../mermaid.js";
 import { PALETTE, ROLE_COLORS } from "../theme.js";
+import { createPaint } from "./style.js";
+import { glyphsFor, toAsciiDrawing } from "./terminal.js";
 
 // ── Color palette (tokens from theme.ts; one color per meaning) ─
 export const c = {
@@ -418,35 +420,64 @@ export function formatCrashError(error: unknown): string {
 }
 
 // ── Check results ────────────────────────────────────────────────
-export function formatCheckResults(results: CheckResult[]): string {
-  const title = `${chalk.bold("Provider Connectivity Check")}`;
-  const header = [title];
+export interface CheckFormatOptions {
+  /** ANSI color (`colorEnabled(stdout)`: off under NO_COLOR, a pipe, TERM=dumb). Default off. */
+  color?: boolean;
+  /** Unicode glyphs and box lines (`supportsUnicode()`); false draws ASCII. Default on. */
+  unicode?: boolean;
+}
 
-  const body: string[] = results.map((r) => {
-    const icon = r.status === "ok" ? c.ok("\u2713") : r.status === "fail" ? c.fail("\u2717") : c.subtle("\u2212");
-    const name = chalk.white(r.name);
-    const detail = r.status === "ok" ? c.subtle(r.detail) : r.status === "fail" ? c.fail(r.detail) : c.subtle(r.detail);
-    return `${icon}  ${name}\n     ${detail}`;
+/**
+ * `sweny check`'s box: one line per check (glyph, name, detail below), then a
+ * summary. Painted through {@link createPaint} and the theme `GLYPHS`,
+ * so `NO_COLOR` and ASCII terminals get the same text without color or with
+ * ASCII glyphs and box lines.
+ */
+export function formatCheckResults(results: CheckResult[], opts: CheckFormatOptions = {}): string {
+  const paint = createPaint(opts.color ?? false);
+  const unicode = opts.unicode ?? true;
+  const g = glyphsFor(unicode);
+  const inner = BOX_WIDTH - 4;
+  const bar = paint.muted("\u2502");
+  const edge = (l: string, r: string) => paint.muted(`  ${l}${"\u2500".repeat(BOX_WIDTH)}${r}`);
+  const blank = `  ${bar}${" ".repeat(BOX_WIDTH)}${bar}`;
+  // A line that fits keeps its color; a longer one wraps as plain text.
+  const row = (text: string): string[] =>
+    (visLen(text) <= inner ? [text] : wrapText(text, inner)).map((l) => `  ${bar}  ${padLine(l, inner)}  ${bar}`);
+  const section = (rows: string[]) => [blank, ...rows, blank];
+
+  const body = results.flatMap((r) => {
+    const icon =
+      r.status === "ok"
+        ? paint.success(g.success)
+        : r.status === "fail"
+          ? paint.error(g.failure)
+          : paint.muted(g.skipped);
+    const tone = r.status === "fail" ? paint.error : paint.muted;
+    // The detail sits under the name, indented past the glyph, each wrapped line painted on its own.
+    const detail = wrapText(r.detail, inner - 5).flatMap((l) => row(`     ${tone(l)}`));
+    return [...row(`${icon}  ${r.name}`), ...detail];
   });
 
   const hasFailure = results.some((r) => r.status === "fail");
   const summary = hasFailure
-    ? c.fail("One or more checks failed. Fix the issues above before running sweny triage.")
+    ? paint.error("One or more checks failed. Fix the issues above before running a workflow.")
     : results.every((r) => r.status === "skip")
-      ? c.subtle("All providers set to file mode: no network checks performed.")
-      : c.ok("All checks passed.");
+      ? paint.muted("All providers set to file mode: no network checks performed.")
+      : paint.success("All checks passed.");
 
-  return [
+  const out = [
     "",
-    boxTop(),
-    ...boxSection(header),
-    boxDivider(),
-    ...boxSection(body),
-    boxDivider(),
-    ...boxSection([summary]),
-    boxBottom(),
+    edge("\u256D", "\u256E"),
+    ...section(row(paint.strong("Provider Connectivity Check"))),
+    edge("\u251C", "\u2524"),
+    ...section(body),
+    edge("\u251C", "\u2524"),
+    ...section(row(summary)),
+    edge("\u2570", "\u256F"),
     "",
   ].join("\n");
+  return unicode ? out : toAsciiDrawing(out);
 }
 
 // ── JSON output ─────────────────────────────────────────────────

@@ -7,6 +7,7 @@ import { Command } from "commander";
 import { registerImplementCommand, registerTriageCommand } from "../cli/config.js";
 import { SUPPORTED_AGENTS, unsupportedAgentError } from "../harness/agents.js";
 import { registerTryCommand } from "../cli/try.js";
+import { DEPRECATED_FLAGS, deprecatedFlagName } from "../cli/deprecated-flags.js";
 
 /**
  * The hosted cloud service is an experiment that is not running and not open
@@ -123,6 +124,14 @@ function section(md: string, heading: string): string {
   return next === -1 ? rest : rest.slice(0, next);
 }
 
+/** `md` without the `## <heading>` section (up to the next `## `). */
+function withoutSection(md: string, heading: string): string {
+  const start = md.indexOf(`\n## ${heading}`);
+  if (start === -1) return md;
+  const next = md.indexOf("\n## ", start + 1);
+  return next === -1 ? md.slice(0, start) : md.slice(0, start) + md.slice(next);
+}
+
 /** `--flag` names in the first column of a docs options table. */
 function documentedFlags(md: string): string[] {
   return [...md.matchAll(/^\|\s*`(--[a-z0-9-]+)/gm)].map((m) => m[1]);
@@ -177,11 +186,25 @@ describe("every documented CLI flag exists in --help", () => {
   it("no docs page documents a parsed-but-unread flag", () => {
     const hits: string[] = [];
     for (const rel of ["README.md", ...docFiles("packages/web/src/content/docs/cli")]) {
-      const text = read(rel);
+      // The one place they may be named: the "Deprecated flags" note, which says they do nothing.
+      const text = withoutSection(read(rel), "Deprecated flags");
       for (const flag of DEAD_FLAGS)
         if (text.includes(`${flag} `) || text.includes(`${flag}\``)) hits.push(`${rel}: ${flag}`);
     }
     expect(hits).toEqual([]);
+  });
+});
+
+describe("deprecated flags note", () => {
+  it("commands.md lists every deprecated flag as having no effect", () => {
+    const md = read("packages/web/src/content/docs/cli/commands.md");
+    const note = section(md, "Deprecated flags");
+    expect(note).toMatch(/no effect/);
+    for (const flag of DEAD_FLAGS) expect(note, flag).toContain(flag);
+  });
+
+  it("the flag table and the docs-honesty list agree", () => {
+    expect(DEPRECATED_FLAGS.map((d) => deprecatedFlagName(d.flag)).sort()).toEqual([...DEAD_FLAGS].sort());
   });
 });
 
@@ -359,6 +382,44 @@ describe("action inputs page matches action.yml", () => {
       expect(doc.def, `${name} default`).toBe(spec.default ?? "");
     }
   });
+});
+
+/**
+ * Every `with:` key in an Action example that uses swenyai/sweny is a real
+ * action.yml input. `linear-team-id` once sat in examples and silently did nothing.
+ */
+describe("Action examples use real action.yml inputs", () => {
+  const actionInputs = new Set(
+    Object.keys((parseYaml(read("action.yml")) as { inputs: Record<string, unknown> }).inputs),
+  );
+
+  for (const file of docFiles("packages/web/src/content/docs/action")) {
+    it(`${file}: with: keys under swenyai/sweny@ are action.yml inputs`, () => {
+      const blocks = read(file).match(/```ya?ml[\s\S]*?```/g) ?? [];
+      const bad: string[] = [];
+      for (const block of blocks) {
+        const lines = block.split("\n");
+        lines.forEach((line, i) => {
+          if (!/uses:\s*swenyai\/sweny@/.test(line)) return;
+          let w = -1;
+          for (let j = i + 1; j < lines.length && !/^\s*- /.test(lines[j]); j++) {
+            if (/^\s*with:\s*$/.test(lines[j])) w = j;
+          }
+          if (w < 0) return;
+          const wIndent = lines[w].match(/^\s*/)![0].length;
+          for (let j = w + 1; j < lines.length; j++) {
+            const l = lines[j];
+            if (l.trim() === "" || l.trim().startsWith("#")) continue;
+            const ind = l.match(/^\s*/)![0].length;
+            if (ind <= wIndent) break;
+            const m = l.match(/^\s*([a-z][a-z0-9-]*):/);
+            if (m && ind === wIndent + 2 && !actionInputs.has(m[1])) bad.push(m[1]);
+          }
+        });
+      }
+      expect(bad, "not inputs in action.yml").toEqual([]);
+    });
+  }
 });
 
 // ── Entry pages: one clean path (#534) ──────────────────────────
