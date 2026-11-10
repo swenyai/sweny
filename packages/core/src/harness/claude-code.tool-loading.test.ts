@@ -27,6 +27,11 @@ let turnOneTools: string[][] = [];
 /** Built-ins plus StructuredOutput: what the model always sees with an output schema. */
 const BUILTINS = ["Read", "Grep", "Glob", "WebSearch", "ToolSearch", "StructuredOutput"];
 
+/** Tools an external skill server would list, by server name. */
+const EXTERNAL_TOOLS: Record<string, Array<{ name: string; handler: (args: any) => Promise<any> }>> = {
+  tickets: [{ name: "lookup_ticket", handler: async () => ({ content: [{ type: "text", text: '{"id":"T-1"}' }] }) }],
+};
+
 /**
  * Claude Code as the SDK documents it: an MCP server's tools are on the
  * turn-1 prompt only when the server sets `alwaysLoad`; otherwise they are
@@ -39,7 +44,9 @@ function fakeClaudeCode({ prompt, options }: { prompt: string; options: any }) {
     for (const [server, cfg] of Object.entries<any>(options.mcpServers ?? {})) {
       const alwaysLoad = cfg.type === "sdk" ? cfg.instance?.alwaysLoad === true : cfg.alwaysLoad === true;
       if (!alwaysLoad) continue;
-      for (const t of cfg.instance?.tools ?? []) loaded.set(`mcp__${server}__${t.name}`, t);
+      // An in-process server lists its own tools; an external (stdio/http) one is
+      // a fixture here: nothing is spawned or fetched.
+      for (const t of cfg.instance?.tools ?? EXTERNAL_TOOLS[server] ?? []) loaded.set(`mcp__${server}__${t.name}`, t);
     }
     turnOneTools.push([...BUILTINS, ...loaded.keys()]);
 
@@ -173,5 +180,102 @@ describe("pr-risk-review scope node on Claude Code: skill tools are on the turn-
     expect(vi.mocked(fetch).mock.calls.map(([u]) => String(u))).toContain(
       "https://api.github.com/repos/swenyai/sweny/pulls/590/files?per_page=100",
     );
+  });
+});
+
+describe("skill-declared MCP servers on Claude Code: their tools are on the turn-1 tool list", () => {
+  beforeEach(() => {
+    turnOneTools = [];
+    vi.doMock("@anthropic-ai/claude-agent-sdk", () => ({
+      query: vi.fn(fakeClaudeCode),
+      createSdkMcpServer: (o: any) => ({ type: "sdk", name: o.name, instance: o }),
+      tool: vi.fn(),
+    }));
+    vi.stubEnv("SWENY_SANDBOX", "off");
+    vi.stubEnv("SWENY_TOOL_BRIDGE", "");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  const servers = {
+    stdio: { command: process.execPath, args: ["tickets-server.js"] },
+    http: { type: "http", url: "https://tickets.invalid/mcp" },
+  };
+
+  it.each(Object.keys(servers))(
+    "a %s skill server's tool is loaded up front and the node's check passes",
+    async (kind) => {
+      const { parseWorkflow } = await import("../schema.js");
+      const { ClaudeCodeHarness } = await import("./claude-code.js");
+      const { execute } = await import("../executor.js");
+      const mcp = servers[kind as keyof typeof servers];
+      const workflow = parseWorkflow(
+        parse(`
+id: tickets
+name: Tickets
+description: one node that must call its skill server's tool
+entry: look
+skills:
+  tickets:
+    instruction: Look tickets up with the tickets server.
+    mcp: ${JSON.stringify(mcp)}
+nodes:
+  look:
+    name: Look up
+    instruction: Call lookup_ticket for ticket T-1.
+    skills: [tickets]
+    eval:
+      - name: looked_it_up
+        kind: function
+        rule:
+          all_tools_called: [lookup_ticket]
+edges: []
+`),
+      ) as Workflow;
+      const { results } = await execute(
+        workflow,
+        {},
+        {
+          skills: new Map(),
+          harness: new ClaudeCodeHarness({ logger: silent, envScope: false }),
+          config: {},
+          logger: silent,
+        },
+      );
+      expect(turnOneTools[0]).toContain("mcp__tickets__lookup_ticket");
+      const look = results.get("look")!;
+      expect((look.evals ?? []).filter((e) => !e.pass)).toEqual([]);
+      expect(look.status).toBe("success");
+    },
+  );
+
+  it("an explicit alwaysLoad: false on the server config wins", async () => {
+    const { ClaudeCodeHarness } = await import("./claude-code.js");
+    const sdk: any = await import("@anthropic-ai/claude-agent-sdk");
+    await new ClaudeCodeHarness({ logger: silent, envScope: false }).run({
+      instruction: "Call lookup_ticket",
+      context: {},
+      tools: [],
+      mcpServers: { tickets: { ...servers.http, alwaysLoad: false } as any },
+    });
+    expect(sdk.query.mock.calls[0][0].options.mcpServers.tickets.alwaysLoad).toBe(false);
+    expect(turnOneTools[0]).not.toContain("mcp__tickets__lookup_ticket");
+  });
+
+  it("a read-only node still gets no skill server", async () => {
+    const { ClaudeCodeHarness } = await import("./claude-code.js");
+    const sdk: any = await import("@anthropic-ai/claude-agent-sdk");
+    await new ClaudeCodeHarness({ logger: silent, envScope: false }).run({
+      instruction: "x",
+      context: {},
+      tools: [],
+      readOnly: true,
+      mcpServers: { tickets: servers.http as any },
+    });
+    expect(sdk.query.mock.calls[0][0].options.mcpServers?.tickets).toBeUndefined();
   });
 });

@@ -775,6 +775,13 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       const allMcpServers: Record<string, any> = mcpWithheld(!!readOnly, agentAccess)
         ? {}
         : { ...this.defaultMcpServers, ...opts.mcpServers, ...this.mcpServers };
+      // A server the node's own skills declare (stdio or http) carries tools the
+      // node's checks require, so it loads up front like sweny-core below
+      // (Claude Code otherwise defers them behind ToolSearch). An explicit
+      // `alwaysLoad` in the server config wins.
+      for (const name of Object.keys(opts.mcpServers ?? {})) {
+        if (allMcpServers[name]) allMcpServers[name] = { alwaysLoad: true, ...allMcpServers[name] };
+      }
       if (useBridge) {
         // Only `tools` (already allow/deny and dry-run filtered by the
         // executor) are exposed. Under readOnly it is still the only MCP
