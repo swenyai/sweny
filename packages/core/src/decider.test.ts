@@ -741,7 +741,8 @@ describe("routable state", () => {
         check: {
           data: {
             severity: "high",
-            count: 2.5,
+            // An integer: a mistyped value now fails the node's output contract (#573) before routing.
+            count: 2,
             note: `uses ${SECRET} FREE-TEXT`,
             extra: "UNDECLARED-DATA",
             tag: token,
@@ -767,7 +768,7 @@ describe("routable state", () => {
     const state: string = srv.seen[0].body.state;
     expect(state).toContain("<untrusted-data");
     expect(state).toContain('"severity": "high"');
-    expect(state).toContain('"count": null'); // 2.5 is not an integer: never sent
+    expect(state).toContain('"count": 2');
     expect(state).toContain("[redacted]");
     for (const leak of [
       token,
