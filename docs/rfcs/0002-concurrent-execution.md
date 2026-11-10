@@ -3,10 +3,11 @@
 Status: accepted 2026-11-09 (owner accepted all ten recommendations in the owner summary). Milestones are tracked as GitHub issues.
 Author: drafted by Claude (SWEny brain session, opus lanes) for Nate; decisions accepted by Nate 2026-11-09. Date: 2026-11-06. Code read at `origin/main` `0d2c5ef1`. Paths are under `packages/core/src/` unless shown otherwise.
 History: four revisions, each reviewed adversarially (Codex astra, fresh-context Opus, Codex sol). Findings from earlier rounds are folded into this text; the dispositions table below covers the last round.
+Amendment 2026-11-10: spec v2 shipped as the safe-defaults version (#598, PR #607): a node that declares no `permissions` and no `outputs` is read-only, and the v1 to v2 migration declares `permissions: write` where v1 relied on the old default. Everything this RFC adds to the spec (the `map` node and the other spec additions) moves to spec v3, with an identity v2 to v3 migration. The spec-version statements below are updated to match.
 
 ## Owner summary
 
-**What we build.** A `map` node (spec v2) fans a workflow out by running one complete child SWEny run per item.
+**What we build.** A `map` node (spec v3) fans a workflow out by running one complete child SWEny run per item.
 - Each child gets its own journal, budget guard and results.
 - A shared spend tally caps the whole map.
 - The parent journal keeps today's v3 grammar unchanged.
@@ -64,10 +65,10 @@ Each child sees only its item plus the inputs passed to it explicitly.
 
 ## 1. Map: fan-out as child runs (M1)
 
-`CURRENT_SPEC_VERSION` becomes 2 (`migrations.ts:32`), with an identity migration. v1 files run unchanged, and v2 fields in a v1 file fail to load. An older sweny refuses a v2 file with `TOO_NEW`.
+`CURRENT_SPEC_VERSION` becomes 3 (`migrations.ts`), with an identity v2 to v3 migration after the v1 to v2 one (#598). v1 and v2 files run unchanged, and v3 fields in an older file fail to load. An older sweny refuses a v3 file with `TOO_NEW`.
 
 ```yaml
-spec_version: "2"
+spec_version: "3"
 nodes:
   list: { name: List todos, instruction: ..., skills: [linear], output: { ... } }
   draft_all:
@@ -270,9 +271,9 @@ At the end of each child, sweny collects the patch with `git diff --binary`, usi
 
 ## 6. Upgrade policy
 
-The identity migration changes `workflowHashOf`, because the hash includes the effective `spec_version` (`journal.ts:146`, `migrations.ts:119`). Fresh runs are unaffected.
+The identity v2 to v3 migration changes `workflowHashOf`, because the hash includes the effective `spec_version` (`journal.ts:146`, `migrations.ts:119`). Fresh runs are unaffected.
 
-A journal written before v2 is **refused**. It already fails the tools hash, which includes the sweny version (`journal.ts:206`). The message names both versions and the retry command: `npx @sweny-ai/core@<journaled version> workflow resume <run>`. No hash recompute is planned.
+A journal written before v3 is **refused**. It already fails the tools hash, which includes the sweny version (`journal.ts:206`). The message names both versions and the retry command: `npx @sweny-ai/core@<journaled version> workflow resume <run>`. No hash recompute is planned.
 
 ## 7. Events and boundaries
 
@@ -285,11 +286,11 @@ A journal written before v2 is **refused**. It already fails the tools hash, whi
 
 ## 8. Rollout
 
-Every milestone ships live, behind spec v2 or a CLI verb, with docs and an example. Nothing is observe-only.
+Every milestone ships live, behind spec v3 or a CLI verb, with docs and an example. Nothing is observe-only.
 
 | # | Milestone | Depends on | Fail-on-revert tests | Size |
 |---|---|---|---|---|
-| M1 | `map` (`isolation: inputs`): slots, generations, `detach()`, p-limit pool, fail-fast and collect, shared tally, read-only children with no outputs, top-level result check, events, boundary checks, upgrade refusal | #549 | 2×60 against a 100 cap: no third child starts; serial under strict; init-only slot recreated; failed child gets g2; cancelled child resumes in place; finished child replays with zero harness calls; stopping launches no generation; `items_hash` mismatch refused; empty input; duplicate keys; stable order; child input holds only item and `with`; `outputs` in a child refused; v1 trace unchanged; pre-v2 journal refused with the versioned message | L |
+| M1 | `map` (`isolation: inputs`): slots, generations, `detach()`, p-limit pool, fail-fast and collect, shared tally, read-only children with no outputs, top-level result check, events, boundary checks, upgrade refusal | #549 | 2×60 against a 100 cap: no third child starts; serial under strict; init-only slot recreated; failed child gets g2; cancelled child resumes in place; finished child replays with zero harness calls; stopping launches no generation; `items_hash` mismatch refused; empty input; duplicate keys; stable order; child input holds only item and `with`; `outputs` in a child refused; v1 trace unchanged; pre-v3 journal refused with the versioned message | L |
 | M2 | CLI bundle and publisher, child intents and per-item caps, `slack_message` and `email` types, PR push refusal | plan item 4, Slack applier fix | Publisher sends bytes with no added marker; orphan bundle refused; second publish refused; failed push opens no PR; Slack crash leaves `unknown: not resent`; three items each publish one comment | L |
 | M3 | Per-node `harness`/`model` (`harnessFor` injected), `isolation: evidence`, `evidence_skills`, `readConfine`, join verifier (sandboxed opt-in script node, plan item 7) | plan items 4 and 7 | Evidence child cannot read a parent file by absolute path; a skill outside `evidence_skills` refused; Codex/pi refused until the carve-out test passes; item harness outside the allowlist refused | L |
 | M4 | CI approval through GitHub Environments | M2 | Digest mismatch refused; rerun reconciles GitHub writes and does not resend Slack | M |

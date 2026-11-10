@@ -1439,6 +1439,10 @@ export function workflowUpgradeAction(file: string, options: { dryRun?: boolean 
   const verb = result.status === "dry-run" ? "Would upgrade" : "Upgraded";
   console.log(chalk.green(`  \u2713 ${verb} ${file}: spec_version "${result.from}" -> "${result.to}"`));
   for (const step of result.steps) console.log(chalk.dim(`    - ${step}`));
+  for (const note of result.notes) {
+    const where = note.nodeId ? `node "${note.nodeId}": ` : "";
+    console.log(chalk.yellow(`    ${where}${note.comment.replace(/^sweny workflow upgrade: /, "")}`));
+  }
   if (result.status === "dry-run") console.log(chalk.dim("    (dry run, file not changed)"));
 }
 

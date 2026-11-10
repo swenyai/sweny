@@ -366,7 +366,7 @@ export const safeOutputDeclarationZ = z
     type: z.enum(SAFE_OUTPUT_TYPES),
     via: z.string().min(1).optional(),
     max: z.number().int().min(1).max(SAFE_OUTPUT_MAX_CEILING).optional(),
-    target: z.string().min(1).optional(),
+    target: z.union([z.string().min(1), z.object({ input: z.string().min(1) }).strict()]).optional(),
     title_prefix: z.string().min(1).max(64).optional(),
     labels: z.array(z.string().min(1)).min(1).optional(),
     expires: z.string().regex(SAFE_OUTPUT_EXPIRES_PATTERN).optional(),
@@ -1204,9 +1204,17 @@ export const workflowJsonSchema = {
           description: "Max writes of this type from this node per run. Default 1.",
         },
         target: {
-          type: "string",
-          minLength: 1,
-          description: "Pinned target (GitHub owner/repo, Linear team id). GitHub default: GITHUB_REPOSITORY.",
+          description:
+            "Pinned target (GitHub owner/repo, Linear team id), or { input: <name> } to take it from a run input. GitHub default: GITHUB_REPOSITORY. An output that pins number never takes its GitHub repository from the agent.",
+          oneOf: [
+            { type: "string", minLength: 1 },
+            {
+              type: "object",
+              required: ["input"],
+              additionalProperties: false,
+              properties: { input: { type: "string", minLength: 1 } },
+            },
+          ],
         },
         title_prefix: {
           type: "string",
@@ -1255,7 +1263,7 @@ export const workflowJsonSchema = {
       type: "string",
       pattern: "^[1-9][0-9]*$",
       description:
-        "Workflow spec version as a positive integer string. Absent means 1. Older versions are migrated in memory on load; newer than the CLI supports is refused. Run `sweny workflow upgrade <file>` to rewrite a file at the current version.",
+        "Workflow spec version as a positive integer string. Absent means 1. Version 2 is safe by default: a node that declares no permissions and no outputs, in a workflow that declares no permissions, is read-only. Version 1 files are migrated in memory on load, keeping write on such nodes with one warning each; newer than the CLI supports is refused. Run `sweny workflow upgrade <file>` to rewrite a file at the current version.",
     },
     entry: { type: "string", minLength: 1, description: "ID of the entry node" },
     rules: {
@@ -1290,7 +1298,8 @@ export const workflowJsonSchema = {
     },
     permissions: {
       $ref: "#/$defs/Permissions",
-      description: "Default and ceiling for every node's permissions. Absent: write.",
+      description:
+        "Default and ceiling for every node's permissions. Absent: read (spec_version 2), write (spec_version 1).",
     },
     safe_outputs: {
       type: "object",
@@ -1524,7 +1533,7 @@ export const workflowJsonSchema = {
           permissions: {
             $ref: "#/$defs/Permissions",
             description:
-              "What this node's agent may do. Absent: read when the node declares outputs, else the workflow's permissions, else write.",
+              "What this node's agent may do. Absent: read when the node declares outputs, else the workflow's permissions, else read (spec_version 2) or write (spec_version 1).",
           },
           outputs: {
             type: "array",

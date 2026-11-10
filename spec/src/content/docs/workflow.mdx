@@ -25,7 +25,7 @@ A Workflow is the top-level document. It defines a directed graph of [Nodes](/no
 | `budget`        | [Budget](/nodes#spend-budgets)                                   | OPTIONAL | none               | Token and cost ceiling for the whole run and for every node. See [Spend Budgets](/nodes#spend-budgets).                                                                     |
 | `decider`       | [Decider](/edges#decision-models)                                | OPTIONAL | none               | Thresholds (`min_confidence`, `min_margin`) for nodes that set `route_by: decider`. The provider comes from operator config. See [Decision models](/edges#decision-models). |
 | `inputs`        | Record&lt;string, [InputField](#inputs)&gt;                      | OPTIONAL | —                  | Declared per-run input contract. The CLI validates `--input` against this and applies defaults. See [Inputs](#inputs).                                                      |
-| `permissions`   | [Permissions](/nodes#permissions)                                | OPTIONAL | `write`            | Default and ceiling for every node's `permissions`.                                                                                                                         |
+| `permissions`   | [Permissions](/nodes#permissions)                                | OPTIONAL | `read`, v1 `write` | Default and ceiling for every node's `permissions`.                                                                                                                         |
 | `safe_outputs`  | [SafeOutputsPolicy](#safe-outputs-policy)                        | OPTIONAL | none               | Run-wide limits for [safe outputs](/nodes#safe-outputs). See [Safe Outputs Policy](#safe-outputs-policy).                                                                   |
 
 ## Spec version
@@ -35,6 +35,8 @@ A Workflow is the top-level document. It defines a directed graph of [Nodes](/no
 - **Older than the implementation supports:** the implementation MUST migrate the file to the current version in memory before validating it, and SHOULD warn once, naming the file's version and how to upgrade it. Migrations are applied one version at a time (v1 to v2, then v2 to v3).
 - **Newer than the implementation supports:** the implementation MUST refuse the file with an error telling the user to upgrade the implementation. It MUST NOT guess.
 - **Invalid** (not a positive integer string): the file is rejected.
+
+Version 2 makes nodes read-only by default (see [Default access](/nodes#permissions)). The migration from version 1 declares `permissions: write` on every node that relied on the version 1 default, so a migrated file runs exactly as before.
 
 In the reference implementation, `sweny workflow upgrade <file>` applies the migrations and rewrites the file with `spec_version` set. `--dry-run` reports the change without writing. YAML comments, blank lines and key order are kept for everything a migration does not touch; comments attached to values a migration replaces or removes are not.
 

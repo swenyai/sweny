@@ -101,9 +101,11 @@ edges: []
   });
 
   it("exits 0 with valid:true JSON on a good workflow when --json is set", () => {
+    // Current spec version: a v1 file is valid too, but warns per node that can write (#598).
     const f = makeTempFile(
       "good.yml",
-      `id: demo
+      `spec_version: "2"
+id: demo
 name: Demo
 entry: a
 nodes:
