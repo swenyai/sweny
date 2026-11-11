@@ -219,6 +219,7 @@ export {
   mapNodeZ,
   childWorkflowZ,
   workflowNodeZ,
+  isAgentNode,
   edgeZ,
   skillZ,
   mcpServerConfigZ,
@@ -230,7 +231,7 @@ export {
   workflowJsonSchema,
   skillJsonSchema,
 } from "./schema.js";
-export type { WorkflowError } from "./schema.js";
+export type { WorkflowError, ParsedWorkflowNode, ParsedAgentNode, ParsedMapNode } from "./schema.js";
 
 // Deterministic `when` expressions (#461). Pure, browser-safe.
 export {

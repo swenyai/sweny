@@ -501,6 +501,23 @@ export const mapNodeZ = z
 /** Any workflow node: an agent node (no `kind`, or `kind: agent`) or a map node (`kind: map`). */
 export const workflowNodeZ = z.discriminatedUnion("kind", [nodeZ, mapNodeZ]);
 
+/** A node as `workflowZ` parses it: an agent node or a map node (spec v3). */
+export type ParsedWorkflowNode = z.infer<typeof workflowNodeZ>;
+/** An agent node as `workflowZ` parses it. */
+export type ParsedAgentNode = z.infer<typeof nodeZ>;
+/** A map node as `workflowZ` parses it. */
+export type ParsedMapNode = z.infer<typeof mapNodeZ>;
+
+/**
+ * Narrow a node to an agent node (#575). Since spec v3 a raw `workflowZ`
+ * parse types each node as agent | map, so agent-only fields (`instruction`,
+ * `rules`, `model`, ...) need the narrowing first; `parseWorkflow` returns a
+ * `Workflow` instead. Works on parsed nodes and on `Node` alike.
+ */
+export function isAgentNode<N extends { kind?: string }>(node: N): node is Exclude<N, { kind: "map" }> {
+  return node.kind !== "map";
+}
+
 /**
  * Workflow type discriminator. Cloud uses this to route runs to a
  * type-specific renderer (Caught/Calibration/Missed for `pr_review`, flake

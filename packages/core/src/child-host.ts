@@ -50,6 +50,8 @@ export interface JournalChildHostOptions {
   cwd?: string;
   /** Where run journals live. Default {@link runStateRoot}. */
   stateRoot?: string;
+  /** The parent run's directory (`RunJournal.dir`). Default: derived from `cwd`, `stateRoot` and `parentRunId`. */
+  parentDir?: string;
   swenyVersion?: string;
   /** Environment whose secret-named values the child journals redact. Never written. */
   env?: Record<string, string | undefined>;
@@ -117,7 +119,7 @@ function stateOf(records: JournalRecord[]): GenerationState {
 export function createJournalChildHost(opts: JournalChildHostOptions): ChildRunHost {
   const cwd = opts.cwd ?? process.cwd();
   const root = opts.stateRoot ?? runStateRoot();
-  const childrenDir = path.join(journalDir(cwd, opts.parentRunId, root), "children");
+  const childrenDir = path.join(opts.parentDir ?? journalDir(cwd, opts.parentRunId, root), "children");
   const slotDir = (ref: ChildRunRef) => path.join(childrenDir, ref.slot);
   const genDir = (ref: ChildRunRef, n: number) => path.join(slotDir(ref), `g${n}`);
 

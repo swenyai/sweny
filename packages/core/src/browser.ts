@@ -96,6 +96,10 @@ export type { SkillValidationResult } from "./skills/index.js";
 export {
   workflowZ,
   nodeZ,
+  mapNodeZ,
+  childWorkflowZ,
+  workflowNodeZ,
+  isAgentNode,
   edgeZ,
   skillZ,
   parseWorkflow,
@@ -103,7 +107,7 @@ export {
   workflowJsonSchema,
   skillJsonSchema,
 } from "./schema.js";
-export type { WorkflowError } from "./schema.js";
+export type { WorkflowError, ParsedWorkflowNode, ParsedAgentNode, ParsedMapNode } from "./schema.js";
 
 // Deterministic `when` expressions (#461). Pure, browser-safe.
 export {
