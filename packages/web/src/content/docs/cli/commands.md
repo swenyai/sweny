@@ -639,11 +639,13 @@ Requires the [GitHub CLI](https://cli.github.com/) (`gh`) to be installed and au
 Send the writes a run froze for approval (`safe_outputs.approval.required`, spec v3). Run it from the run's workspace.
 
 ```bash
-sweny publish 20261111-090000-abc123            # verify and print the exact calls; sends nothing
-sweny publish 20261111-090000-abc123 --approve  # send them, once
+sweny publish 20261111-090000-abc123                     # verify and print the exact calls and digests; sends nothing
+sweny publish 20261111-090000-abc123 --approve <digest>  # send the bundle with that digest, once
 ```
 
-For each bundle the run's journal names, it checks the bundle's bytes against its digest, refuses an expired bundle or a run whose agent ran without an enforced sandbox, and prints every call with its exact arguments. `--approve` records you as `local:<os user>` (checked against `approval.approvers` when the workflow declares them), consumes the one approval for that node visit, and sends each call as frozen. Each write gets a receipt: `sent`, `failed`, `refused`, `not sent`, or `unknown: not resent` when the process died after the send and before its receipt. A second `--approve` sends nothing and prints the first one's receipts. Bundle files the journal does not name are reported and never sent. Exit code 1 when anything was refused or did not send.
+For each bundle the run's journal names, it checks the bundle's bytes against its digest, refuses an expired bundle or a run whose agent ran without an enforced sandbox, and prints every call with its exact arguments. `--approve` takes the digests the preview printed (a full digest or a unique prefix of 12 or more characters) and sends only those bundles, and only once the run has ended; a digest that names no bundle of the run sends nothing at all. It records you as `local:<os user>` (checked against `approval.approvers` when the workflow declares them), consumes the one approval for that node visit, and sends each call as frozen. Each write gets a receipt: `sent`, `failed`, `refused`, `not sent`, or `unknown: not resent` when the process died after the send and before its receipt. A second `--approve` sends nothing and prints the first one's receipts. Bundle files the journal does not name are reported and never sent. Exit code 1 when anything was refused or did not send.
+
+Credentials for the sends (`SLACK_BOT_TOKEN`, `SMTP_URL`, `GITHUB_TOKEN`, `LINEAR_API_KEY`, `GITHUB_API_URL`, ...) come only from the environment `sweny` started with, never from the workspace `.env`: an agent can write that file, so it must not pick the token or server a write goes out through. Only built-in skills send.
 
 ## sweny upgrade
 

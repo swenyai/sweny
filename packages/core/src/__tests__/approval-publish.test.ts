@@ -18,7 +18,10 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { execute } from "../executor.js";
+import { execute, guardStagedWrite } from "../executor.js";
+import { publishTransport } from "../cli/publish.js";
+import { startupEnv } from "../startup-env.js";
+import { builtinSkills } from "../skills/index.js";
 import { createSkillMap } from "../skills/index.js";
 import { notification } from "../skills/notification.js";
 import { RunJournal, journalDir, markerToken, type JournalRecord } from "../journal.js";
@@ -191,21 +194,35 @@ function bundlesOf(cwd: string): string[] {
   return existsSync(dir) ? readdirSync(dir).sort() : [];
 }
 
-function publish(cwd: string, approve: boolean, extra: { faults?: PublishFaults; now?: () => number } = {}) {
+/**
+ * `sweny publish <run>` as a human runs it: preview, then `--approve` with the
+ * digests the preview printed. `approve: true` approves every digest the
+ * preview named; a list approves exactly those.
+ */
+function publish(
+  cwd: string,
+  approve: boolean | string[],
+  extra: { faults?: PublishFaults; now?: () => number; user?: string } = {},
+) {
   const t = fakeTransports();
   const lines: string[] = [];
-  const run = () =>
-    publishRun({
-      runId: RUN_ID,
-      cwd,
-      approve,
-      skills: createSkillMap(t.skills),
-      config: {},
-      logger: silent,
-      user: "nate",
-      print: (l: string) => lines.push(l),
-      ...extra,
-    });
+  const opts = (digests: string[]) => ({
+    runId: RUN_ID,
+    cwd,
+    approve: digests,
+    skills: createSkillMap(t.skills),
+    config: {},
+    logger: silent,
+    user: "nate",
+    print: (l: string) => lines.push(l),
+    ...extra,
+  });
+  const run = async () => {
+    if (approve === false) return publishRun(opts([]));
+    if (Array.isArray(approve)) return publishRun(opts(approve));
+    const preview = await publishRun({ ...opts([]), print: () => {} });
+    return publishRun(opts(preview.bundles.map((b) => b.digest)));
+  };
   return { run, sent: t.sent, lines };
 }
 
@@ -366,7 +383,9 @@ describe("approval mode across a crash (#576)", () => {
     const [orphan] = bundlesOf(cwd);
     const digest = orphan.replace(/\.json$/, "");
 
-    const early = publish(cwd, true);
+    // The run has not ended: approving anything is refused, and the preview shows the orphan.
+    await expect(publish(cwd, [digest]).run()).rejects.toThrow(/has not ended/);
+    const early = publish(cwd, false);
     const before = await early.run();
     expect(before).toEqual({ bundles: [], orphans: [digest] });
     expect(early.sent).toEqual([]);
@@ -506,6 +525,87 @@ describe("map children request writes; the map plans them per item (#576)", () =
   });
 });
 
+describe("approval mode holds no direct write either (#576)", () => {
+  it("a write node's write tools, skill MCP and pushes are withheld; the dispatcher refuses one that slips through", async () => {
+    process.env.SWENY_STATE_DIR = tmp("sweny-state-");
+    const cwd = tmp("sweny-ws-");
+    const t = fakeTransports();
+    const offered: string[][] = [];
+    const policies: unknown[] = [];
+    const claude: Claude = {
+      async run(req) {
+        offered.push(req.tools.map((x) => x.name));
+        policies.push(req.policy);
+        // A worst-case agent: calls every tool it was handed.
+        for (const tool of req.tools) {
+          await tool.handler({ channel: "C0EVIL", text: "sent without approval" }, { config: {}, logger: silent });
+        }
+        return { status: "success", data: { value: "x" }, toolCalls: [], contained: true } as NodeResult;
+      },
+      async evaluate() {
+        throw new Error("no routing");
+      },
+      async ask() {
+        return "ALLOW";
+      },
+    };
+    const wf: Workflow = {
+      id: "w",
+      name: "w",
+      description: "",
+      spec_version: "3",
+      entry: "writer",
+      safe_outputs: { approval: { required: true } },
+      nodes: { writer: { name: "Writer", instruction: "NODE:writer", skills: ["slack"], permissions: "write" } },
+      edges: [],
+    };
+    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "w.yml" });
+    const { results } = await execute(
+      wf,
+      {},
+      {
+        skills: createSkillMap(t.skills),
+        claude,
+        config: {},
+        logger: silent,
+        cwd,
+        env: {},
+        journal,
+      },
+    );
+    journal.end("success");
+    expect(t.sent).toEqual([]);
+    expect(offered[0]).not.toContain("slack_send_message");
+    expect(results.get("writer")!.skippedWrites).toEqual(["slack_send_message"]);
+    expect(() => guardStagedWrite({ name: "slack_send_message", access: "write" }, true, "approval required")).toThrow(
+      "slack_send_message is a write tool and this run waits for approval: nothing was written",
+    );
+  });
+});
+
+describe("sweny publish sends with the operator's credentials, never the workspace .env's (#576)", () => {
+  it("takes transport credentials from the startup environment and built-in skills only", () => {
+    const before = process.env.SLACK_BOT_TOKEN;
+    // What loadDotenv does with a workspace .env an agent wrote: set process.env after startup.
+    process.env.SLACK_BOT_TOKEN = "xoxb-from-workspace-dotenv";
+    try {
+      const t = publishTransport();
+      expect(t.config.SLACK_BOT_TOKEN).not.toBe("xoxb-from-workspace-dotenv");
+      expect(t.config.SLACK_BOT_TOKEN).toBe(startupEnv().SLACK_BOT_TOKEN || undefined);
+      expect(t.skills).toBe(builtinSkills);
+    } finally {
+      if (before === undefined) delete process.env.SLACK_BOT_TOKEN;
+      else process.env.SLACK_BOT_TOKEN = before;
+    }
+    const explicit = publishTransport({
+      SMTP_URL: "smtps://op@smtp.acme.test",
+      GITHUB_API_URL: "https://ghe.test/api/v3",
+    });
+    expect(explicit.config).toEqual({ SMTP_URL: "smtps://op@smtp.acme.test" });
+    expect(explicit.githubApiUrl).toBe("https://ghe.test/api/v3");
+  });
+});
+
 describe("sweny publish: the CLI publisher (#576)", () => {
   async function produced() {
     process.env.SWENY_STATE_DIR = tmp("sweny-state-");
@@ -562,6 +662,47 @@ describe("sweny publish: the CLI publisher (#576)", () => {
     await p.run();
     expect(p.sent).toEqual([{ tool: "github_add_comment", args: bundle.writes[0].args }]);
     expect((p.sent[0].args.body as string).match(/sweny-output/g)).toHaveLength(1);
+  });
+
+  it("--approve sends only the digests it names, and an unknown digest sends nothing", async () => {
+    process.env.SWENY_STATE_DIR = tmp("sweny-state-");
+    const cwd = tmp("sweny-ws-");
+    const base = approvalWorkflow();
+    const wf = approvalWorkflow({
+      nodes: {
+        ...base.nodes,
+        notify2: {
+          name: "Notify again",
+          instruction: "NODE:notify2",
+          skills: ["slack"],
+          outputs: [{ type: "slack_message", target: "C0OPS" }],
+        },
+      },
+      edges: [...base.edges, { from: "notify", to: "notify2" }],
+    });
+    await produce(cwd, wf, { notify: [SLACK], notify2: [{ type: "slack_message", body: "second" }] });
+    const preview = publish(cwd, false);
+    const seen = await preview.run();
+    expect(seen.bundles.map((b) => b.node)).toEqual(["notify", "notify2"]);
+    const [first, second] = seen.bundles.map((b) => b.digest);
+    expect(preview.lines.join("\n")).toContain(`--approve ${first}`);
+
+    const unknown = publish(cwd, ["0".repeat(64)]);
+    await expect(unknown.run()).rejects.toThrow(/no bundle of this run has that digest; nothing was sent/);
+    const short = publish(cwd, [first.slice(0, 8)]);
+    await expect(short.run()).rejects.toThrow(/nothing was sent/);
+    expect([...unknown.sent, ...short.sent]).toEqual([]);
+
+    const one = publish(cwd, [first.slice(0, 12)]);
+    const out = await one.run();
+    expect(one.sent.map((x) => x.args.text)).toEqual([SLACK.body]);
+    expect(out.bundles.map((b) => [b.node, b.state])).toEqual([
+      ["notify", "published"],
+      ["notify2", "awaiting approval"],
+    ]);
+    const two = publish(cwd, [second]);
+    await two.run();
+    expect(two.sent.map((x) => x.args.text)).toEqual(["second"]);
   });
 
   it("a second publish sends nothing", async () => {
@@ -662,7 +803,7 @@ describe("sweny publish: the CLI publisher (#576)", () => {
     const ok = publishRun({
       runId: RUN_ID,
       cwd,
-      approve: true,
+      approve: [out.bundles[0].digest],
       skills: createSkillMap(fakeTransports().skills),
       config: {},
       logger: silent,
@@ -760,7 +901,13 @@ describe("notify_email: email over SMTP_URL through nodemailer (#576)", () => {
     );
     expect(mail.urls).toEqual(["smtps://u:p@smtp.acme.test:465"]);
     expect(mail.sent).toEqual([
-      { from: "sweny@acme.test", to: "ops@acme.test", subject: "Morning prompts", text: "Three drafts." },
+      {
+        from: "sweny@acme.test",
+        to: "ops@acme.test",
+        envelope: { from: "sweny@acme.test", to: ["ops@acme.test"] },
+        subject: "Morning prompts",
+        text: "Three drafts.",
+      },
     ]);
     expect(out).toMatchObject({ id: "<real-1@smtp.test>" });
   });
@@ -802,11 +949,32 @@ describe("notify_email: email over SMTP_URL through nodemailer (#576)", () => {
     expect(await send("ops@acme.test, evil@x.test", "ops@acme.test")).toMatchObject({ refused: true });
     expect(await send("lead@acme.test.evil", "@acme.test")).toMatchObject({ refused: true });
     expect(await send("", "@acme.test")).toEqual({ refused: true, reason: "no recipient" });
+    // nodemailer splits on ";" and groups too: the check parses exactly as nodemailer does.
+    for (const to of [
+      "evil@x.com;ops@acme.test",
+      "team: evil@x.com, ops@acme.test;",
+      "Ops <evil@x.com>, ops@acme.test",
+      "ops@acme.test (x) evil@x.com",
+    ]) {
+      expect(await send(to, "@acme.test"), to).toMatchObject({ refused: true });
+    }
+    for (const to of ['"a,b"@acme.test', "not-an-address", "ops@acme"]) {
+      expect(await send(to, "@acme.test"), to).toEqual({
+        refused: true,
+        reason: "recipient is not a plain email address",
+      });
+    }
     expect(mail.sent).toEqual([]);
-    expect(await send("OPS@Acme.test, lead@corp.test", "ops@acme.test, @CORP.test")).toMatchObject({
+    expect(await send("OPS@Acme.test; Lead <lead@corp.test>", "ops@acme.test, @CORP.test")).toMatchObject({
       id: "<real-1@smtp.test>",
     });
-    expect(mail.sent).toHaveLength(1);
+    // Delivered to exactly the checked addresses, as written.
+    expect(mail.sent).toEqual([
+      expect.objectContaining({
+        to: "OPS@Acme.test, lead@corp.test",
+        envelope: { from: "sweny@acme.test", to: ["OPS@Acme.test", "lead@corp.test"] },
+      }),
+    ]);
   });
 
   it("the write stage refuses an email output whose pinned recipient is not on the list, before anything is frozen", async () => {

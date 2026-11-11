@@ -137,6 +137,25 @@ describe("slack_message and email in the write stage (#576)", () => {
     expect(unset.sent).toEqual([]);
   });
 
+  it("refuses a pinned email target that nodemailer would split past the allowlist", async () => {
+    for (const target of ["x@evil.test;ops@acme.test", "team: x@evil.test, ops@acme.test;", "Ops <x@evil.test>"]) {
+      const s = stage([{ type: "email", target }], [{ type: "email", title: "s", body: "b" }], {
+        config: { SMTP_ALLOWED_RECIPIENTS: "@acme.test" },
+      });
+      expect((await s.run).receipts[0], target).toMatchObject({ status: "refused" });
+      expect(s.sent).toEqual([]);
+    }
+  });
+
+  it("writes to the author's spelling of the pinned target, not the agent's casing", async () => {
+    const { run, sent } = stage(
+      [{ type: "slack_message", target: "C0Ops" }],
+      [{ type: "slack_message", body: "hi", target: "c0ops" }],
+    );
+    expect((await run).receipts[0]).toMatchObject({ status: "applied", target: "C0Ops" });
+    expect(sent).toEqual([{ tool: "slack_send_message", args: { channel: "C0Ops", text: "hi" } }]);
+  });
+
   it("refuses a blank message or email body, and an email without a subject", async () => {
     const { run, sent } = stage(
       [

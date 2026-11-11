@@ -9,7 +9,7 @@
  * 2. refuses expired bundles and runs whose agent ran without an enforced
  *    sandbox (such an agent could have rewritten the run's state);
  * 3. prints the exact calls it would make;
- * 4. with `approve`: authenticates `local:<os user>` against the declared
+ * 4. with `approve` (the digests the preview printed, once the run has ended): authenticates `local:<os user>` against the declared
  *    approvers, consumes the visit's one approval by creating
  *    `<state>/approvals/<proposal key>` with `O_EXCL`, and sends each call
  *    byte for byte, recording an intent before and a receipt after every send.
@@ -87,8 +87,12 @@ export interface PublishRunOptions {
   cwd?: string;
   /** Where run journals live (default {@link runStateRoot}). Approvals live beside it. */
   stateRoot?: string;
-  /** Send. Without it the bundles are verified and printed, nothing more. */
-  approve: boolean;
+  /**
+   * The digests to send, as the preview printed them (a full digest, or a
+   * unique prefix of at least 12 characters). Only these are sent, and only
+   * once the run has ended. Absent or empty: verify and print, nothing more.
+   */
+  approve?: string[];
   /** Skills that send the writes (their write tools are called directly, never through the journal wrapper). */
   skills: Map<string, Skill>;
   config: Record<string, string>;
@@ -233,6 +237,10 @@ export async function publishRun(o: PublishRunOptions): Promise<PublishResult> {
   if (read.corruptAtLine !== undefined || read.forgedAtLine !== undefined) {
     throw new Error(`the journal of run ${o.runId} fails authentication; nothing is published`);
   }
+  const approving = (o.approve ?? []).map((d) => d.trim().toLowerCase()).filter((d) => d.length > 0);
+  if (approving.length > 0 && !read.records.some((r) => r.type === "run:end")) {
+    throw new Error(`run ${o.runId} has not ended; approve its bundles after it ends`);
+  }
   const unsandboxed =
     read.records.some((r) => r.type === "agent:unsandboxed") || childRanUnsandboxed(path.join(dir, "children"));
   const named = namedBundles(read.records);
@@ -248,6 +256,17 @@ export async function publishRun(o: PublishRunOptions): Promise<PublishResult> {
   for (const d of orphans) print(`! bundle ${d}: not named by the run's journal (orphan); never sent`);
   if (named.size === 0) print(`run ${o.runId} has no bundle waiting for approval`);
 
+  // Every approved digest must name exactly one bundle the journal names: nothing is sent otherwise.
+  const chosen = new Set<string>();
+  for (const d of approving) {
+    const hits = d.length >= 12 && /^[0-9a-f]+$/.test(d) ? [...named.keys()].filter((k) => k.startsWith(d)) : [];
+    if (hits.length !== 1) {
+      throw new Error(
+        `--approve ${d}: ${hits.length === 0 ? "no bundle of this run has that digest" : "matches more than one bundle"}; nothing was sent`,
+      );
+    }
+    chosen.add(hits[0]);
+  }
   const approver = `local:${o.user ?? os.userInfo().username}`;
   const bundles: PublishedBundle[] = [];
   for (const [digest, visit] of named) {
@@ -318,8 +337,8 @@ export async function publishRun(o: PublishRunOptions): Promise<PublishResult> {
       refused("bundle expired", writes);
       continue;
     }
-    if (!o.approve) {
-      print(`  awaiting approval: sweny publish ${o.runId} --approve`);
+    if (!chosen.has(digest)) {
+      print(`  awaiting approval: sweny publish ${o.runId} --approve ${digest}`);
       bundles.push({ digest, ...visit, state: "awaiting approval", writes });
       continue;
     }

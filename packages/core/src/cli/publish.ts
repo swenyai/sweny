@@ -17,10 +17,10 @@ import { parse as parseYaml } from "yaml";
 import type { Command } from "commander";
 import { parseWorkflow, validateWorkflow } from "../schema.js";
 import { builtinSkills, createSkillMap } from "../skills/index.js";
-import { configuredSkills, discoverSkillsWithDiagnostics } from "../skills/custom-loader.js";
+import { discoverSkillsWithDiagnostics } from "../skills/custom-loader.js";
 import { publishRun } from "../approval.js";
-import { trustedEnvValue } from "../startup-env.js";
-import { isValidSkillId } from "../types.js";
+import { startupEnv } from "../startup-env.js";
+import { isValidSkillId, type Skill } from "../types.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -520,12 +520,12 @@ export function registerPublishCommand(program: Command): void {
       "Publish a workflow or skill to the SWEny Marketplace; with a run id, send the writes that run froze for approval",
     )
     .option(
-      "--approve",
-      "With a run id: send the run's approval bundles (without it they are only verified and printed)",
+      "--approve <digest...>",
+      "With a run id: send the bundles with these digests, as the preview printed them (the run must have ended)",
     )
-    .action(async (runId: string | undefined, opts: { approve?: boolean }) => {
+    .action(async (runId: string | undefined, opts: { approve?: string[] }) => {
       if (runId) {
-        process.exitCode = await publishRunAction(runId, opts.approve === true);
+        process.exitCode = await publishRunAction(runId, opts.approve ?? []);
         return;
       }
       await runPublish();
@@ -533,19 +533,34 @@ export function registerPublishCommand(program: Command): void {
 }
 
 /**
- * `sweny publish <run-id> [--approve]` (RFC 0002 M2, #576): verify and print
- * the run's approval bundles, and with `--approve` send them once. Exit 1
- * when anything was refused or did not send.
+ * The skills and transport credentials `sweny publish` sends with: built-in
+ * skills only (a workspace skill is agent-writable), and every credential from
+ * the environment as it was at startup, before the workspace `.env` was read.
+ * A run's agent can write that `.env`; it must not choose the token, SMTP
+ * server or API a frozen write goes out through.
  */
-export async function publishRunAction(runId: string, approve: boolean): Promise<number> {
-  const skills = configuredSkills(process.env, process.cwd());
+export function publishTransport(env: Readonly<NodeJS.ProcessEnv> = startupEnv()): {
+  skills: Skill[];
+  config: Record<string, string>;
+  githubApiUrl?: string;
+} {
   const config: Record<string, string> = {};
-  for (const skill of skills) {
+  for (const skill of builtinSkills) {
     for (const [key, field] of Object.entries(skill.config)) {
-      const v = field.env ? process.env[field.env] : undefined;
+      const v = field.env ? env[field.env] : undefined;
       if (v !== undefined && v !== "") config[key] = v;
     }
   }
+  return { skills: builtinSkills, config, ...(env.GITHUB_API_URL ? { githubApiUrl: env.GITHUB_API_URL } : {}) };
+}
+
+/**
+ * `sweny publish <run-id> [--approve <digest>...]` (RFC 0002 M2, #576): verify
+ * and print the run's approval bundles, and send the approved ones once. Exit 1
+ * when anything was refused or did not send.
+ */
+export async function publishRunAction(runId: string, approve: string[]): Promise<number> {
+  const transport = publishTransport();
   const logger = {
     info: () => {},
     debug: () => {},
@@ -556,13 +571,11 @@ export async function publishRunAction(runId: string, approve: boolean): Promise
     const out = await publishRun({
       runId,
       approve,
-      skills: createSkillMap(skills),
-      config,
+      skills: createSkillMap(transport.skills),
+      config: transport.config,
       logger,
       print: (line) => console.log(line),
-      ...(trustedEnvValue(process.env, "GITHUB_API_URL")
-        ? { githubApiUrl: trustedEnvValue(process.env, "GITHUB_API_URL") }
-        : {}),
+      ...(transport.githubApiUrl ? { githubApiUrl: transport.githubApiUrl } : {}),
     });
     const bad =
       out.bundles.some((b) => b.state === "refused" || b.state === "incomplete") ||

@@ -582,7 +582,8 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       refuse("destination is not pinned", { via });
       continue;
     }
-    const target = intent.target ?? pinned;
+    // The author's (or the run's) spelling of the destination, never the agent's casing of it.
+    const target = pinned ?? intent.target;
     if (applier.needsTarget && !target) {
       refuse("no target", { via });
       continue;
@@ -930,7 +931,7 @@ async function propose(
   });
   o.summary?.(
     `**SWEny** node \`${safeId(o.nodeId)}\`: ${toFreeze.length} write(s) wait for approval, bundle \`${digest}\`. ` +
-      "Send them with `sweny publish <run> --approve`.",
+      `Send them with \`sweny publish <run> --approve ${digest}\` once the run has ended.`,
   );
   return { receipts };
 }

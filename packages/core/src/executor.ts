@@ -354,6 +354,11 @@ async function executeRun(
   const writeState = createWriteStageState();
   const stageOutputs = dryRun || options.stageOutputs === true || workflow.safe_outputs?.staged === true;
   const approval = workflow.safe_outputs?.approval;
+  // Approval mode (#576) writes nothing during the run, so its nodes hold no direct write
+  // either: write tools, skill MCP servers, pushes and agent_env grants are withheld exactly
+  // as in a staged run. Only the write stage's frozen bundle can write, after approval.
+  const withholdWrites = stageOutputs || approval?.required === true;
+  const withheldWhy = dryRun ? "dry run" : stageOutputs ? "staged" : "approval required";
   const runEnv = options.env ?? process.env;
   const usesOutputs =
     Object.values(workflow.nodes).some((n) => (n.outputs?.length ?? 0) > 0) ||
@@ -1005,13 +1010,13 @@ async function executeRun(
     // A staged run (--stage, safe_outputs.staged) writes nothing either: its
     // write tools are withheld too, and the dispatcher below refuses any that
     // still reach a handler.
-    const readTools = readOnlyNode || stageOutputs ? filteredTools.filter(isReadTool) : filteredTools;
-    // A staged write node records what it lost, like a dry run.
-    const stagedWriteNode = stageOutputs && !readOnlyNode;
+    const readTools = readOnlyNode || withholdWrites ? filteredTools.filter(isReadTool) : filteredTools;
+    // A staged (or approval-mode) write node records what it lost, like a dry run.
+    const stagedWriteNode = withholdWrites && !readOnlyNode;
     const skippedWrites =
       dryRun || stagedWriteNode ? filteredTools.filter((t) => !isReadTool(t)).map((t) => t.name) : [];
     if (skippedWrites.length > 0) {
-      const why = dryRun ? "dry run" : "staged";
+      const why = withheldWhy;
       logger.info(`  ${why}: withheld write tools: ${skippedWrites.join(", ")}`, { node: currentId });
     } else if (readOnlyNode && readTools.length < filteredTools.length) {
       const withheld = filteredTools.filter((t) => !isReadTool(t)).map((t) => t.name);
@@ -1119,7 +1124,7 @@ async function executeRun(
       ...t,
       handler: async (toolInput: any) => {
         safeObserve(observer, { type: "tool:call", node: currentId!, tool: t.name, input: toolInput }, logger);
-        guardStagedWrite(t, stageOutputs);
+        guardStagedWrite(t, withholdWrites, withheldWhy);
         const toolCtx: ToolContext = {
           config,
           logger,
@@ -1166,7 +1171,7 @@ async function executeRun(
     const instruction = dryRun
       ? `${dryRunNotice(skippedWrites)}\n\n---\n\n${nodeInstruction}`
       : skippedWrites.length > 0
-        ? `${stagedNotice(skippedWrites)}\n\n---\n\n${nodeInstruction}`
+        ? `${stagedNotice(skippedWrites, withheldWhy === "approval required")}\n\n---\n\n${nodeInstruction}`
         : nodeInstruction;
 
     // Run Claude on this node, with optional eval-failure retry loop.
@@ -1195,12 +1200,12 @@ async function executeRun(
     // withholds write tokens in this node's agent env (see withPushBlocked).
     // Skill credentials stay in sweny: the agent gets only what the node grants
     // with `agent_env`, never on a read-only node or in a staged run.
-    const granted = grantedAgentEnv(node.agent_env, { readOnly: readOnlyNode, staged: stageOutputs });
+    const granted = grantedAgentEnv(node.agent_env, { readOnly: readOnlyNode, staged: withholdWrites });
     if (granted.dropped) logger.warn(`  ${granted.dropped}`, { node: currentId });
     const agentAccess = {
       ...resolveAgentAccess(node.skills, skills, granted.grant),
       // A staged run loads no skill or external MCP server either: it may write.
-      ...(stageOutputs ? { noPush: true, noMcp: true } : {}),
+      ...(withholdWrites ? { noPush: true, noMcp: true } : {}),
     };
     // #365: a node or workflow that declares `permissions` or `outputs` gets
     // one portable policy, compiled by each adapter. The gate also runs here so
@@ -1360,7 +1365,7 @@ async function executeRun(
           timeoutMs,
           agentAccess,
           ...(nodePolicy ? { policy: nodePolicy } : {}),
-          ...(readOnlyNode || stageOutputs ? {} : { mcpServers: skillMcpServers }),
+          ...(readOnlyNode || withholdWrites ? {} : { mcpServers: skillMcpServers }),
           ...(readOnlyNode ? { readOnly: true } : {}),
           onUsage,
           onProgress: (message) => {
@@ -2448,9 +2453,10 @@ export function isReadTool(tool: Pick<Tool, "access">): boolean {
  * unclassified) tool handler runs, whatever reached the agent. Throws before
  * any side effect.
  */
-export function guardStagedWrite(tool: Pick<Tool, "name" | "access">, staged: boolean): void {
+export function guardStagedWrite(tool: Pick<Tool, "name" | "access">, staged: boolean, why = "staged"): void {
   if (staged && !isReadTool(tool)) {
-    throw new Error(`${tool.name} is a write tool and this run is staged: nothing was written`);
+    const run = why === "approval required" ? "this run waits for approval" : `this run is ${why}`;
+    throw new Error(`${tool.name} is a write tool and ${run}: nothing was written`);
   }
 }
 
@@ -2466,9 +2472,13 @@ function dryRunNotice(skippedWrites: string[]): string {
 }
 
 /** Instruction section prepended to a staged write node whose write tools were withheld. */
-function stagedNotice(skippedWrites: string[]): string {
+function stagedNotice(skippedWrites: string[], approval = false): string {
+  const head = approval
+    ? `## Approval required\n\nThis run's writes wait for a human's approval: nothing is written outside the workspace now. `
+    : `## Staged run\n\nThis run is staged: nothing is written outside the workspace. `;
   return (
-    `## Staged run\n\nThis run is staged: nothing is written outside the workspace. These write tools were ` +
+    head +
+    `These write tools were ` +
     `withheld from this step: ${skippedWrites.join(", ")}. Where this step would call one, describe ` +
     `exactly what it would have written instead.`
   );
