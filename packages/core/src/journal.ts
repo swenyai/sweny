@@ -909,10 +909,17 @@ export class JournalIntegrityError extends Error {
 
 /** Thrown at resume when what the run depends on changed since it was journaled (and `force` is off). */
 export class JournalMismatchError extends Error {
-  constructor(public readonly what: string[]) {
+  /** `subject`: what cannot be resumed, when it is not the run itself (a map child, #575). */
+  constructor(
+    public readonly what: string[],
+    subject?: string,
+  ) {
     super(
-      `cannot resume: ${what.join(", ")} changed since this run was journaled. ` +
-        `Resuming would mix results from two different runs. Start a new run, or pass --force to resume anyway.`,
+      subject === undefined
+        ? `cannot resume: ${what.join(", ")} changed since this run was journaled. ` +
+            `Resuming would mix results from two different runs. Start a new run, or pass --force to resume anyway.`
+        : `cannot resume ${subject}: ${what.join(", ")} changed since it was journaled. ` +
+            `Resuming would mix results from two different runs. Start a new run, or resume with --force.`,
     );
     this.name = "JournalMismatchError";
   }

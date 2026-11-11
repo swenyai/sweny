@@ -123,7 +123,7 @@ export function createJournalChildHost(opts: JournalChildHostOptions): ChildRunH
   const slotDir = (ref: ChildRunRef) => path.join(childrenDir, ref.slot);
   const genDir = (ref: ChildRunRef, n: number) => path.join(slotDir(ref), `g${n}`);
 
-  const open = async (ref: ChildRunRef, { fresh }: { fresh: boolean }): Promise<ChildRun> => {
+  const open = async (ref: ChildRunRef, { fresh, force }: { fresh: boolean; force?: boolean }): Promise<ChildRun> => {
     const slot = slotDir(ref);
     fs.mkdirSync(slot, { recursive: true, mode: 0o700 });
     const slotLock = acquireRunLock(slot);
@@ -157,7 +157,13 @@ export function createJournalChildHost(opts: JournalChildHostOptions): ChildRunH
           if (read.forgedAtLine !== undefined || read.corruptAtLine !== undefined) {
             throw new Error(`child run ${runId}: its journal is damaged or was edited; start a new parent run`);
           }
-          journal = RunJournal.openForResume({ ...base, read, plan: buildResumePlan(read.records), lock });
+          journal = RunJournal.openForResume({
+            ...base,
+            read,
+            plan: buildResumePlan(read.records),
+            lock,
+            force: force === true,
+          });
         } catch (err) {
           lock.release();
           throw err;

@@ -14,7 +14,13 @@ import crypto from "node:crypto";
 import pLimit from "p-limit";
 
 import type { AgentHarness } from "./harness/types.js";
-import { canonicalHash, workflowHashOf, type ChildRegistration, type ExecutionJournal } from "./journal.js";
+import {
+  JournalMismatchError,
+  canonicalHash,
+  workflowHashOf,
+  type ChildRegistration,
+  type ExecutionJournal,
+} from "./journal.js";
 import type {
   ExecutionEvent,
   ExecutionResult,
@@ -159,8 +165,13 @@ export interface ChildRun {
 export interface ChildRunHost {
   /** The parent run's id: the root of every child's logical id. */
   readonly runId: string;
-  /** Open the child's next generation per {@link childAction}. `fresh`: see there. */
-  open(ref: ChildRunRef, opts: { fresh: boolean }): Promise<ChildRun>;
+  /**
+   * Open the child's next generation per {@link childAction}. `fresh`: see
+   * there. `force`: the parent resume was forced (`--force`), so a resumed or
+   * replayed child resumes even though its input, instructions, tools or sweny
+   * version changed.
+   */
+  open(ref: ChildRunRef, opts: { fresh: boolean; force?: boolean }): Promise<ChildRun>;
   /** Spend every generation of these children journaled: the shared tally starts from it on resume. */
   spent?(refs: ChildRunRef[]): { tokens: number; costUsd: number };
 }
@@ -294,6 +305,8 @@ export interface MapVisit {
   host: ChildRunHost;
   /** The items changed since an earlier attempt registered them, and the resume was forced. */
   fresh: boolean;
+  /** The parent resume was forced: every resumed or replayed child is too. */
+  force?: boolean;
   /** Runs one child to its end (the executor's `execute` with the child's options). */
   runChild: (input: unknown, exec: ChildExecution) => Promise<ExecutionResult>;
   /** Children running at once (the node's, or 1 under strict budget policy). */
@@ -351,6 +364,8 @@ export async function runMap(v: MapVisit): Promise<NodeResult> {
   const mapAbort = new AbortController();
   let stopping = false;
   let firstFailure: string | undefined;
+  // A child that cannot be resumed without --force stops the whole map, once, with the reason.
+  let refusal: JournalMismatchError | undefined;
   const stop = (key: string, why: string) => {
     firstFailure ??= `item "${key}" failed: ${why}`;
     if (!failFast || stopping) return;
@@ -398,7 +413,7 @@ export async function runMap(v: MapVisit): Promise<NodeResult> {
     );
     let run: ChildRun;
     try {
-      run = await host.open(ref, { fresh: v.fresh });
+      run = await host.open(ref, { fresh: v.fresh, force: v.force === true });
     } catch (err) {
       outcomes[i] = { status: "failed", error: `could not open its child run: ${errText(err)}` };
       stop(key, outcomes[i].error!);
@@ -429,16 +444,26 @@ export async function runMap(v: MapVisit): Promise<NodeResult> {
         ...(run.observer ? { observer: scoped(run.observer, run.runId, host.runId, run.generation) } : {}),
         signal: childSignal,
       });
-      if (childSignal.aborted) {
+      const out = itemOutcome(res, v.child, node.result!);
+      // A child that finished before its signal fired keeps its result; a failure under a fired signal was the cancel.
+      if (out.status === "failed" && childSignal.aborted) {
         run.detach();
         outcomes[i] = { status: "cancelled", error: "cancelled while running", generation: run.generation };
         return;
       }
-      const out = itemOutcome(res, v.child, node.result!);
       run.end(out.status === "failed" ? "failed" : "success");
       outcomes[i] = { ...out, generation: run.generation };
       if (out.status === "failed") stop(key, out.error ?? "failed");
     } catch (err) {
+      if (err instanceof JournalMismatchError) {
+        // The child's journal refused before appending anything: nothing to end, it stays resumable.
+        run.detach();
+        refusal ??= new JournalMismatchError(err.what, `map node "${v.nodeId}" item "${key}" (child run ${run.runId})`);
+        outcomes[i] = { status: "cancelled", error: refusal.message, generation: run.generation };
+        stopping = true;
+        mapAbort.abort(refusal);
+        return;
+      }
       if (childSignal.aborted) {
         run.detach();
         outcomes[i] = { status: "cancelled", error: "cancelled while running", generation: run.generation };
@@ -472,6 +497,7 @@ export async function runMap(v: MapVisit): Promise<NodeResult> {
     }
   };
   await Promise.allSettled(keys.map((_, i) => limit(() => ended(i))));
+  if (refusal) throw refusal;
   return mapResult(v, outcomes, firstFailure);
 }
 

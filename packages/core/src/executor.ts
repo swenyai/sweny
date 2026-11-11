@@ -748,6 +748,7 @@ async function executeRun(
             prepared: mapPrep,
             host: options.children!,
             fresh: mapFresh,
+            force: journal?.forced?.() === true,
             runChild: (childInput, exec) =>
               execute(mapChild!, childInput, {
                 ...options,
