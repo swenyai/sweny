@@ -1036,6 +1036,18 @@ export function validateWorkflow(
   // Permissions and safe outputs (#365). The workflow's `permissions` and
   // `safe_outputs.allow` are a ceiling every node inherits.
   const wfAccess = typeof workflow.permissions === "string" ? workflow.permissions : workflow.permissions?.access;
+  // #608: the same rule as a node's `allow`. A workflow that declares read is a
+  // ceiling, so it grants no built-in to any node. With no declared access, a
+  // node may still declare write and use the workflow's allow.
+  const wfAllow = typeof workflow.permissions === "object" ? workflow.permissions.allow : undefined;
+  if ((wfAllow?.length ?? 0) > 0 && wfAccess === "read") {
+    errors.push({
+      code: "PERMISSION_ALLOW_READ",
+      message:
+        `The workflow allows [${wfAllow!.join(", ")}] but its permissions are read, ` +
+        `and a read workflow grants no built-in beyond reading. Remove allow, or make the workflow permissions: write.`,
+    });
+  }
   const allowedOutputs = workflow.safe_outputs?.allow;
   for (const [nodeId, node] of Object.entries(workflow.nodes)) {
     const nodeAccess = typeof node.permissions === "string" ? node.permissions : node.permissions?.access;

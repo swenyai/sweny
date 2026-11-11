@@ -73,6 +73,8 @@ describe("permissions.allow: the schema field", () => {
     expect(e).toBeDefined();
     expect(e?.nodeId).toBeUndefined();
     expect(validateWorkflow(wf({ access: "write" }, { access: "write", allow: ["subagent"] }))).toEqual([]);
+    // No declared access: not a ceiling, so a write node can use the workflow's allow.
+    expect(validateWorkflow(wf({ access: "write" }, { allow: ["subagent"] }))).toEqual([]);
   });
 
   it("a write node may allow one", () => {

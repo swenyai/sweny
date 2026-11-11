@@ -130,6 +130,8 @@ const REPLAY_CAPABILITIES: HarnessCapabilities = {
   usage: { tokens: true, costUsd: true, live: false },
   cancel: "signal",
   resume: false,
+  // A recording has no built-ins: nothing outside a node's policy can reach it (#608).
+  builtinAllow: "native",
 };
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

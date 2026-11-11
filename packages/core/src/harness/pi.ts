@@ -131,6 +131,15 @@ const WRITE_BUILTINS = ["bash", "edit", "write"] as const;
 export const PI_BUILTIN_TOOLS = ["read", "bash", "powershell", "edit", "write", "grep", "find", "ls"] as const;
 
 /**
+ * The gap line for a write node that loads an external MCP server: it gets
+ * `--exclude-tools` over {@link PI_BUILTIN_TOOLS} instead of `--tools`, and
+ * sweny accepts any pi from {@link MIN_PI_VERSION} up.
+ */
+export const PI_EXCLUDE_GAP =
+  "builtin allow-list: with an external MCP server pi gets --exclude-tools over the built-ins pi 0.99.2 has, " +
+  "not --tools (which would drop the server's tools), so a built-in a newer pi adds still reaches the agent";
+
+/**
  * `disallowed_tools` names a node may use, per portable class. Claude Code
  * names are included because bundled workflows (triage.yml) were written for
  * it; pi names come from its tool table.
@@ -1101,6 +1110,9 @@ export class PiHarness implements AgentHarness {
       } else {
         const rest = PI_BUILTIN_TOOLS.filter((n) => !builtins.includes(n));
         if (rest.length > 0) toolArgs.push("--exclude-tools", rest.join(","));
+        // A list of the built-ins pi 0.99.2 has is a deny list: a built-in a newer
+        // pi adds would reach the agent. Reported like Codex's, never refused.
+        extraDegraded.push(PI_EXCLUDE_GAP);
       }
 
       const args = [

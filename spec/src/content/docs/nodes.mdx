@@ -181,7 +181,7 @@ The object form MUST declare at least one field.
 
 **Default access.** The node's own `access`; else `read` when the node declares [`outputs`](#safe-outputs); else the workflow's `permissions`; else `read` in a version 2 file and `write` in a version 1 file. When an implementation migrates a version 1 file, it MUST keep `write` on each node that relied on that default (by declaring it), and SHOULD warn once per such node.
 
-**Ceiling.** The workflow's [`permissions`](/workflow#fields) is the default and the ceiling for every node. A node MUST NOT declare `write` under a workflow `read` (validation error `PERMISSION_CEILING`). `deny` and `allow` classes are the union of both levels; `strict` applies if either level sets it. A node whose access is `read` MUST NOT declare `allow` (validation error `PERMISSION_ALLOW_READ`).
+**Ceiling.** The workflow's [`permissions`](/workflow#fields) is the default and the ceiling for every node. A node MUST NOT declare `write` under a workflow `read` (validation error `PERMISSION_CEILING`). `deny` and `allow` classes are the union of both levels; `strict` applies if either level sets it. A node whose access is `read`, or a workflow that declares `read`, MUST NOT declare `allow` (validation error `PERMISSION_ALLOW_READ`).
 
 A conforming executor, for a node whose access is `read`:
 

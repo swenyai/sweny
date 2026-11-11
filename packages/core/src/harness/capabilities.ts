@@ -109,6 +109,7 @@ export const CODEX_CAPABILITIES: HarnessCapabilities = {
  *   `allToolNames`: read, bash, powershell, edit, write, grep, find, ls), so
  *   a write node that loads an external MCP server, whose tool names `--tools`
  *   cannot know up front, gets `--exclude-tools` over the rest of that set.
+ *   That path is a deny list, so the adapter reports it per node (PI_EXCLUDE_GAP).
  *   builtinClasses: shell, write, edit; pi has no net or subagent built-in.
  */
 export const PI_CAPABILITIES: HarnessCapabilities = {

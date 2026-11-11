@@ -249,6 +249,10 @@ export const CLAUDE_WRITE_BUILTIN_TOOLS = [
   ...CLAUDE_TOOLS_BY_CLASS.net,
 ] as const;
 
+/** Reported on a node that allows subagents (#608): their tool list is not shown to be the node's. */
+export const CLAUDE_SUBAGENT_GAP =
+  "subagent: nothing shows a Claude Code subagent keeps the node's built-in tool list; it may have more tools than the node";
+
 /**
  * The built-in allow-list for one node: the policy's list, plus the tools of
  * each class a write node allows (#608), minus every name the compiled deny
@@ -611,6 +615,17 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     const readOnly = !!req.readOnly || policy.readOnly;
     const disallowedTools = compileClaudeCodeDeny(policy, req.disallowedTools ?? []);
     const degraded = [...gate.degraded];
+    // #608: the opt-in hands the node Task and Agent, and nothing shows a
+    // subagent is held to its parent's `tools` (see CLAUDE_WRITE_BUILTIN_TOOLS).
+    if (
+      !readOnly &&
+      !policy.nativeNone &&
+      claudeCodeBuiltinTools({ readOnly, allow: policy.allow }, disallowedTools).some((t) =>
+        CLAUDE_TOOLS_BY_CLASS.subagent.includes(t),
+      )
+    ) {
+      degraded.push(CLAUDE_SUBAGENT_GAP);
+    }
     const result = await this.runQuery({
       ...req,
       readOnly,
