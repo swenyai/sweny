@@ -10,6 +10,33 @@
 
 import type { Skill, ToolContext, SkillCategory } from "../types.js";
 
+/** A variable specifier, so a browser bundler never pulls the SMTP stack (node:*) into the browser entry. */
+const NODEMAILER = "nodemailer";
+
+/**
+ * Why `notify_email` may not send to `to` (comma-separated), or undefined when
+ * every recipient is on `SMTP_ALLOWED_RECIPIENTS`: an exact address, or an
+ * `@domain` entry. Case-insensitive. An unset or empty list allows nobody.
+ * Fixed wording: it becomes a refusal reason on receipts.
+ */
+export function emailRecipientRefusal(to: string | undefined, allowed: string | undefined): string | undefined {
+  const list = (allowed ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0);
+  if (list.length === 0) return "SMTP_ALLOWED_RECIPIENTS is not set, so no email is sent";
+  const recipients = (to ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0);
+  if (recipients.length === 0) return "no recipient";
+  const ok = (r: string) => {
+    const at = r.lastIndexOf("@");
+    return at > 0 && (list.includes(r) || list.includes(r.slice(at)));
+  };
+  return recipients.every(ok) ? undefined : "recipient not on SMTP_ALLOWED_RECIPIENTS";
+}
+
 /**
  * Resolve the destination URL for `notify_webhook`.
  *
@@ -103,6 +130,12 @@ export const notification: Skill = {
       description: "From address for email sent over SMTP_URL",
       required: false,
       env: "SMTP_FROM",
+    },
+    SMTP_ALLOWED_RECIPIENTS: {
+      description:
+        "Comma-separated addresses (ops@acme.com) or domains (@acme.com) notify_email may send to. Unset: it sends nothing.",
+      required: false,
+      env: "SMTP_ALLOWED_RECIPIENTS",
     },
   },
   tools: [
@@ -217,8 +250,9 @@ export const notification: Skill = {
       name: "notify_email",
       access: "write",
       description:
-        "Send a plain-text email over SMTP_URL (nodemailer), from SMTP_FROM. Exactly one send per call; " +
-        "SMTP has no lookup, so a send whose outcome is unknown is never repeated.",
+        "Send a plain-text email over SMTP_URL (nodemailer), from SMTP_FROM, only to recipients on " +
+        "SMTP_ALLOWED_RECIPIENTS. Exactly one send per call; SMTP has no lookup, so a send whose outcome is " +
+        "unknown is never repeated.",
       input_schema: {
         type: "object",
         properties: {
@@ -229,10 +263,13 @@ export const notification: Skill = {
         required: ["to", "subject", "text"],
       },
       handler: async (input: { to: string; subject: string; text: string }, ctx) => {
+        // The recipient list is the operator's: an agent (or a prompt injection) cannot mail anyone else.
+        const refusal = emailRecipientRefusal(input.to, ctx.config.SMTP_ALLOWED_RECIPIENTS);
+        if (refusal) return { refused: true, reason: refusal };
         if (!ctx.config.SMTP_URL) throw new Error("[Notification] SMTP_URL not configured");
         if (!ctx.config.SMTP_FROM) throw new Error("[Notification] SMTP_FROM not configured (the From address)");
-        // Loaded on first use: nothing else in the CLI pays for the SMTP stack.
-        const { default: nodemailer } = await import("nodemailer");
+        // Loaded on first use, and kept out of browser bundles: nothing else pays for the SMTP stack.
+        const { default: nodemailer } = (await import(/* @vite-ignore */ NODEMAILER)) as typeof import("nodemailer");
         const transport = nodemailer.createTransport(ctx.config.SMTP_URL);
         const info = await transport.sendMail({
           from: ctx.config.SMTP_FROM,

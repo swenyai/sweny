@@ -1547,6 +1547,7 @@ describe("replay keeps every NodeResult field (#581)", () => {
     degraded: ["sandbox_off"],
     policy: { envScope: true, sandbox: "strict", sandboxStarted: true },
     contained: true,
+    intents: [{ type: "comment", body: "from a map child", recordedAt: 1_000 }],
     outputs: [
       {
         type: "issue",

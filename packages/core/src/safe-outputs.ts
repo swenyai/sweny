@@ -33,6 +33,7 @@ import type {
 import { SAFE_OUTPUT_APPLIERS, SAFE_OUTPUT_PINNED_TARGET, isRefusal, refusalReason, skippedReason } from "./types.js";
 import type { ProposedWrite } from "./approval-bundle.js";
 import { trustedEnvValue } from "./startup-env.js";
+import { emailRecipientRefusal } from "./skills/notification.js";
 
 /** Name of the intent-recording tool a node with `outputs` receives. */
 export const EMIT_OUTPUT_TOOL = "emit_output";
@@ -587,6 +588,14 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       continue;
     }
     const at = { via, ...(target ? { target } : {}) };
+    // Email (#576): the pinned recipient must also be on the operator's SMTP_ALLOWED_RECIPIENTS.
+    if (type === "email") {
+      const why = emailRecipientRefusal(target, o.config.SMTP_ALLOWED_RECIPIENTS);
+      if (why) {
+        refuse(why, at);
+        continue;
+      }
+    }
 
     // Shape and size.
     const body = intent.body ?? "";

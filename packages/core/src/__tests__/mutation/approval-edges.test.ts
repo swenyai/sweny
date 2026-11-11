@@ -50,7 +50,7 @@ function stage(
     intents: intents.map((i) => ({ recordedAt: 0, ...i }) as never),
     nodeSkills: ["slack", "notification", "github"],
     skills: t.skills,
-    config: {},
+    config: { SMTP_ALLOWED_RECIPIENTS: "ops@acme.test,@lead.test" },
     env: {},
     actor: {},
     staged: false,
@@ -113,11 +113,28 @@ describe("slack_message and email in the write stage (#576)", () => {
       [{ type: "email", target: { input: "to" } }],
       [{ type: "email", title: "s", body: "b" }],
       {
-        input: { to: "lead@acme.test" },
+        input: { to: "boss@lead.test" },
       },
     );
     await run;
-    expect(sent[0].args.to).toBe("lead@acme.test");
+    expect(sent[0].args.to).toBe("boss@lead.test");
+  });
+
+  it("refuses an email whose pinned recipient is not on SMTP_ALLOWED_RECIPIENTS, or when it is unset", async () => {
+    const off = stage([{ type: "email", target: "x@evil.test" }], [{ type: "email", title: "s", body: "b" }]);
+    expect((await off.run).receipts[0]).toMatchObject({
+      status: "refused",
+      reason: "recipient not on SMTP_ALLOWED_RECIPIENTS",
+      via: "notification",
+      target: "x@evil.test",
+    });
+    expect(off.sent).toEqual([]);
+    const unset = stage([EMAIL], [{ type: "email", title: "s", body: "b" }], { config: {} });
+    expect((await unset.run).receipts[0]).toMatchObject({
+      status: "refused",
+      reason: "SMTP_ALLOWED_RECIPIENTS is not set, so no email is sent",
+    });
+    expect(unset.sent).toEqual([]);
   });
 
   it("refuses a blank message or email body, and an email without a subject", async () => {

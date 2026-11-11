@@ -46,8 +46,10 @@ vi.mock("nodemailer", () => ({
   },
 }));
 
-const RUN_ID = "20261111-090000-m2a576";
+const RUN_ID = "20261111-090000-a2a576";
 const silent = { info() {}, warn() {}, error() {}, debug() {} };
+/** The operator's email allowlist (#576): the pinned recipient must be on it. */
+const ALLOW = { SMTP_ALLOWED_RECIPIENTS: "ops@acme.test" };
 
 class Kill extends Error {
   constructor(at: string) {
@@ -118,7 +120,7 @@ function fakeTransports() {
     name: "Notification",
     description: "",
     category: "notification",
-    config: {},
+    config: { SMTP_ALLOWED_RECIPIENTS: { description: "allowed recipients", required: false } },
     tools: [write("notify_email", () => ({ id: `<msg-${sent.length}@test>`, accepted: ["ops@acme.test"] }))],
   };
   const github: Skill = {
@@ -173,7 +175,7 @@ async function produce(cwd: string, workflow: Workflow, emit: Record<string, obj
     {
       skills: createSkillMap(t.skills),
       claude: agent.claude,
-      config: {},
+      config: ALLOW,
       logger: silent,
       cwd,
       env: {},
@@ -337,7 +339,14 @@ describe("approval mode across a crash (#576)", () => {
     const wf = approvalWorkflow();
     const t = fakeTransports();
     const agent = fakeAgent({ notify: [SLACK, EMAIL] });
-    const opts = { skills: createSkillMap(t.skills), claude: agent.claude, config: {}, logger: silent, cwd, env: {} };
+    const opts = {
+      skills: createSkillMap(t.skills),
+      claude: agent.claude,
+      config: ALLOW,
+      logger: silent,
+      cwd,
+      env: {},
+    };
     const journal = RunJournal.create({
       runId: RUN_ID,
       cwd,
@@ -363,7 +372,8 @@ describe("approval mode across a crash (#576)", () => {
     expect(early.sent).toEqual([]);
 
     const prepared = prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => wf });
-    if (!prepared.ok || "planOnly" in prepared) throw new Error("resume refused");
+    if (!prepared.ok || "planOnly" in prepared)
+      throw new Error(`resume refused: ${"error" in prepared ? prepared.error : "plan only"}`);
     const { results } = await execute(wf, prepared.ctx.input, { ...opts, journal: prepared.ctx.journal });
     prepared.ctx.journal.end("success");
     expect(agent.calls.filter((c) => c === "notify")).toHaveLength(1);
@@ -739,7 +749,14 @@ describe("notify_email: email over SMTP_URL through nodemailer (#576)", () => {
     expect(tool().access).toBe("write");
     const out = await tool().handler(
       { to: "ops@acme.test", subject: "Morning prompts", text: "Three drafts." },
-      { config: { SMTP_URL: "smtps://u:p@smtp.acme.test:465", SMTP_FROM: "sweny@acme.test" }, logger: silent },
+      {
+        config: {
+          SMTP_URL: "smtps://u:p@smtp.acme.test:465",
+          SMTP_FROM: "sweny@acme.test",
+          SMTP_ALLOWED_RECIPIENTS: "@acme.test",
+        },
+        logger: silent,
+      },
     );
     expect(mail.urls).toEqual(["smtps://u:p@smtp.acme.test:465"]);
     expect(mail.sent).toEqual([
@@ -753,15 +770,64 @@ describe("notify_email: email over SMTP_URL through nodemailer (#576)", () => {
     await expect(
       tool().handler(
         { to: "a@b.test", subject: "s", text: "t" },
-        { config: { SMTP_FROM: "x@y.test" }, logger: silent },
+        { config: { SMTP_FROM: "x@y.test", SMTP_ALLOWED_RECIPIENTS: "a@b.test" }, logger: silent },
       ),
     ).rejects.toThrow(/SMTP_URL/);
     await expect(
       tool().handler(
         { to: "a@b.test", subject: "s", text: "t" },
-        { config: { SMTP_URL: "smtp://smtp.test" }, logger: silent },
+        { config: { SMTP_URL: "smtp://smtp.test", SMTP_ALLOWED_RECIPIENTS: "a@b.test" }, logger: silent },
       ),
     ).rejects.toThrow(/SMTP_FROM/);
     expect(mail.sent).toEqual([]);
+  });
+
+  it("sends only to SMTP_ALLOWED_RECIPIENTS: unset sends nothing, and every recipient must be listed", async () => {
+    mail.sent.length = 0;
+    const cfg = { SMTP_URL: "smtp://smtp.test", SMTP_FROM: "sweny@acme.test" };
+    const send = (to: string, allowed?: string) =>
+      tool().handler(
+        { to, subject: "s", text: "t" },
+        { config: { ...cfg, ...(allowed !== undefined ? { SMTP_ALLOWED_RECIPIENTS: allowed } : {}) }, logger: silent },
+      );
+    expect(await send("ops@acme.test")).toEqual({
+      refused: true,
+      reason: "SMTP_ALLOWED_RECIPIENTS is not set, so no email is sent",
+    });
+    expect(await send("ops@acme.test", " , ")).toMatchObject({ refused: true });
+    expect(await send("evil@x.test", "ops@acme.test,@corp.test")).toEqual({
+      refused: true,
+      reason: "recipient not on SMTP_ALLOWED_RECIPIENTS",
+    });
+    expect(await send("ops@acme.test, evil@x.test", "ops@acme.test")).toMatchObject({ refused: true });
+    expect(await send("lead@acme.test.evil", "@acme.test")).toMatchObject({ refused: true });
+    expect(await send("", "@acme.test")).toEqual({ refused: true, reason: "no recipient" });
+    expect(mail.sent).toEqual([]);
+    expect(await send("OPS@Acme.test, lead@corp.test", "ops@acme.test, @CORP.test")).toMatchObject({
+      id: "<real-1@smtp.test>",
+    });
+    expect(mail.sent).toHaveLength(1);
+  });
+
+  it("the write stage refuses an email output whose pinned recipient is not on the list, before anything is frozen", async () => {
+    process.env.SWENY_STATE_DIR = tmp("sweny-state-");
+    const cwd = tmp("sweny-ws-");
+    const wf = approvalWorkflow({
+      nodes: {
+        draft: { name: "Draft", instruction: "NODE:draft", skills: [], permissions: "read" },
+        notify: {
+          name: "Notify",
+          instruction: "NODE:notify",
+          skills: ["notification"],
+          outputs: [{ type: "email", target: "someone@else.test" }],
+        },
+      },
+    });
+    const { results, sent } = await produce(cwd, wf, { notify: [EMAIL] });
+    expect(sent).toEqual([]);
+    expect(bundlesOf(cwd)).toEqual([]);
+    expect(results.get("notify")!.outputs).toEqual([
+      expect.objectContaining({ type: "email", status: "refused", reason: "recipient not on SMTP_ALLOWED_RECIPIENTS" }),
+    ]);
   });
 });

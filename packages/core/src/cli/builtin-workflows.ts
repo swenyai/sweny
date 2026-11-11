@@ -58,6 +58,8 @@ const LEGACY_WRITE_TOOLS: Record<SafeOutputType, string[]> = {
   pr: ["github_create_pr"],
   label: ["github_add_labels"],
   issue_state: ["linear_update_issue", "linear_set_issue_state", "github_set_issue_state"],
+  slack_message: ["slack_send_message"],
+  email: ["notify_email"],
 };
 
 const writeToolsBySkill = new Map(

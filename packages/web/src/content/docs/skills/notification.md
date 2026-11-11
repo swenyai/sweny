@@ -25,10 +25,11 @@ All config fields are optional. Set the ones for the channels you want to use.
 | `TEAMS_WEBHOOK_URL` | Microsoft Teams webhook URL |
 | `SMTP_URL` | SMTP connection URL for `notify_email` (`smtp://` or `smtps://user:pass@host:port`) |
 | `SMTP_FROM` | From address for `notify_email` |
+| `SMTP_ALLOWED_RECIPIENTS` | Comma-separated addresses (`ops@acme.com`) or domains (`@acme.com`) `notify_email` may send to. Unset: no email is sent |
 The skill activates when at least one of the above is set. If none are set, the skill will not appear in the available tool set.
 
 :::note[Email notifications]
-`notify_email` sends one plain-text email over `SMTP_URL` (through nodemailer) from `SMTP_FROM`. In a workflow, prefer the `email` safe output: its recipient is pinned by the declaration (`target`), never chosen by the agent, and with `safe_outputs.approval` it waits for `sweny publish --approve`. SMTP has no lookup, so a send whose outcome is unknown is never repeated.
+`notify_email` sends one plain-text email over `SMTP_URL` (through nodemailer) from `SMTP_FROM`, only to recipients on `SMTP_ALLOWED_RECIPIENTS`. With the list unset it sends nothing and says why, so neither an agent nor an injected prompt can mail an arbitrary address. In a workflow, prefer the `email` safe output: its recipient is pinned by the declaration (`target`), never chosen by the agent, and with `safe_outputs.approval` it waits for `sweny publish --approve`. SMTP has no lookup, so a send whose outcome is unknown is never repeated.
 :::
 
 ## Tools
