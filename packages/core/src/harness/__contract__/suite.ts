@@ -248,7 +248,11 @@ export function runContractSuite(
           const warn = policyGate(caps, policy);
           const strict = policyGate(caps, { ...policy, strict: true });
           if (mappable) {
-            expect(warn.degraded, `${c} warn`).toEqual([]);
+            // A write node on a harness with no built-in allow-list reports that too (case 25).
+            expect(
+              warn.degraded.filter((d) => !d.startsWith("builtin allow-list: ")),
+              `${c} warn`,
+            ).toEqual([]);
             expect(strict.refuse, `${c} strict`).toBeUndefined();
             // Declared native, so the denial must actually reach the agent.
             fakes.script(DONE);
@@ -884,7 +888,10 @@ export function runContractSuite(
           const contained = native ? await build({ sandbox: true }) : await build({ sandboxWrapper: rec });
           for (const [label, over, policy] of nodes) {
             fakes.script(DONE);
-            const p: NodePolicy = { ...policy, strict: true, sandbox: "strict" };
+            // A write node on a harness with no built-in allow-list is refused under
+            // strict for that gap (case 25), not for the credential this case is about.
+            const strict = policy.readOnly || contained.capabilities.builtinAllow !== undefined;
+            const p: NodePolicy = { ...policy, strict, sandbox: "strict" };
             const r = await contained.run(req({ ...over, policy: p }));
             expect(r.status, `${label} contained: ${JSON.stringify(r.data)}`).toBe("success");
             expect(masked(fakes.captured(), rec.requests.at(-1)?.denyRead), `${label}: unreadable`).toBe(true);

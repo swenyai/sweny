@@ -246,6 +246,7 @@ describe("CodexHarness policy", () => {
     expect(r.degraded).toEqual([
       "deny [write]: harness can only deny [shell, net, subagent]",
       expect.stringMatching(/^max_turns: /),
+      expect.stringMatching(/^builtin allow-list: /),
     ]);
     const o = overrides();
     expect(o["features.shell_tool"]).toBe(false);
@@ -320,9 +321,10 @@ describe("CodexHarness policy", () => {
       });
       byNode[id] = r.degraded;
       expect(r.status, `${id}: ${String(r.data.error ?? "")}`).toBe("success");
-      // The turn budget is the one opinion Codex keeps by watchdog; it is reported, never refused.
+      // Codex keeps the turn budget by watchdog and its built-ins by a deny list (#608);
+      // both are reported, never refused.
       expect(
-        r.degraded.filter((d) => !d.startsWith("max_turns: ")),
+        r.degraded.filter((d) => !d.startsWith("max_turns: ") && !d.startsWith("builtin allow-list: ")),
         id,
       ).toEqual([]);
     }

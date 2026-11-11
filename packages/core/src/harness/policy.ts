@@ -163,6 +163,27 @@ export function policyGate(
     }
   }
 
+  // #608: a write node gets only its policy's built-ins. A read-only node is
+  // covered by the read-only check, and `native: none` by its own. Checked last
+  // so the other gaps keep their place in a refusal.
+  if (!policy.readOnly && !policy.nativeNone && caps.builtinAllow !== "native") {
+    if (caps.builtinAllow === "deny-list") {
+      wrapped.push(
+        "builtin allow-list: harness has no built-in tool allow-list; sweny turns off the built-ins it knows, " +
+          "so one it does not know (a newer agent version) still reaches the agent",
+      );
+    } else {
+      unenforced.push(
+        "builtin allow-list: harness cannot limit the agent to the node's built-in tools; it keeps all of its own",
+      );
+    }
+  }
+  // An opt-in the harness has no built-in for grants nothing. Reported, never refused.
+  const ungrantable = (policy.allow ?? []).filter((c) => caps.builtinClasses && !caps.builtinClasses.includes(c));
+  if (!policy.readOnly && ungrantable.length > 0) {
+    wrapped.push(`allow [${ungrantable.join(", ")}]: harness has no built-in tool of this class`);
+  }
+
   const degraded = [...unenforced, ...wrapped];
   if (unenforced.length > 0 && policy.strict) {
     return { degraded, refuse: `strict policy: ${unenforced.join("; ")}` };

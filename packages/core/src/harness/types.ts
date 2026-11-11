@@ -45,6 +45,19 @@ export interface HarnessCapabilities {
   resume: boolean;
   /** The harness can run a node with no built-in tools and no settings sources. Absent means false. */
   nativeNone?: boolean;
+  /**
+   * How a write node is kept to its policy's built-in tools (#608). `native`:
+   * sweny hands the agent an explicit allow-list, so nothing outside the
+   * policy reaches it. `deny-list`: the agent has no allow-list, and sweny
+   * turns off the built-ins it knows (reported, never refused). Absent: the
+   * agent keeps its own built-ins (unenforced; strict refuses the node).
+   */
+  builtinAllow?: "native" | "deny-list";
+  /**
+   * Tool classes the harness has a built-in for, so `policy.allow` can grant
+   * them. Absent: not known (the agent's own built-ins).
+   */
+  builtinClasses?: ToolClass[];
 }
 
 /** What a node is allowed to do, compiled per adapter by the harness. */
@@ -53,6 +66,12 @@ export interface NodePolicy {
   readOnly: boolean;
   /** Portable deny list. */
   deny: ToolClass[];
+  /**
+   * Classes a write node opts into beyond its default built-ins
+   * (`permissions.allow`, #608; today `subagent`). Never set on a read-only
+   * run; a class in `deny` is never here.
+   */
+  allow?: ToolClass[];
   /** Legacy `disallowed_tools` passthrough, harness-native names. */
   nativeDeny?: string[];
   /** Allowed egress hosts. */

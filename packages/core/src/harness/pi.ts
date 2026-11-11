@@ -117,6 +117,20 @@ const BUILTIN_BY_CLASS: Readonly<Partial<Record<ToolClass, readonly string[]>>> 
 const READ_ONLY_BUILTINS = ["read", "grep", "find", "ls"] as const;
 
 /**
+ * Built-in tools a write node adds (#608): the shell and the file tools, the
+ * same classes as Claude Code's write list. `powershell` is left out: `bash`
+ * is the shell on every host sweny runs pi on.
+ */
+const WRITE_BUILTINS = ["bash", "edit", "write"] as const;
+
+/**
+ * Every built-in tool pi 0.99.2 can register with `--no-extensions` (src/core/
+ * tools/index.ts `allToolNames`). The MCP extension (`-e builtin:mcp`) adds
+ * only MCP tools and its resource tools.
+ */
+export const PI_BUILTIN_TOOLS = ["read", "bash", "powershell", "edit", "write", "grep", "find", "ls"] as const;
+
+/**
  * `disallowed_tools` names a node may use, per portable class. Claude Code
  * names are included because bundled workflows (triage.yml) were written for
  * it; pi names come from its tool table.
@@ -1067,16 +1081,26 @@ export class PiHarness implements AgentHarness {
         bridgeNames = named.names;
       }
 
-      // Tool selection. A dry run is an allowlist (only reading tools plus
-      // sweny's own); otherwise built-ins are denied by name and MCP tools stay.
+      // Tool selection (#608): every node gets an allow-list of its policy's
+      // built-ins (reading tools, plus the shell and file tools on a write node,
+      // minus denials) and sweny's own tools. `--tools` names every tool it
+      // keeps, so it would drop an external server's tools, whose names are not
+      // known until pi lists them; with one loaded (a write node only), every
+      // other built-in is excluded by name instead, which `-ne` makes the same
+      // set (PI_BUILTIN_TOOLS).
       const toolArgs: string[] = [];
       const excluded = new Set<string>(compiled.piTools);
       for (const c of deny) for (const n of BUILTIN_BY_CLASS[c] ?? []) excluded.add(n);
-      if (readOnly) {
-        const allow = [...READ_ONLY_BUILTINS.filter((n) => !excluded.has(n)), ...bridgeNames];
+      const builtins = [...READ_ONLY_BUILTINS, ...(readOnly ? [] : WRITE_BUILTINS)].filter(
+        (n) => !excluded.has(n),
+      ) as string[];
+      const external = Object.keys(entries).some((id) => id !== PI_BRIDGE_SERVER);
+      if (!external) {
+        const allow = [...builtins, ...bridgeNames];
         toolArgs.push(...(allow.length > 0 ? ["--tools", allow.join(",")] : ["--no-tools"]));
-      } else if (excluded.size > 0) {
-        toolArgs.push("--exclude-tools", [...excluded].join(","));
+      } else {
+        const rest = PI_BUILTIN_TOOLS.filter((n) => !builtins.includes(n));
+        if (rest.length > 0) toolArgs.push("--exclude-tools", rest.join(","));
       }
 
       const args = [

@@ -357,8 +357,8 @@ export const nodeRetryZ = z
 
 /**
  * Node / workflow permissions (#365): `read` | `write`, or an object with
- * `access`, `deny` (portable tool classes) and `strict`. The object form must
- * declare at least one key.
+ * `access`, `deny` and `allow` (portable tool classes, #608) and `strict`. The
+ * object form must declare at least one key.
  */
 export const nodePermissionsZ = z.union([
   z.enum(NODE_ACCESS),
@@ -366,13 +366,20 @@ export const nodePermissionsZ = z.union([
     .object({
       access: z.enum(NODE_ACCESS).optional(),
       deny: z.array(z.enum(TOOL_CLASSES)).min(1).optional(),
+      allow: z.array(z.enum(TOOL_CLASSES)).min(1).optional(),
       strict: z.boolean().optional(),
       native: z.enum(NODE_NATIVE).optional(),
     })
     .strict()
-    .refine((p) => p.access !== undefined || p.deny !== undefined || p.strict !== undefined || p.native !== undefined, {
-      message: "permissions must declare at least one of access, deny, strict, native",
-    }),
+    .refine(
+      (p) =>
+        p.access !== undefined ||
+        p.deny !== undefined ||
+        p.allow !== undefined ||
+        p.strict !== undefined ||
+        p.native !== undefined,
+      { message: "permissions must declare at least one of access, deny, allow, strict, native" },
+    ),
 ]);
 
 /**
@@ -665,6 +672,7 @@ export interface WorkflowError {
     | "EDGE_ITERATIONS_EXCEEDED"
     | "RETRY_MAX_EXCEEDED"
     | "PERMISSION_CEILING"
+    | "PERMISSION_ALLOW_READ"
     | "AGENT_ENV_READ_ONLY"
     | "BUDGET_CEILING"
     | "OUTPUT_NOT_ALLOWED"
@@ -1035,6 +1043,17 @@ export function validateWorkflow(
       errors.push({
         code: "PERMISSION_CEILING",
         message: `Node "${nodeId}" asks for permissions write, above the workflow's permissions read`,
+        nodeId,
+      });
+    }
+    // #608: `allow` opts a write node into a built-in; a read node gets none.
+    const allowed = typeof node.permissions === "object" ? node.permissions.allow : undefined;
+    if ((allowed?.length ?? 0) > 0 && resolveNodePermissions(node, workflow).access === "read") {
+      errors.push({
+        code: "PERMISSION_ALLOW_READ",
+        message:
+          `Node "${nodeId}" allows [${allowed!.join(", ")}] but its permissions are read, ` +
+          `and a read node gets no built-in beyond reading. Remove allow, or make the node permissions: write.`,
         nodeId,
       });
     }
@@ -1433,6 +1452,13 @@ export const workflowJsonSchema = {
               items: { type: "string", enum: [...TOOL_CLASSES] },
               minItems: 1,
               description: "Built-in tool classes the agent must not have, compiled per harness.",
+            },
+            allow: {
+              type: "array",
+              items: { type: "string", enum: [...TOOL_CLASSES] },
+              minItems: 1,
+              description:
+                "Built-in tool classes a write node opts into beyond its default list (today only 'subagent' is left out by default). 'deny' wins; a read node may not allow any. A harness with no built-in of a class reports it.",
             },
             strict: {
               type: "boolean",

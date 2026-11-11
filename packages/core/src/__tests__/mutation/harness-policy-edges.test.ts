@@ -27,6 +27,8 @@ const weak: HarnessCapabilities = {
   usage: { tokens: false, costUsd: false, live: false },
   cancel: "kill",
   resume: false,
+  // The built-in allow-list gap (#608) has its own edges in builtin-allow-edges.test.ts.
+  builtinAllow: "native",
 };
 
 const contained: HarnessCapabilities = { ...weak, sandbox: { fs: true, network: true } };

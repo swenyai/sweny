@@ -174,19 +174,22 @@ gather:
 | -------- | ------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
 | `access` | `read` \| `write`                                       | OPTIONAL | `read` runs the node read-only.                                                                                  |
 | `deny`   | (`shell` \| `write` \| `edit` \| `net` \| `subagent`)[] | OPTIONAL | Built-in tool classes the agent MUST NOT have. Compiled by the executor to each agent runtime's native names.    |
+| `allow`  | (`shell` \| `write` \| `edit` \| `net` \| `subagent`)[] | OPTIONAL | Built-in tool classes a `write` node opts into beyond its default list. `deny` wins.                             |
 | `strict` | boolean                                                 | OPTIONAL | Load only the MCP servers the executor injects, and refuse the node on a runtime that cannot enforce the policy. |
 
 The object form MUST declare at least one field.
 
 **Default access.** The node's own `access`; else `read` when the node declares [`outputs`](#safe-outputs); else the workflow's `permissions`; else `read` in a version 2 file and `write` in a version 1 file. When an implementation migrates a version 1 file, it MUST keep `write` on each node that relied on that default (by declaring it), and SHOULD warn once per such node.
 
-**Ceiling.** The workflow's [`permissions`](/workflow#fields) is the default and the ceiling for every node. A node MUST NOT declare `write` under a workflow `read` (validation error `PERMISSION_CEILING`). `deny` classes are the union of both levels; `strict` applies if either level sets it.
+**Ceiling.** The workflow's [`permissions`](/workflow#fields) is the default and the ceiling for every node. A node MUST NOT declare `write` under a workflow `read` (validation error `PERMISSION_CEILING`). `deny` and `allow` classes are the union of both levels; `strict` applies if either level sets it. A node whose access is `read` MUST NOT declare `allow` (validation error `PERMISSION_ALLOW_READ`).
 
 A conforming executor, for a node whose access is `read`:
 
 - **MUST** pass only skill tools classified `access: read` (the same gate as a [dry run](/execution#dry-run-semantics)).
 - **MUST NOT** load external skill MCP servers, since their tools cannot be classified.
 - **MUST** remove shell, file-write, edit, fetch and subagent built-ins.
+
+For a node whose access is `write`, it **MUST** give the agent only these built-ins: read and search tools, plus the `shell`, `write`, `edit` and `net` classes, plus each class the node `allow`s, minus every `deny` class. `subagent` is left out unless allowed. A runtime that cannot limit the agent to such a list reports it; one that can turn off only the built-ins it knows reports it too, and may run the node under `strict`.
 
 For every node it **MUST** enforce `deny`, and under `strict` it **MUST** refuse the node before any model call when the runtime cannot enforce part of the policy. Without `strict`, it MAY run the node and report what it could not enforce. `strict` includes exclusive MCP: a runtime that cannot keep the user's own MCP servers out of the run cannot enforce it, so a `strict` node is refused there.
 

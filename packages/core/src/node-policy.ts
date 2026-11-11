@@ -14,6 +14,8 @@ export interface ResolvedPermissions {
   deny: ToolClass[];
   strict: boolean;
   native?: NodeNative;
+  /** Built-in classes opted into (#608). Absent when neither declares any. */
+  allow?: ToolClass[];
 }
 
 function spec(p: NodePermissions | undefined): NodePermissionsSpec {
@@ -54,8 +56,9 @@ export function hasNodePolicy(
  * access: the node's own, else `read` when it declares `outputs`, else the
  * workflow's, else {@link defaultNodeAccess} (`read` from spec v2, `write` in
  * v1). A workflow `read` ceiling wins over a node `write` (the loader rejects
- * that combination; this is the runtime backstop). deny: union. strict:
- * either. native: `none` if either says so.
+ * that combination; this is the runtime backstop). deny: union. allow: union
+ * (#608; deny still wins when the policy is built). strict: either. native:
+ * `none` if either says so.
  */
 export function resolveNodePermissions(
   node: Pick<Node, "permissions" | "outputs">,
@@ -67,12 +70,14 @@ export function resolveNodePermissions(
     own.access ?? (node.outputs && node.outputs.length > 0 ? "read" : (wf.access ?? defaultNodeAccess(workflow)));
   if (wf.access === "read") access = "read";
   const deny = [...new Set<ToolClass>([...(wf.deny ?? []), ...(own.deny ?? [])])];
+  const allow = [...new Set<ToolClass>([...(wf.allow ?? []), ...(own.allow ?? [])])];
   const none = wf.native === "none" || own.native === "none";
   return {
     access,
     deny,
     strict: wf.strict === true || own.strict === true,
     ...(none ? { native: "none" as const } : {}),
+    ...(allow.length > 0 ? { allow } : {}),
   };
 }
 
@@ -84,16 +89,22 @@ export function exceedsPermissionCeiling(
   return spec(workflow.permissions).access === "read" && spec(node.permissions).access === "write";
 }
 
-/** The portable policy handed to the harness for one node run. */
+/**
+ * The portable policy handed to the harness for one node run. `allow` (#608)
+ * reaches only a write run, minus every denied class.
+ */
 export function buildNodePolicy(opts: {
   permissions: ResolvedPermissions;
   dryRun: boolean;
   disallowedTools?: string[];
   egress?: string[];
 }): NodePolicy {
+  const readOnly = opts.dryRun || opts.permissions.access === "read";
+  const allow = readOnly ? [] : (opts.permissions.allow ?? []).filter((c) => !opts.permissions.deny.includes(c));
   return {
-    readOnly: opts.dryRun || opts.permissions.access === "read",
+    readOnly,
     deny: opts.permissions.deny,
+    ...(allow.length > 0 ? { allow } : {}),
     ...(opts.disallowedTools && opts.disallowedTools.length > 0 ? { nativeDeny: opts.disallowedTools } : {}),
     egress: opts.egress ?? [],
     strict: opts.permissions.strict,

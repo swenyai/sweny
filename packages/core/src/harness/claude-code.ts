@@ -225,7 +225,8 @@ export function compileClaudeCodeDeny(policy: NodePolicy, legacy: readonly strin
  * the shell, file-edit and web built-ins (its `tools.deny` classes and
  * `disallowed_tools` names then leave the list). No node gets the subagent
  * tools (Task, Agent) by default: nothing shows a subagent is held to its
- * parent's `tools`, so the default must not depend on it.
+ * parent's `tools`, so the default must not depend on it. A write node opts in
+ * with `permissions.allow: [subagent]` (#608).
  *
  * Passed as the SDK's `tools` option, which "Specif[ies] the base set of
  * available built-in tools" (sdk.d.ts); `allowedTools` only auto-approves
@@ -249,13 +250,24 @@ export const CLAUDE_WRITE_BUILTIN_TOOLS = [
 ] as const;
 
 /**
- * The built-in allow-list for one node: the policy's list minus every name the
- * compiled deny list removes. Path-scoped rules (`Read(//dir/**)`) narrow a
- * tool, they do not remove it, so they are not matched here.
+ * The built-in allow-list for one node: the policy's list, plus the tools of
+ * each class a write node allows (#608), minus every name the compiled deny
+ * list removes. Path-scoped rules (`Read(//dir/**)`) narrow a tool, they do
+ * not remove it, so they are not matched here.
  */
-export function claudeCodeBuiltinTools(policy: { readOnly: boolean }, deny: readonly string[] = []): string[] {
+export function claudeCodeBuiltinTools(
+  policy: { readOnly: boolean; allow?: readonly ToolClass[] },
+  deny: readonly string[] = [],
+): string[] {
   const denied = new Set(deny);
-  const base: readonly string[] = policy.readOnly ? CLAUDE_READ_ONLY_BUILTIN_TOOLS : CLAUDE_WRITE_BUILTIN_TOOLS;
+  const base: readonly string[] = policy.readOnly
+    ? CLAUDE_READ_ONLY_BUILTIN_TOOLS
+    : [
+        ...new Set([
+          ...CLAUDE_WRITE_BUILTIN_TOOLS,
+          ...(policy.allow ?? []).flatMap((c) => CLAUDE_TOOLS_BY_CLASS[c] ?? []),
+        ]),
+      ];
   return base.filter((t) => !denied.has(t));
 }
 
@@ -605,6 +617,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
       strictMcp: mcpWithheld(readOnly, req.agentAccess) || policy.strict || policy.exclusiveMcp === true,
       nativeNone: policy.nativeNone === true,
+      allow: policy.allow,
       sandboxMode: policy.sandbox,
       agentAccess: {
         envVars: req.agentAccess?.envVars ?? [],
@@ -652,6 +665,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     strictMcp?: boolean;
     /** `permissions.native: none`: SDK `tools: []` and `settingSources: []` on this node's query. */
     nativeNone?: boolean;
+    /** Built-in classes a write node opts into (`permissions.allow`, #608). */
+    allow?: ToolClass[];
     /** Per-request containment requirement; falls back to the client default. */
     sandboxMode?: SandboxMode;
     /** Live token usage (#449), reported as assistant messages arrive. */
@@ -881,7 +896,10 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       if (!defers) env.ENABLE_TOOL_SEARCH = "false";
       const builtinTools = opts.nativeNone
         ? []
-        : [...claudeCodeBuiltinTools({ readOnly: !!readOnly }, disallowedTools), ...(defers ? ["ToolSearch"] : [])];
+        : [
+            ...claudeCodeBuiltinTools({ readOnly: !!readOnly, allow: opts.allow }, disallowedTools),
+            ...(defers ? ["ToolSearch"] : []),
+          ];
 
       stream = query({
         prompt,

@@ -10,6 +10,8 @@ import type { HarnessCapabilities } from "./types.js";
  * usage: tokens live (per assistant message, a lower bound until the terminal
  * `result` message gives the authoritative total); cost only at the end of the
  * node (the SDK prices the run in `total_cost_usd` on `result`).
+ * builtinAllow native (#606, #608): the SDK `tools` option, "the base set of
+ * available built-in tools" (sdk.d.ts); see `claudeCodeBuiltinTools`.
  */
 export const CLAUDE_CODE_CAPABILITIES: HarnessCapabilities = {
   structuredOutput: "native",
@@ -23,6 +25,8 @@ export const CLAUDE_CODE_CAPABILITIES: HarnessCapabilities = {
   cancel: "signal",
   resume: false,
   nativeNone: true,
+  builtinAllow: "native",
+  builtinClasses: ["shell", "write", "edit", "net", "subagent"],
 };
 
 /**
@@ -49,6 +53,13 @@ export const CLAUDE_CODE_CAPABILITIES: HarnessCapabilities = {
  *   `tools.deny: [shell]` still removes it.
  * - turnLimit watchdog: codex exec has no turn limit; sweny counts tool calls.
  * - usage tokens only: `turn.completed.usage`; Codex reports no cost.
+ * - builtinAllow deny-list (#608): Codex has no allow-list for its built-in
+ *   tools. `enabled_tools` exists only per MCP server (config.schema.json,
+ *   RawMcpServerConfig); built-ins come from feature switches and config
+ *   (core/src/tools/spec_plan.rs: add_shell_tools, add_core_utility_tools,
+ *   add_collaboration_tools), and apply_patch has none. sweny turns off what it
+ *   knows (CODEX_ISOLATION_FEATURES_OFF, plus shell, web search and subagents
+ *   by policy), and every write node reports the rest.
  */
 export const CODEX_CAPABILITIES: HarnessCapabilities = {
   structuredOutput: "native",
@@ -62,6 +73,8 @@ export const CODEX_CAPABILITIES: HarnessCapabilities = {
   usage: { tokens: true, costUsd: false, live: false },
   cancel: "kill",
   resume: false,
+  builtinAllow: "deny-list",
+  builtinClasses: ["shell", "write", "edit", "net", "subagent"],
 };
 
 /**
@@ -90,6 +103,13 @@ export const CODEX_CAPABILITIES: HarnessCapabilities = {
  * - usage tokens and cost: `get_session_stats` returns tokens and cost for the
  *   session. Read once at the end, so `live` is false.
  * - cancel rpc: the `abort` command, then SIGTERM and SIGKILL.
+ * - builtinAllow native (#608): `--tools` is an exact-name allow-list over
+ *   every registered tool (src/core/agent-session.ts `_refreshToolRegistry`).
+ *   With `-ne` the built-ins are a closed set (src/core/tools/index.ts
+ *   `allToolNames`: read, bash, powershell, edit, write, grep, find, ls), so
+ *   a write node that loads an external MCP server, whose tool names `--tools`
+ *   cannot know up front, gets `--exclude-tools` over the rest of that set.
+ *   builtinClasses: shell, write, edit; pi has no net or subagent built-in.
  */
 export const PI_CAPABILITIES: HarnessCapabilities = {
   structuredOutput: "prompt",
@@ -103,6 +123,8 @@ export const PI_CAPABILITIES: HarnessCapabilities = {
   usage: { tokens: true, costUsd: true, live: false },
   cancel: "rpc",
   resume: false,
+  builtinAllow: "native",
+  builtinClasses: ["shell", "write", "edit"],
 };
 
 /**
@@ -134,6 +156,9 @@ export const PI_CAPABILITIES: HarnessCapabilities = {
  *   is USD. Per-turn token usage is behind an unstable flag.
  * - cancel rpc: `session/cancel`, then kill.
  * - resume false: sweny starts a fresh session per node.
+ * - builtinAllow absent (#608): the agent keeps all its own built-ins; nothing
+ *   in the protocol lists or limits them, so a write node is reported, and
+ *   refused under strict.
  */
 export const ACP_CAPABILITIES: HarnessCapabilities = {
   structuredOutput: "prompt",
