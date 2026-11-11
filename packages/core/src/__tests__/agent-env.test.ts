@@ -410,7 +410,7 @@ describe("applyAgentFileConfig (.sweny.yml -> SWENY_* env)", () => {
   });
 
   describe("in CI, .sweny.yml only tightens (#599)", () => {
-    const run = async (file: Record<string, unknown>, env: NodeJS.ProcessEnv) => {
+    const run = async (file: Record<string, string | string[]>, env: NodeJS.ProcessEnv) => {
       const { applyAgentFileConfig } = await import("../cli/config-file.js");
       const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
       try {

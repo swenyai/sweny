@@ -404,8 +404,9 @@ describe.skipIf(!claudeReady)("/proc isolation, Claude SDK sandbox path", () => 
     });
     const line = r.stdout.split("\n").find((l) => l.startsWith("PARENT_RESULT "));
     const parent = line ? JSON.parse(line.slice("PARENT_RESULT ".length)) : undefined;
+    const called = fake.call as ToolCall | undefined;
     const result = lastResult(
-      fake.call?.name ?? "tool",
+      called?.name ?? "tool",
       `parent: ${JSON.stringify(parent)}\nstderr: ${r.stderr.slice(-4000)}`,
     );
     return { result, contained: parent?.contained };
