@@ -19,6 +19,7 @@ import type { ExecutionResult, Logger, MapItemStatus, Node, NodeResult, Observer
 import { MAP_INDEX_KEY } from "./types.js";
 import { itemKeyOf, mapLimits, mapPathSegments } from "./map-spec.js";
 import { checkOutputContract, contractFailureMessage } from "./output-contract.js";
+import type { SpendTally } from "./budget.js";
 
 /** One child of one map visit. */
 export interface ChildRunRef {
@@ -66,6 +67,18 @@ export function childRef(
     itemsHash,
     workflowHash,
   };
+}
+
+/** The refs of a map visit's children, in input order. */
+export function childRefs(
+  parentRun: string,
+  node: string,
+  iteration: number,
+  keys: string[],
+  itemsHash = "",
+  workflowHash = "",
+): ChildRunRef[] {
+  return keys.map((k, i) => childRef(parentRun, node, iteration, k, i, itemsHash, workflowHash));
 }
 
 /** A generation's run id: the logical id and the generation number. */
@@ -278,6 +291,8 @@ export interface MapVisit {
   concurrency: number;
   /** The parent run's signal. */
   signal?: AbortSignal;
+  /** The spend the children share (#575): admission stops at its cap, and a crossing aborts every child. */
+  tally?: SpendTally;
   logger: Logger;
 }
 
@@ -310,7 +325,7 @@ export async function runMap(v: MapVisit): Promise<NodeResult> {
     stopping = true;
     mapAbort.abort(new Error(`map ${v.nodeId} stopping: ${firstFailure}`));
   };
-  const runSignals = v.signal ? [mapAbort.signal, v.signal] : [mapAbort.signal];
+  const runSignals = [mapAbort.signal, ...(v.signal ? [v.signal] : []), ...(v.tally ? [v.tally.signal] : [])];
 
   const limit = pLimit(Math.max(1, v.concurrency));
   const task = async (i: number): Promise<void> => {
@@ -320,6 +335,11 @@ export async function runMap(v: MapVisit): Promise<NodeResult> {
         status: "cancelled",
         error: stopping ? "not started: the map was stopping" : "the run was aborted",
       };
+      return;
+    }
+    // Admission (#575): no child starts once the shared spend reached the cap.
+    if (v.tally && (v.tally.breach || v.tally.exhausted())) {
+      outcomes[i] = { status: "cancelled", error: "not started: the run budget is spent" };
       return;
     }
     const ref = childRef(

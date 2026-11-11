@@ -63,7 +63,16 @@ import { asClaude } from "./harness/compat.js";
 import { budgetGate, isToolClass, policyGate, resolveHarnessPolicy } from "./harness/policy.js";
 import type { HarnessPolicyMode } from "./harness/policy.js";
 import type { AgentHarness, HarnessRunResult } from "./harness/types.js";
-import { BudgetGuard, BudgetRefusal, describeOverrun, minLimits, spendOf, toLimits } from "./budget.js";
+import {
+  BudgetGuard,
+  BudgetRefusal,
+  describeOverrun,
+  hasLimits,
+  minLimits,
+  spendOf,
+  toLimits,
+  type SpendTally,
+} from "./budget.js";
 import type { SpendKind } from "./budget.js";
 import { createRunDecider, wantsDecider } from "./decider.js";
 import type { DeciderOperatorConfig, RunDecider } from "./decider.js";
@@ -83,7 +92,7 @@ import {
 } from "./safe-outputs.js";
 import { JournalMismatchError, JournalWriteError, type ExecutionJournal, type JournalReplay } from "./journal.js";
 import { childWorkflowOf, isMapNode, mapLimits, withMapOutputs } from "./map-spec.js";
-import { prepareMap, runMap, type ChildRunHost, type PreparedMap } from "./map.js";
+import { childRefs, prepareMap, runMap, type ChildRunHost, type PreparedMap } from "./map.js";
 import {
   COUNT_OF_KEYWORD,
   checkOutputContract,
@@ -189,6 +198,11 @@ export interface ExecuteOptions {
    * `createJournalChildHost` / `createMemoryChildHost` in `child-host.ts`.
    */
   children?: ChildRunHost;
+  /**
+   * @internal A map child's run (#575): the spend its map's children share.
+   * Set by the executor for each child; never by a caller.
+   */
+  spendTally?: SpendTally;
   /**
    * Operator config for the decision model (#357): where it lives and its
    * key. Only nodes with `route_by: decider` consult it. `false` turns it off
@@ -326,7 +340,10 @@ async function executeRun(
   const runInput = input && typeof input === "object" ? (input as Record<string, unknown>) : undefined;
   // Spend budgets (#449): the run ceiling is the lower of the workflow's
   // `budget` and the caller's (`--max-tokens`, `--max-cost`).
-  const budgetGuard = new BudgetGuard(minLimits(toLimits(workflow.budget), toLimits(options.budget)));
+  const budgetGuard = new BudgetGuard(
+    minLimits(toLimits(workflow.budget), toLimits(options.budget)),
+    options.spendTally,
+  );
   // The executor's own completions (judge, route, retry reflection, safe-output
   // screen) report usage into the same guard as node runs, under their kind,
   // and into the journal so a resume keeps them. Every call passes a gate
@@ -608,6 +625,15 @@ async function executeRun(
     // Resume (#363): a visit an earlier attempt finished is replayed from the journal, not re-run.
     const replay: JournalReplay | undefined = journal?.replay(currentId, iteration);
     if (replay?.kind === "complete") {
+      // A finished map visit (#575): its children's journaled spend is this run's too.
+      if (isMapNode(node) && options.children?.spent) {
+        const order = (replay.result.data as { order?: unknown }).order;
+        const keys = Array.isArray(order) ? order.filter((k): k is string => typeof k === "string") : [];
+        budgetGuard.absorb({
+          node: options.children.spent(childRefs(options.children.runId, currentId, iteration, keys)),
+        });
+        syncSpend();
+      }
       results.set(currentId, replay.result);
       trace.steps.push({ node: currentId, status: replay.result.status, iteration });
       safeObserve(observer, { type: "node:exit", node: currentId, result: replay.result }, logger);
@@ -691,8 +717,28 @@ async function executeRun(
     }
 
     if (mapPrep) {
-      // A map visit (#575): every item as a complete, read-only child run.
-      const result: NodeResult = mapPrep.ok
+      // A map visit (#575): every item as a complete, read-only child run, over
+      // one spend tally seeded with the run's spend and every earlier generation's.
+      const host = options.children!;
+      const tally = budgetGuard.shareWithChildren();
+      if (mapPrep.ok && host.spent) {
+        const reg = mapPrep.registration;
+        tally.seed(
+          host.spent(childRefs(host.runId, currentId, iteration, mapPrep.keys, reg.items_hash, reg.workflow_hash)),
+        );
+      }
+      const budgeted = hasLimits(tally.limits);
+      const declaredConcurrency = mapLimits(node).concurrency;
+      // Strict policy: admission is checked against settled spend before each child, so one at a time.
+      const serial = budgeted && harnessPolicy === "strict";
+      const concurrentWarning =
+        budgeted && !serial && declaredConcurrency > 1
+          ? `budget_concurrent: map node "${currentId}" runs up to ${declaredConcurrency} children at once under a ` +
+            `run budget; the cap is checked when each child starts and on live reports, so concurrent children ` +
+            `can overrun it (strict harness policy runs them one at a time)`
+          : undefined;
+      if (concurrentWarning) logger.warn(`  ${concurrentWarning}`, { node: currentId });
+      let result: NodeResult = mapPrep.ok
         ? await runMap({
             nodeId: currentId,
             node,
@@ -711,8 +757,10 @@ async function executeRun(
                 signal: exec.signal,
                 budget: node.item_budget,
                 children: undefined,
+                spendTally: tally,
               }),
-            concurrency: mapLimits(node).concurrency,
+            concurrency: serial ? 1 : declaredConcurrency,
+            tally,
             ...(signal ? { signal } : {}),
             logger,
           })
@@ -721,6 +769,33 @@ async function executeRun(
             data: { error: `map node "${currentId}" ${mapPrep.error}` },
             toolCalls: [],
           };
+      // The children's spend is the run's: later nodes and the receipt see it.
+      budgetGuard.absorb(tally.children);
+      syncSpend();
+      const spentByChildren = tally.childTotal;
+      if (spentByChildren.tokens > 0 || spentByChildren.costUsd > 0) {
+        result = { ...result, usage: { inputTokens: spentByChildren.tokens, costUsd: spentByChildren.costUsd } };
+      }
+      // A crossing fails the map; a cap reached exactly only explains a map that failed for it.
+      const capped = mapPrep.ok
+        ? (tally.breach ?? (result.status === "failed" ? tally.exhausted() : undefined))
+        : undefined;
+      if (capped) {
+        const error = describeOverrun(capped, currentId);
+        const prior = (result.data as Record<string, unknown>).error;
+        result = {
+          ...result,
+          status: "failed",
+          data: {
+            ...result.data,
+            error: tally.breach ? error : (prior ?? error),
+            budget_error: error,
+            budget_exceeded: true,
+          },
+          budget: capped,
+        };
+      }
+      if (concurrentWarning) result = { ...result, degraded: [concurrentWarning] };
       // The run itself was aborted: stop like any other node would.
       throwIfAborted(signal);
       results.set(currentId, result);
@@ -989,7 +1064,7 @@ async function executeRun(
       budgetOn && options.harness
         ? budgetGate(
             options.harness.capabilities,
-            minLimits(nodeBudget.limits, budgetGuard.runLimits),
+            minLimits(nodeBudget.limits, budgetGuard.ceiling),
             permissions.strict || harnessPolicy === "strict",
           )
         : undefined;
