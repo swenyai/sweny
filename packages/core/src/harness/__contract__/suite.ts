@@ -9,7 +9,7 @@
  *
  * Each case passes, or is skipped only where the adapter's declared
  * `capabilities` say the opinion is not native (the skip must match the
- * declaration). Twenty-four cases, one `it` each, so a report reads "24 passed".
+ * declaration). Twenty-five cases, one `it` each, so a report reads "25 passed".
  * Cases 16 to 18 (#365) prove the node policy reaches the agent, which safe
  * outputs depend on. Case 19 (#442) proves a staged run cannot push through
  * the env it hands the agent. Case 20 (#449) proves live usage reaches
@@ -20,7 +20,9 @@
  * harness (natively or through the process wrapper) can enforce it, and is
  * reported, or refused under strict, where it cannot. Case 24 proves a
  * completion's usage reaches `complete()`'s `onUsage` once, failed or not, and
- * that a hook that throws never changes the completion's result.
+ * that a hook that throws never changes the completion's result. Case 25
+ * (#608) proves a write node gets only its policy's built-ins (a subagent only
+ * through `policy.allow`), or the harness reports that it cannot limit them.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -133,6 +135,7 @@ export const CONTRACT_CASE_NAMES = [
   "22 checkout token: a persisted git credential is unreadable to read-only and staged nodes where enforceable, else degraded or refused",
   "23 staged MCP: a staged write node loads no injected or skill MCP server, only sweny's own tool channel",
   "24 completion usage: complete() reports usage once, before failure checks, and a throwing hook never changes the result",
+  "25 builtin allow-list: a write node gets only its policy's built-ins, a subagent only by policy.allow, or the gap is reported",
 ] as const;
 
 export interface ContractSuiteOptions {
@@ -996,6 +999,59 @@ export function runContractSuite(
         expect(await coreEvaluate(h, { question: "Which?", context: {}, choices, onUsage: throwing })).toBe("b");
         expect(fakes.captured().invocations).toBe(before + 1);
         expect(hookCalls).toBe(2);
+      },
+
+      // 25 (#608): Claude Code hands every node an explicit built-in list
+      // (#606). Every harness that can does the same: read tools, the shell,
+      // write, edit and net classes, a subagent only when policy.allow names
+      // it, and nothing outside every class. One that cannot says so: a
+      // deny-list harness reports it, one with neither is unenforced and strict
+      // refuses the node before the agent starts.
+      async () => {
+        const { h } = await fresh();
+        const caps = h.capabilities;
+        const write: NodePolicy = { readOnly: false, deny: [], egress: [], strict: false };
+        const gaps = (d: string[]) => d.filter((x) => x.startsWith("builtin allow-list"));
+
+        fakes.script(DONE);
+        const r = await h.run(req({ policy: write }));
+        const cap = fakes.captured();
+        if (caps.builtinAllow === "native") {
+          expect(cap.extraBuiltins, "the agent got an explicit list with nothing outside the policy").toEqual([]);
+          expect(gaps(r.degraded)).toEqual([]);
+        } else {
+          expect(gaps(r.degraded), "a harness with no allow-list reports it").toHaveLength(1);
+        }
+        // Subagents are off by default wherever the harness can switch them off.
+        if (nativeDenyClasses(caps).includes("subagent")) {
+          expect(cap.allows("subagent"), "no subagent by default").toBe(false);
+        }
+
+        // The opt-in reaches the agent where the harness has a subagent tool, and deny still wins.
+        fakes.script(DONE);
+        const opted = await h.run(req({ policy: { ...write, allow: ["subagent"] } }));
+        if (caps.builtinClasses?.includes("subagent")) {
+          expect(fakes.captured().allows("subagent"), "allow: [subagent]").toBe(true);
+          expect(opted.degraded.filter((d) => d.startsWith("allow "))).toEqual([]);
+        } else if (caps.builtinClasses !== undefined) {
+          expect(opted.degraded).toContain("allow [subagent]: harness has no built-in tool of this class");
+        }
+        if (nativeDenyClasses(caps).includes("subagent")) {
+          fakes.script(DONE);
+          await h.run(req({ policy: { ...write, allow: ["subagent"], deny: ["subagent"] } }));
+          expect(fakes.captured().allows("subagent"), "deny wins over allow").toBe(false);
+        }
+
+        fakes.script(DONE);
+        const before = fakes.captured().invocations;
+        const strict = await h.run(req({ policy: { ...write, strict: true } }));
+        if (caps.builtinAllow === undefined) {
+          expect(strict.status, "unenforced: strict refuses").toBe("failed");
+          expect(String(strict.data.error)).toMatch(/builtin allow-list/);
+          expect(fakes.captured().invocations, "agent not started").toBe(before);
+        } else {
+          expect(String(strict.data.error ?? ""), "never refused for the allow-list").not.toMatch(/builtin allow-list/);
+        }
       },
     ];
 

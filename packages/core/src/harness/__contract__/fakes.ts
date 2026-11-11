@@ -62,6 +62,13 @@ export interface FakeCapture {
   shellConfinedReadOnly?: boolean;
   /** All built-in tools disabled (classification calls). */
   builtinToolsDisabled: boolean;
+  /**
+   * #608: built-in tools the agent would have outside the read tools and every
+   * portable class (agent messaging, scheduling, worktrees, ...), by the
+   * agent's own names. `undefined`: sweny handed the agent no allow-list, so it
+   * keeps whatever its own defaults are, and the fake cannot say what they are.
+   */
+  extraBuiltins?: string[];
   maxTurns?: number;
   model?: string;
   /** The JSON schema the harness asked the agent to enforce natively. */
@@ -108,10 +115,13 @@ const CLAUDE_TOOLS_BY_CLASS: Record<ToolClass, string[]> = {
   shell: ["Bash"],
   write: ["Write", "NotebookEdit"],
   edit: ["Edit", "MultiEdit"],
-  // WebSearch is deliberately left available in dry runs; only fetch is net-write-capable.
-  net: ["WebFetch"],
+  // A web query is an egress channel too (#608): read-only nodes get neither.
+  net: ["WebFetch", "WebSearch"],
   subagent: ["Task", "Agent"],
 };
+
+/** Claude Code built-ins that only read the checkout, plus the deferred-tool loader. */
+const CLAUDE_READ_TOOLS = ["Read", "Grep", "Glob", "ToolSearch"];
 
 function emptyCapture(): FakeCapture {
   return {
@@ -209,6 +219,9 @@ export function createClaudeSdkFake(): ClaudeSdkFake {
     for (const s of bridgeSocketsIn(o.mcpServers)) bridgeDirs.add(path.dirname(s));
     const disallowed: string[] = Array.isArray(o.disallowedTools) ? o.disallowedTools : [];
     const builtinToolsDisabled = Array.isArray(o.tools) && o.tools.length === 0;
+    // SDK `tools`: the base set of built-ins (absent: the CLI's full default preset).
+    const listed: string[] | undefined = Array.isArray(o.tools) ? o.tools : undefined;
+    const known = new Set([...CLAUDE_READ_TOOLS, ...Object.values(CLAUDE_TOOLS_BY_CLASS).flat()]);
     const loaded = Object.keys(o.mcpServers ?? {});
     // Without strictMcpConfig the SDK also loads the user's own MCP config.
     if (o.strictMcpConfig !== true) loaded.push(AMBIENT_MCP_CANARY);
@@ -221,7 +234,9 @@ export function createClaudeSdkFake(): ClaudeSdkFake {
       nativeDisallowed: [...disallowed],
       builtinToolsDisabled,
       allows: (c: ToolClass) =>
-        !builtinToolsDisabled && CLAUDE_TOOLS_BY_CLASS[c].some((name) => !disallowed.includes(name)),
+        !builtinToolsDisabled &&
+        CLAUDE_TOOLS_BY_CLASS[c].some((name) => !disallowed.includes(name) && (!listed || listed.includes(name))),
+      extraBuiltins: listed?.filter((t) => !known.has(t)),
       // Read, Grep and Glob honor a `Read(//abs)` deny rule; Bash only inside the
       // SDK sandbox, whose filesystem denyRead must name the file too.
       unreadable: (p: string) =>
@@ -575,6 +590,9 @@ export function createPiProcessFake(): PiProcessFake {
       }
     };
     const disabled = (["shell", "write", "edit", "net", "subagent"] as ToolClass[]).every((k) => !allows(k));
+    // pi 0.99.2's built-ins (core/tools/index.js allToolNames) and the MCP extension's tools.
+    const piKnown = new Set(["read", "grep", "find", "ls", "bash", "powershell", "edit", "write"]);
+    const mcpOwn = (t: string) => t.startsWith("mcp__") || /^(list|read)_mcp_resource/.test(t);
     return {
       invocations,
       prompt: c.prompt,
@@ -583,6 +601,8 @@ export function createPiProcessFake(): PiProcessFake {
       nativeDisallowed: [],
       allows,
       builtinToolsDisabled: disabled,
+      // Any other extension can register any tool, so nothing can be said then.
+      extraBuiltins: c.otherExtensionsLoaded ? undefined : c.activeTools.filter((t) => !piKnown.has(t) && !mcpOwn(t)),
       maxTurns: undefined,
       model: c.model,
       structuredSchema: undefined,

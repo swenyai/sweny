@@ -146,6 +146,33 @@ describe("Claude Code built-in tool allow-list", () => {
     expect(mod.CLAUDE_WRITE_BUILTIN_TOOLS).not.toContain("Agent");
   });
 
+  // #608: permissions.allow is the one opt-in, the same on every harness.
+  it("a write node that allows subagent gets Task and Agent, and nothing else extra", async () => {
+    const opts = await optionsFor({ policy: policy({ allow: ["subagent"] }) });
+    expect(opts.tools).toEqual([...mod.CLAUDE_WRITE_BUILTIN_TOOLS, "Task", "Agent"]);
+    for (const t of NEVER) expect(opts.tools).not.toContain(t);
+  });
+
+  it("deny wins over allow, and a read-only node ignores allow", async () => {
+    const denied = await optionsFor({ policy: policy({ allow: ["subagent"], deny: ["subagent"] }) });
+    expect(denied.tools).not.toContain("Task");
+    expect(denied.tools).not.toContain("Agent");
+    const named = await optionsFor({ policy: policy({ allow: ["subagent"], nativeDeny: ["Agent"] }) });
+    expect(named.tools).toContain("Task");
+    expect(named.tools).not.toContain("Agent");
+    const ro = await optionsFor({ policy: policy({ readOnly: true, allow: ["subagent"] }) });
+    expect(ro.tools).toEqual(["Read", "Grep", "Glob"]);
+  });
+
+  it("claudeCodeBuiltinTools adds an allowed class's tools to the write list only", () => {
+    expect(mod.claudeCodeBuiltinTools({ readOnly: false, allow: ["subagent"] })).toEqual([
+      ...mod.CLAUDE_WRITE_BUILTIN_TOOLS,
+      "Task",
+      "Agent",
+    ]);
+    expect(mod.claudeCodeBuiltinTools({ readOnly: true, allow: ["subagent"] })).toEqual(["Read", "Grep", "Glob"]);
+  });
+
   it("a request with no policy at all gets the write list, never the full preset", async () => {
     const opts = await optionsFor({});
     expect(opts.tools).toEqual(mod.claudeCodeBuiltinTools({ readOnly: false }));
