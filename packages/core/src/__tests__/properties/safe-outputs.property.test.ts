@@ -35,6 +35,9 @@ const TOOL_FOR: Record<SafeOutputType, string> = {
   pr: "github_create_pr",
   label: "github_add_labels",
   issue_state: "github_set_issue_state",
+  // Not generated below (TYPES): Slack and email go through other skills (#576).
+  slack_message: "slack_send_message",
+  email: "notify_email",
 };
 
 interface Call {

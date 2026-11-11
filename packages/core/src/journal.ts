@@ -122,6 +122,14 @@ import { resolveNodePermissions } from "./node-policy.js";
 import { effectiveSpecVersion } from "./migrations.js";
 import { spendOf, type SeedSpend, type Spend, type SpendKind } from "./budget.js";
 import type { DeciderCounters } from "./decider.js";
+import {
+  BUNDLES_DIR,
+  BUNDLE_VERSION,
+  writeBundle,
+  type ApprovalBundle,
+  type Proposal,
+  type ProposedWrite,
+} from "./approval-bundle.js";
 
 /**
  * v3: each record's HMAC chains the run id and the previous record's HMAC.
@@ -1685,7 +1693,11 @@ export function markerToken(key: string): string {
   return `swenyk${key.slice(0, 24)}`;
 }
 
-function withMarker(toolName: string, args: unknown, key: string): unknown {
+/**
+ * `args` with the idempotency marker appended to the body field the tool
+ * carries (GitHub and Linear writes); any other tool's args unchanged.
+ */
+export function withMarker(toolName: string, args: unknown, key: string): unknown {
   const field = MARKER_FIELD[toolName];
   if (!field || !args || typeof args !== "object") return args;
   const a = args as Record<string, unknown>;
@@ -1939,12 +1951,27 @@ export interface ExecutionJournal {
   meter?(kind: Exclude<SpendKind, "node">, node: string, iteration: number, usage: NodeUsage): void;
   /** The visit's agent ran without an enforced sandbox: recorded so a resume can say so. */
   uncontained?(node: string, iteration: number): void;
+  /**
+   * Approval mode (#576): freeze one visit's writes into a bundle in the run's
+   * private dir, markers included, and return its digest. Throws when the
+   * bundle cannot be written; nothing is sent either way.
+   */
+  propose?(node: string, iteration: number, writes: ProposedWrite[], opts: ProposeOptions): string;
   /** Spend earlier attempts of this run already journaled (resume), by kind when known; the run budget starts from it. */
   priorSpend?(): SeedSpend | undefined;
   /** Receipt `degraded` entries this journal adds to the run (e.g. `journal_unsandboxed`). */
   degraded?(): string[];
   /** The decider state earlier attempts of this run journaled (resume); undefined otherwise. */
   deciderResume?(): JournalDeciderState | undefined;
+}
+
+/** What a bundle carries besides its writes. */
+export interface ProposeOptions {
+  /** Workflow id, for the printout. */
+  workflow: string;
+  /** Bundle lifetime in ms from the visit's checkpoint. */
+  expiresMs: number;
+  approvers?: string[];
 }
 
 /** Test seams: a throw simulates the process dying at that point of an append. */
@@ -2112,6 +2139,8 @@ export class RunJournal implements ExecutionJournal {
   private lastUsage = new Map<string, { tokens: number; costUsd: number }>();
   /** Visits already recorded as run without an enforced sandbox. */
   private uncontainedVisits = new Set<string>();
+  /** When each visit checkpointed in this attempt: a bundle's `created_at` (#576). */
+  private checkpointAt = new Map<string, string>();
 
   private constructor(opts: RunJournalOptions, resume?: ResumeJournalOptions) {
     this.opts = opts;
@@ -2175,9 +2204,10 @@ export class RunJournal implements ExecutionJournal {
     throw err;
   }
 
-  private append(type: string, fields: Record<string, unknown>): void {
+  /** Append one record; returns its `at` (empty when a fault seam already killed the run). */
+  private append(type: string, fields: Record<string, unknown>): string {
     if (this.failure) throw this.failure;
-    if (this.killed) return;
+    if (this.killed) return "";
     if (!this.key) return this.fail("no signing key for this run");
     const body: Record<string, unknown> = {
       v: JOURNAL_SCHEMA_VERSION,
@@ -2222,6 +2252,7 @@ export class RunJournal implements ExecutionJournal {
     }
     this.seq++;
     this.prev = h;
+    return body.at as string;
   }
 
   private closeFd(): void {
@@ -2393,7 +2424,7 @@ export class RunJournal implements ExecutionJournal {
 
   checkpoint(node: string, iteration: number, cp: JournalCheckpoint): void {
     if (this.resume?.plan.checkpoints.has(visitKey(node, iteration))) return;
-    this.append("node:checkpoint", {
+    const at = this.append("node:checkpoint", {
       node,
       iteration,
       result: this.clean(journalResult(cp.result)),
@@ -2401,6 +2432,34 @@ export class RunJournal implements ExecutionJournal {
       agent_failed: cp.agentRunFailed,
       attempt: cp.attempt,
     });
+    if (at) this.checkpointAt.set(visitKey(node, iteration), at);
+  }
+
+  /**
+   * Freeze one visit's writes (#576). Each GitHub or Linear write gets its
+   * reconciliation marker now, from `hash(proposal, n)`, so the publisher
+   * sends the frozen bytes as they are. `created_at` is the visit's
+   * checkpoint time, so a resumed visit freezes the same bytes again.
+   */
+  propose(node: string, iteration: number, writes: ProposedWrite[], opts: ProposeOptions): string {
+    const k = visitKey(node, iteration);
+    const proposal: Proposal = { run: this.runId, node, iteration };
+    const journaled = this.resume?.plan.checkpoints.get(k)?.at;
+    const created = this.checkpointAt.get(k) ?? (typeof journaled === "string" ? journaled : new Date().toISOString());
+    const bundle: ApprovalBundle = {
+      bundle: BUNDLE_VERSION,
+      proposal,
+      workflow: opts.workflow,
+      created_at: created,
+      expires_at: new Date(Date.parse(created) + opts.expiresMs).toISOString(),
+      ...(opts.approvers?.length ? { approvers: [...opts.approvers] } : {}),
+      writes: writes.map((w, n) => ({
+        n,
+        ...w,
+        args: withMarker(w.tool, w.args, canonicalHash({ proposal, n })) as Record<string, unknown>,
+      })),
+    };
+    return writeBundle(path.join(this.dir, BUNDLES_DIR), bundle);
   }
 
   nodeEnd(node: string, iteration: number, result: NodeResult, writeState: WriteStageState): void {
@@ -2652,6 +2711,7 @@ export const NODE_RESULT_JOURNAL = {
   degraded: { journal: "verbatim" },
   policy: { journal: "verbatim" }, // booleans and a mode; the run receipt reads it for replayed nodes
   outputs: { journal: "verbatim" },
+  intents: { journal: "verbatim" }, // a map child's write requests (#576): its map re-plans them on replay too
   budget: { journal: "verbatim" }, // a replayed node that crossed a budget must still be the node that stopped the run
   contained: {
     journal: "excluded",

@@ -78,8 +78,8 @@ export interface RunPolicy {
   envScope?: boolean;
   /** Sandbox facts. `started` is false when the mode asked for one but the host could not. */
   sandbox?: { mode: "off" | "auto" | "strict"; started: boolean };
-  /** Safe outputs staged (previewed) and applied (written), summed over nodes. */
-  outputs?: { staged: number; applied: number };
+  /** Safe outputs staged (previewed) and applied (written), summed over nodes; `pending`: waiting for approval (#576). */
+  outputs?: { staged: number; applied: number; pending?: number };
 }
 
 /** The short key of a `degraded` entry: the text before its first colon. */
@@ -107,6 +107,7 @@ export function summarizeRun(
   const policy: RunPolicy = {};
   let staged = 0;
   let applied = 0;
+  let pending = 0;
   const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
   for (const [nodeId, r] of results) {
@@ -123,6 +124,7 @@ export function summarizeRun(
     for (const o of r.outputs ?? []) {
       if (o.status === "staged") staged++;
       else if (o.status === "applied") applied++;
+      else if (o.status === "pending") pending++;
     }
     if (r.status === "success") nodesOk++;
     else if (r.status === "skipped") nodesSkipped++;
@@ -138,7 +140,9 @@ export function summarizeRun(
     }
   }
 
-  if (staged > 0 || applied > 0) policy.outputs = { staged, applied };
+  if (staged > 0 || applied > 0 || pending > 0) {
+    policy.outputs = { staged, applied, ...(pending > 0 ? { pending } : {}) };
+  }
 
   // The executor's own completions (judge, route, ...) are on no node result,
   // and a node result holds only its last attempt. With the split present the
@@ -203,6 +207,7 @@ export function policyParts(p: RunPolicy | undefined): string[] {
     const n = (count: number) => `${count} ${count === 1 ? "output" : "outputs"}`;
     if (p.outputs.staged > 0) parts.push(`${n(p.outputs.staged)} staged`);
     if (p.outputs.applied > 0) parts.push(`${n(p.outputs.applied)} applied`);
+    if ((p.outputs.pending ?? 0) > 0) parts.push(`${n(p.outputs.pending!)} awaiting approval (sweny publish)`);
   }
   return parts;
 }

@@ -28,6 +28,7 @@ describe("executor.ts is skill-neutral", () => {
 
   it("hands every tool the same run context", () => {
     expect(code).toContain("toolRunContext(workflow.id, runEnv)");
-    expect(code.match(/\.\.\.runToolContext/g)).toHaveLength(2);
+    // The node write stage, the map's child write stage (#576), and the agent's own tool calls.
+    expect(code.match(/\.\.\.runToolContext/g)).toHaveLength(3);
   });
 });

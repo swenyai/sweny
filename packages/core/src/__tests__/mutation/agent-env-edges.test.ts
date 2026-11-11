@@ -858,6 +858,8 @@ describe("skill credentials", () => {
     "DISCORD_WEBHOOK_URL",
     "TEAMS_WEBHOOK_URL",
     "SMTP_URL",
+    "SMTP_FROM",
+    "SMTP_ALLOWED_RECIPIENTS",
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
     "SUPABASE_ALLOWED_TABLES",

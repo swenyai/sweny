@@ -40,8 +40,9 @@ import type {
   ToolCall,
   RouteRung,
   MapCounts,
+  SafeOutputReceipt,
 } from "./types.js";
-import { consoleLogger } from "./types.js";
+import { SAFE_OUTPUT_APPROVAL_EXPIRES_DEFAULT, consoleLogger } from "./types.js";
 import { resolveSources } from "./source-resolver.js";
 import { evaluateAll, aggregateEval } from "./eval/index.js";
 import type { AggregateOutcome, ToolAliases } from "./eval/index.js";
@@ -84,6 +85,7 @@ import {
   applySafeOutputs,
   createEmitOutputTool,
   createWriteStageState,
+  parseDuration,
   resolveActor,
   safeOutputsInstruction,
   unresolvedOutputs,
@@ -91,6 +93,7 @@ import {
   type ActorInfo,
   type SafeOutputIntent,
 } from "./safe-outputs.js";
+import type { ProposedWrite } from "./approval-bundle.js";
 import { JournalMismatchError, JournalWriteError, type ExecutionJournal, type JournalReplay } from "./journal.js";
 import { childWorkflowOf, isMapNode, mapLimits, withMapOutputs } from "./map-spec.js";
 import { childRefs, prepareMap, runMap, type ChildRunHost, type PreparedMap } from "./map.js";
@@ -102,6 +105,16 @@ import {
   listContractProblems,
   outputContractProblems,
 } from "./output-contract.js";
+
+/** One map item's write requests from one child node (#576), planned by the map. */
+interface ItemWrites {
+  key: string;
+  index: number;
+  node: string;
+  intents: SafeOutputIntent[];
+  /** The child's run input (`{ item, item_key, ...with }`): what its `{ input: name }` pins resolve against. */
+  input: Record<string, unknown>;
+}
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -204,6 +217,12 @@ export interface ExecuteOptions {
    * Set by the executor for each child; never by a caller.
    */
   spendTally?: SpendTally;
+  /**
+   * @internal A map child's run (#576): nodes with `outputs` record their
+   * write requests on the node result (`intents`) instead of applying them;
+   * the map re-plans them per item. Set by the executor; never by a caller.
+   */
+  deferOutputs?: boolean;
   /**
    * Operator config for the decision model (#357): where it lives and its
    * key. Only nodes with `route_by: decider` consult it. `false` turns it off
@@ -334,8 +353,21 @@ async function executeRun(
   // triggering actor, resolved once per run.
   const writeState = createWriteStageState();
   const stageOutputs = dryRun || options.stageOutputs === true || workflow.safe_outputs?.staged === true;
+  const approval = workflow.safe_outputs?.approval;
+  // Approval mode (#576) writes nothing during the run, so its nodes hold no direct write
+  // either: write tools, skill MCP servers, pushes and agent_env grants are withheld exactly
+  // as in a staged run. Only the write stage's frozen bundle can write, after approval.
+  const withholdWrites = stageOutputs || approval?.required === true;
+  const withheldWhy = dryRun ? "dry run" : stageOutputs ? "staged" : "approval required";
   const runEnv = options.env ?? process.env;
-  const usesOutputs = Object.values(workflow.nodes).some((n) => (n.outputs?.length ?? 0) > 0);
+  const usesOutputs =
+    Object.values(workflow.nodes).some((n) => (n.outputs?.length ?? 0) > 0) ||
+    // A map child's write requests (#576) are planned here, under this run's actor.
+    Object.entries(workflow.nodes).some(
+      ([id, n]) =>
+        isMapNode(n) &&
+        Object.values(childWorkflowOf(workflow, id)?.nodes ?? {}).some((c) => (c.outputs?.length ?? 0) > 0),
+    );
   const actor: ActorInfo = usesOutputs ? resolveActor(runEnv, options.actor) : {};
   // The run input, for `number: { input }` issue pins on outputs.
   const runInput = input && typeof input === "object" ? (input as Record<string, unknown>) : undefined;
@@ -562,6 +594,109 @@ async function executeRun(
   const githubApiUrl = trustedEnvValue(runEnv, "GITHUB_API_URL") || undefined;
   // The run's identity and job-summary writer, the same for every tool, from the operator's env.
   const runToolContext = toolRunContext(workflow.id, runEnv);
+
+  // Approval mode (#576): where a visit's writes are frozen instead of sent.
+  const approvalFor = (
+    visit: string,
+    iteration: number,
+  ): { approval?: NonNullable<Parameters<typeof applySafeOutputs>[0]["approval"]> } => {
+    if (approval?.required !== true) return {};
+    if (!journal?.propose) return { approval: "unavailable" };
+    return {
+      approval: {
+        propose: (writes: ProposedWrite[]) =>
+          journal.propose!(visit, iteration, writes, {
+            workflow: workflow.id,
+            expiresMs: parseDuration(approval.expires ?? SAFE_OUTPUT_APPROVAL_EXPIRES_DEFAULT)!,
+            ...(approval.approvers ? { approvers: approval.approvers } : {}),
+          }),
+      },
+    };
+  };
+
+  /**
+   * A map visit's child write requests (#576), planned in item order. Each
+   * item is its own write node (`<map>[<key>]`), so its caps are its own; the
+   * run cap, dedupe and trust are the run's. In approval mode every item's
+   * writes go into one bundle for the map visit: one proposal per visit.
+   * There is no model screen for child writes: with `safe_outputs.screen` on
+   * they are vetoed (fail closed).
+   */
+  const stageChildWrites = async (
+    mapId: string,
+    iteration: number,
+    items: ItemWrites[],
+  ): Promise<{ receipts: SafeOutputReceipt[]; error?: string }> => {
+    const receipts: SafeOutputReceipt[] = [];
+    const frozen: ProposedWrite[] = [];
+    const pendingAt: number[] = [];
+    const visitApproval = approvalFor(mapId, iteration).approval;
+    const collect =
+      visitApproval && visitApproval !== "unavailable"
+        ? {
+            propose: (writes: ProposedWrite[]) => {
+              frozen.push(...writes);
+              return "";
+            },
+          }
+        : visitApproval;
+    const wrapped = journal ? journal.wrapWrites(mapId, iteration, skills) : skills;
+    for (const w of items) {
+      const childNode = childWorkflowOf(workflow, mapId)?.nodes[w.node];
+      const stage = await applySafeOutputs({
+        nodeId: `${mapId}[${w.key}]`,
+        declarations: childNode?.outputs ?? [],
+        intents: w.intents,
+        policy: workflow.safe_outputs,
+        nodeSkills: childNode?.skills ?? [],
+        skills: wrapped,
+        config,
+        env: runEnv,
+        actor,
+        staged: stageOutputs,
+        ...(collect ? { approval: collect } : {}),
+        cwd: resolveCwd,
+        pushBranch,
+        ...(githubApiUrl ? { githubApiUrl } : {}),
+        ...runToolContext,
+        state: writeState,
+        logger,
+        input: w.input,
+        ...(journal?.reconcile
+          ? {
+              reconcile: (sk: Skill, tool: string, args: unknown, ctx: ToolContext) =>
+                journal.reconcile!(mapId, iteration, sk, tool, args, ctx),
+            }
+          : {}),
+      });
+      for (const r of stage.receipts) {
+        if (r.status === "pending") pendingAt.push(receipts.length);
+        receipts.push({ ...r, item: w.key });
+      }
+      if (stage.error) {
+        // Nothing of this visit is frozen once one item's writes failed.
+        for (const i of pendingAt)
+          receipts[i] = { ...receipts[i], status: "skipped", reason: "an earlier write failed" };
+        return { receipts, error: `item "${w.key}": ${stage.error}` };
+      }
+    }
+    if (frozen.length > 0 && collect && collect !== "unavailable") {
+      let digest: string;
+      try {
+        digest = (visitApproval as { propose(writes: ProposedWrite[]): string }).propose(frozen);
+      } catch (err) {
+        for (const i of pendingAt) {
+          receipts[i] = { ...receipts[i], status: "failed", reason: "could not write the approval bundle" };
+        }
+        return {
+          receipts,
+          error: `could not write the approval bundle: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+      for (const i of pendingAt) receipts[i] = { ...receipts[i], digest };
+    }
+    return { receipts };
+  };
   const resolvedSources = await resolveSources(sourceMap, {
     cwd: resolveCwd,
     env: options.env ?? process.env,
@@ -721,6 +856,7 @@ async function executeRun(
       // A map visit (#575): every item as a complete, read-only child run, over
       // one spend tally seeded with the run's spend and every earlier generation's.
       const host = options.children!;
+      const itemWrites: ItemWrites[] = [];
       const tally = budgetGuard.shareWithChildren();
       if (mapPrep.ok && host.spent) {
         const reg = mapPrep.registration;
@@ -760,7 +896,10 @@ async function executeRun(
                 budget: node.item_budget,
                 children: undefined,
                 spendTally: tally,
+                deferOutputs: true,
               }),
+            onItemIntents: (key, index, childNode, childIntents, itemInput) =>
+              itemWrites.push({ key, index, node: childNode, intents: childIntents, input: itemInput }),
             concurrency: serial ? 1 : declaredConcurrency,
             tally,
             ...(signal ? { signal } : {}),
@@ -799,6 +938,33 @@ async function executeRun(
         };
       }
       if (concurrentWarning) result = { ...result, degraded: [concurrentWarning] };
+      // Child write requests (#576): planned here, item by item in input order, each item's caps its own.
+      if (itemWrites.length > 0) {
+        if (result.status === "success") {
+          const stage = await stageChildWrites(
+            currentId,
+            iteration,
+            itemWrites.sort((a, b) => a.index - b.index),
+          );
+          result = { ...result, outputs: stage.receipts };
+          if (stage.error) {
+            logger.warn(`  ${stage.error}`, { node: currentId });
+            result = { ...result, status: "failed", data: { ...result.data, error: stage.error } };
+          }
+        } else {
+          result = {
+            ...result,
+            outputs: itemWrites.flatMap((w) =>
+              w.intents.map((i) => ({
+                type: i.type,
+                status: "skipped" as const,
+                reason: "map did not succeed",
+                item: w.key,
+              })),
+            ),
+          };
+        }
+      }
       if (mapPrep.ok) {
         const counts = (result.data as { counts: MapCounts }).counts;
         safeObserve(
@@ -844,13 +1010,13 @@ async function executeRun(
     // A staged run (--stage, safe_outputs.staged) writes nothing either: its
     // write tools are withheld too, and the dispatcher below refuses any that
     // still reach a handler.
-    const readTools = readOnlyNode || stageOutputs ? filteredTools.filter(isReadTool) : filteredTools;
-    // A staged write node records what it lost, like a dry run.
-    const stagedWriteNode = stageOutputs && !readOnlyNode;
+    const readTools = readOnlyNode || withholdWrites ? filteredTools.filter(isReadTool) : filteredTools;
+    // A staged (or approval-mode) write node records what it lost, like a dry run.
+    const stagedWriteNode = withholdWrites && !readOnlyNode;
     const skippedWrites =
       dryRun || stagedWriteNode ? filteredTools.filter((t) => !isReadTool(t)).map((t) => t.name) : [];
     if (skippedWrites.length > 0) {
-      const why = dryRun ? "dry run" : "staged";
+      const why = withheldWhy;
       logger.info(`  ${why}: withheld write tools: ${skippedWrites.join(", ")}`, { node: currentId });
     } else if (readOnlyNode && readTools.length < filteredTools.length) {
       const withheld = filteredTools.filter((t) => !isReadTool(t)).map((t) => t.name);
@@ -958,7 +1124,7 @@ async function executeRun(
       ...t,
       handler: async (toolInput: any) => {
         safeObserve(observer, { type: "tool:call", node: currentId!, tool: t.name, input: toolInput }, logger);
-        guardStagedWrite(t, stageOutputs);
+        guardStagedWrite(t, withholdWrites, withheldWhy);
         const toolCtx: ToolContext = {
           config,
           logger,
@@ -1005,7 +1171,7 @@ async function executeRun(
     const instruction = dryRun
       ? `${dryRunNotice(skippedWrites)}\n\n---\n\n${nodeInstruction}`
       : skippedWrites.length > 0
-        ? `${stagedNotice(skippedWrites)}\n\n---\n\n${nodeInstruction}`
+        ? `${stagedNotice(skippedWrites, withheldWhy === "approval required")}\n\n---\n\n${nodeInstruction}`
         : nodeInstruction;
 
     // Run Claude on this node, with optional eval-failure retry loop.
@@ -1034,12 +1200,12 @@ async function executeRun(
     // withholds write tokens in this node's agent env (see withPushBlocked).
     // Skill credentials stay in sweny: the agent gets only what the node grants
     // with `agent_env`, never on a read-only node or in a staged run.
-    const granted = grantedAgentEnv(node.agent_env, { readOnly: readOnlyNode, staged: stageOutputs });
+    const granted = grantedAgentEnv(node.agent_env, { readOnly: readOnlyNode, staged: withholdWrites });
     if (granted.dropped) logger.warn(`  ${granted.dropped}`, { node: currentId });
     const agentAccess = {
       ...resolveAgentAccess(node.skills, skills, granted.grant),
       // A staged run loads no skill or external MCP server either: it may write.
-      ...(stageOutputs ? { noPush: true, noMcp: true } : {}),
+      ...(withholdWrites ? { noPush: true, noMcp: true } : {}),
     };
     // #365: a node or workflow that declares `permissions` or `outputs` gets
     // one portable policy, compiled by each adapter. The gate also runs here so
@@ -1199,7 +1365,7 @@ async function executeRun(
           timeoutMs,
           agentAccess,
           ...(nodePolicy ? { policy: nodePolicy } : {}),
-          ...(readOnlyNode || stageOutputs ? {} : { mcpServers: skillMcpServers }),
+          ...(readOnlyNode || withholdWrites ? {} : { mcpServers: skillMcpServers }),
           ...(readOnlyNode ? { readOnly: true } : {}),
           onUsage,
           onProgress: (message) => {
@@ -1517,7 +1683,11 @@ async function executeRun(
     // Safe outputs write stage (#365). Runs only after the agent finished and
     // every eval passed; deterministic checks first, an optional model screen
     // may veto, and only then does sweny call the skill's own write handler.
-    if (outputDecls.length > 0) {
+    if (outputDecls.length > 0 && options.deferOutputs === true) {
+      // A map child (#576): the requests go up to the map, which plans them per item.
+      if (result.status === "success" && !agentRunFailed && intents.length > 0)
+        result = { ...result, intents: [...intents] };
+    } else if (outputDecls.length > 0) {
       if (result.status === "success" && !agentRunFailed) {
         journal?.checkpoint(currentId, iteration, { result, intents, agentRunFailed, attempt });
         const stage = await applySafeOutputs({
@@ -1531,6 +1701,8 @@ async function executeRun(
           env: runEnv,
           actor,
           staged: stageOutputs,
+          // Approval mode (#576): the writes are frozen into a bundle in the run's private dir; nothing is sent.
+          ...approvalFor(visitId, iteration),
           cwd: resolveCwd,
           pushBranch,
           ...(githubApiUrl ? { githubApiUrl } : {}),
@@ -2281,9 +2453,10 @@ export function isReadTool(tool: Pick<Tool, "access">): boolean {
  * unclassified) tool handler runs, whatever reached the agent. Throws before
  * any side effect.
  */
-export function guardStagedWrite(tool: Pick<Tool, "name" | "access">, staged: boolean): void {
+export function guardStagedWrite(tool: Pick<Tool, "name" | "access">, staged: boolean, why = "staged"): void {
   if (staged && !isReadTool(tool)) {
-    throw new Error(`${tool.name} is a write tool and this run is staged: nothing was written`);
+    const run = why === "approval required" ? "this run waits for approval" : `this run is ${why}`;
+    throw new Error(`${tool.name} is a write tool and ${run}: nothing was written`);
   }
 }
 
@@ -2299,9 +2472,13 @@ function dryRunNotice(skippedWrites: string[]): string {
 }
 
 /** Instruction section prepended to a staged write node whose write tools were withheld. */
-function stagedNotice(skippedWrites: string[]): string {
+function stagedNotice(skippedWrites: string[], approval = false): string {
+  const head = approval
+    ? `## Approval required\n\nThis run's writes wait for a human's approval: nothing is written outside the workspace now. `
+    : `## Staged run\n\nThis run is staged: nothing is written outside the workspace. `;
   return (
-    `## Staged run\n\nThis run is staged: nothing is written outside the workspace. These write tools were ` +
+    head +
+    `These write tools were ` +
     `withheld from this step: ${skippedWrites.join(", ")}. Where this step would call one, describe ` +
     `exactly what it would have written instead.`
   );
