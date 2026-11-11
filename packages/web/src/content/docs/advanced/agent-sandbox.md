@@ -89,27 +89,49 @@ MCP servers that SWEny wires for a skill get their credentials explicitly, so th
 
 ## Sandbox
 
-In CI (`CI=true`) the default is `sandbox: auto`: the agent's shell commands run sandboxed whenever the host supports it (Claude Code's own sandbox; for pi, ACP agents and other agents without one, SWEny wraps the whole agent process in its process sandbox). Locally the default is `off`, so nothing changes on your laptop (private registries, docker, cargo and go keep working) unless you opt in. When sandboxed:
+The defaults:
+
+| Where | Default | Host cannot sandbox |
+|-------|---------|---------------------|
+| The `swenyai/sweny` GitHub Action (Linux, macOS) | `strict` | The node is refused, with the fix in the error |
+| The Action on Windows, and the CLI in any other CI (`CI=true`) | `auto` | Warns, runs unsandboxed |
+| Locally | `off` | Not sandboxed, so nothing changes on your laptop (private registries, docker, cargo and go keep working) |
+
+Sandboxed means Claude Code's shell commands run in its own sandbox, and Codex, pi and ACP agents run whole inside SWEny's process sandbox (`srt`). When sandboxed:
 
 - Network egress is limited to an allowlist: source hosting and package registries (`github.com`, `api.github.com`, `*.githubusercontent.com`, `registry.npmjs.org`, `pypi.org`, `proxy.golang.org`, `crates.io`, `rubygems.org`, ...), plus the provider hosts of the node's skills (`api.linear.app` for `linear`, `*.sentry.io` for `sentry`, `*.datadoghq.com` for `datadog`, ...), plus your `sandbox-allowed-domains`.
 - Commands cannot opt out of the sandbox.
 - The agent's own Anthropic credentials are unset inside sandboxed commands, and `~/.claude/.credentials.json` is unreadable.
+- On Linux the agent runs in its own PID namespace, so it cannot read the environment of the SWEny process (or any process outside the sandbox) through `/proc/<pid>/environ`.
 
-The sandbox needs macOS, or Linux with `bubblewrap` and `socat` installed and able to create user namespaces. The `swenyai/sweny` Action installs both on Linux runners for you. Elsewhere:
+### Why the Action is strict: `/proc`
 
-```bash
-sudo apt-get install -y bubblewrap socat
-```
+SWEny keeps skill credentials (`GITHUB_TOKEN`, `LINEAR_API_KEY`, ...) out of the agent's environment, but they are still in SWEny's own environment, and on Linux any process running as the same user can read another's starting environment from `/proc/<pid>/environ`. Env scoping cannot stop that; only the sandbox's PID namespace does. CI proves both sides on every pull request (`packages/core/src/harness/sandbox/proc-isolation.test.ts`, in the `sandbox-wrapper` job on a GitHub-hosted Ubuntu runner): a parent process holding a secret starts an agent with the secret withheld from the agent's env, and the agent tries its parent's `/proc/<pid>/environ`, every ancestor, and every `/proc` entry.
 
-Three modes:
+| Agent path | Unsandboxed (`off`, or `auto` on a host that cannot sandbox) | Sandboxed (`auto` or `strict` on a host that can) |
+|------------|--------------------------------------------------|-------------------------------------|
+| Claude Code (SDK sandbox), sweny's own harness | Reads the parent's secret | Cannot: the parent's pid does not exist in the agent's namespace, and no visible process holds the secret |
+| Process sandbox (`srt`: Codex, pi, ACP) | Reads the parent's secret | Cannot, same result |
+
+The test covers Linux. macOS has no `/proc`, and this test does not cover other ways a same-user process can read another's environment there.
+
+### Modes
 
 | Mode | Host supports the sandbox | Host does not |
 |------|---------------------------|---------------|
-| `auto` (default in CI) | Sandboxed | One loud warning naming what is missing, then runs **unsandboxed**. Unattended CI never breaks on a missing dependency. |
-| `strict` | Sandboxed | The node **fails closed** with the same message. Never runs unsandboxed. |
+| `strict` (default in the Action) | Sandboxed | The node **fails closed** with a message naming the fix and the opt-out. Never runs unsandboxed. |
+| `auto` (default in other CI) | Sandboxed | One loud warning naming what is missing, then runs **unsandboxed**: network, filesystem and `/proc` unrestricted. |
 | `off` (default locally) | Not sandboxed | Not sandboxed |
 
 Env scoping is controlled separately by `env-scope`. Untrusted-input fencing always applies.
+
+### Host requirements
+
+The sandbox needs macOS, or Linux with `bubblewrap` and `socat` installed and able to create user namespaces (the process sandbox also needs `ripgrep`). The Action installs them on Linux runners for you. Elsewhere:
+
+```bash
+sudo apt-get install -y bubblewrap socat ripgrep
+```
 
 On Ubuntu 23.10 and later, AppArmor can block the unprivileged user namespaces bubblewrap needs, and GitHub-hosted `ubuntu-24.04` runners do. Ubuntu 26.04 (GitHub's `ubuntu-26.04` image, which `ubuntu-latest` now runs) also loads the `bwrap-userns-restrict` AppArmor profile, which denies every capability to the processes bubblewrap starts, so the sandbox's seccomp helper fails with `apply-seccomp: write /proc/self/setgroups ... Permission denied`. On GitHub-hosted runners (ephemeral VMs) the Action relaxes both by default (`scripts/sandbox-userns.sh`), so agents are sandboxed there with no setup:
 
@@ -120,7 +142,32 @@ sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict   # only where the
 
 The profile unload works around [anthropics/sandbox-runtime#429](https://github.com/anthropics/sandbox-runtime/issues/429) and goes away once a fixed sandbox runtime is pinned.
 
-On self-hosted runners those settings belong to a persistent host, so the Action only changes them when you set `SWENY_SANDBOX: strict` in the step's `env`; otherwise `auto` warns and runs unsandboxed. `off` never touches them.
+### Self-hosted runners
+
+Same default: `strict`. Those settings belong to a persistent host, so the Action never changes them on its own there. Prepare the host once:
+
+1. Install `bubblewrap`, `socat` and `ripgrep`.
+2. On Ubuntu 23.10+, run the two commands above, and make them stick across reboots (a file in `/etc/sysctl.d/` for the sysctl; on 26.04, remove or disable the `bwrap-userns-restrict` profile).
+3. Check with `bwrap --ro-bind / / --dev /dev --proc /proc unshare --user --map-root-user true` as the runner's user. It exits 0 when the host can sandbox.
+
+Or set `SWENY_SANDBOX: strict` in the step's `env` to let the Action apply step 2 on each run (it needs passwordless `sudo`). On a host that cannot sandbox, the Action's dependency step warns with the fix, and the run refuses its first agent node; with `SWENY_SANDBOX: strict` set explicitly, the step itself fails.
+
+### Opting out
+
+To run agents unsandboxed in the Action, say so explicitly, and relax the harness policy too (under the Action's default `strict` harness policy, a node whose policy needs the sandbox, such as a staged write, is still refused):
+
+```yaml
+- uses: swenyai/sweny@v5
+  with:
+    workflow: triage
+    harness-policy: warn
+  env:
+    SWENY_SANDBOX: off      # or `sandbox: off` in .sweny.yml
+```
+
+`SWENY_SANDBOX: auto` keeps the old behavior: sandboxed when the host can, unsandboxed with a warning when it cannot. Unsandboxed, an agent can read SWEny's environment, skill credentials included, through `/proc` (see above).
+
+The Action's default travels as `SWENY_SANDBOX_DEFAULT=strict`, which `SWENY_SANDBOX` and `.sweny.yml` `sandbox:` override. A CLI older than this default (set with `cli-version`) ignores it and runs `auto`.
 
 :::note[Scope]
 The sandbox covers the agent's shell commands. SWEny's own skill tools run in the SWEny process, and MCP servers run outside the sandbox; both only receive the credentials wired for them.
@@ -136,7 +183,7 @@ Workflow input (issues, alerts, tickets), earlier steps' output, and `context:` 
 
 | `.sweny.yml` | Env var | Values | Default |
 |--------------|---------|--------|---------|
-| `sandbox` | `SWENY_SANDBOX` | `auto`, `strict`, `off` (see [Sandbox](#sandbox)) | `auto` in CI, `off` locally |
+| `sandbox` | `SWENY_SANDBOX` | `auto`, `strict`, `off` (see [Sandbox](#sandbox)) | `strict` in the GitHub Action (not Windows), `auto` in other CI, `off` locally |
 | `sandbox-allowed-domains` | `SWENY_SANDBOX_ALLOWED_DOMAINS` | List of hosts; `*.example.com` wildcards allowed | none |
 | `env-scope` | `SWENY_ENV_SCOPE` | `on`, `off` | `on` in CI, `off` locally |
 | `env-passthrough` | `SWENY_ENV_PASSTHROUGH` | List of env var names; `"*"` inherits everything except skill credentials (not recommended) | none |

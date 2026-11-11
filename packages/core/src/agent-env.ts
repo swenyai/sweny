@@ -22,7 +22,8 @@
  * cli/config-file.ts):
  *   SWENY_ENV_SCOPE                / env-scope                on | off (default: on in CI, off locally)
  *   SWENY_ENV_PASSTHROUGH          / env-passthrough          extra var names ("*" = inherit all)
- *   SWENY_SANDBOX                  / sandbox                  auto | strict | off (default: auto in CI, off locally)
+ *   SWENY_SANDBOX                  / sandbox                  auto | strict | off (default: SWENY_SANDBOX_DEFAULT, else auto in CI, off locally)
+ *   SWENY_SANDBOX_DEFAULT                                     the default when neither is set; the GitHub Action sets strict
  *   SWENY_SANDBOX_ALLOWED_DOMAINS  / sandbox-allowed-domains  extra hosts for sandboxed commands
  */
 
@@ -1219,11 +1220,23 @@ export function resolveAgentAccess(
  */
 export type SandboxMode = "off" | "auto" | "strict";
 
+/** One sandbox mode value, or undefined when it is empty or not a mode. */
+function parseSandboxMode(v: string | undefined): SandboxMode | undefined {
+  const raw = (v ?? "").trim().toLowerCase();
+  if (raw === "off" || raw === "false" || raw === "0" || raw === "no") return "off";
+  if (raw === "strict" || raw === "on" || raw === "true" || raw === "1") return "strict";
+  if (raw === "auto") return "auto";
+  return undefined;
+}
+
 /**
  * Parse the sandbox mode from the explicit `mode` or `SWENY_SANDBOX`.
  * Accepts `off|false|0|no`, `auto`, `strict|on|true|1` (`on` is an alias for
- * `strict`). Unset or unknown (with a warning) uses the default: `auto` when
- * `CI` is truthy, `off` otherwise. An explicit value always wins.
+ * `strict`). Unset or unknown (with a warning) uses the default:
+ * `SWENY_SANDBOX_DEFAULT` when it is a mode (the GitHub Action sets `strict`,
+ * #599), else `auto` when `CI` is truthy, `off` otherwise. An explicit value
+ * always wins, so `.sweny.yml` `sandbox:` (copied into `SWENY_SANDBOX`) and
+ * `SWENY_SANDBOX` override the Action's default.
  */
 export function resolveSandboxMode(
   env: Record<string, string | undefined>,
@@ -1231,13 +1244,22 @@ export function resolveSandboxMode(
   logger?: Pick<Logger, "warn">,
 ): SandboxMode {
   const raw = (mode ?? env.SWENY_SANDBOX ?? "").trim().toLowerCase();
-  if (raw === "off" || raw === "false" || raw === "0" || raw === "no") return "off";
-  if (raw === "strict" || raw === "on" || raw === "true" || raw === "1") return "strict";
-  if (raw === "auto") return "auto";
-  const fallback: SandboxMode = truthy(env.CI) ? "auto" : "off";
+  const explicit = parseSandboxMode(raw);
+  if (explicit) return explicit;
+  const fallback: SandboxMode = parseSandboxMode(env.SWENY_SANDBOX_DEFAULT) ?? (truthy(env.CI) ? "auto" : "off");
   if (raw !== "") logger?.warn(`SWENY_SANDBOX="${raw}" is not one of off|auto|strict; using ${fallback}`);
   return fallback;
 }
+
+/**
+ * How to get past a strict sandbox the host cannot start (#599): fix the host,
+ * or opt out explicitly. Ends every strict refusal.
+ */
+export const SANDBOX_FIX_HINT =
+  "Fix the host (Linux: sudo apt-get install -y bubblewrap socat, and allow unprivileged user namespaces; " +
+  "see https://docs.sweny.ai/advanced/agent-sandbox/), or opt out explicitly: SWENY_SANDBOX=off " +
+  "(`sandbox: off` in .sweny.yml) with harness-policy warn runs agents unsandboxed, " +
+  "and SWENY_SANDBOX=auto falls back with a warning.";
 
 /**
  * The fix-it hint for a sandbox start that failed on a user namespace. Ubuntu
@@ -1491,6 +1513,13 @@ export interface AgentSandboxResolution {
   warning?: string;
 }
 
+/** Where a strict mode came from, for the refusal: an explicit setting, or the Action's default. */
+function strictSource(opts: Pick<ResolveAgentSandboxOpts, "env" | "mode">): string {
+  return opts.mode === undefined && !parseSandboxMode(opts.env.SWENY_SANDBOX)
+    ? "SWENY_SANDBOX_DEFAULT=strict, the GitHub Action's default"
+    : "SWENY_SANDBOX=strict";
+}
+
 /**
  * Resolve the `sandbox` query option for one agent call.
  *
@@ -1510,8 +1539,8 @@ export function resolveAgentSandbox(opts: ResolveAgentSandboxOpts): AgentSandbox
       return {
         mode,
         error:
-          `Agent sandbox is required (SWENY_SANDBOX=strict) but unavailable: ${reason}. ` +
-          `Refusing to run the agent unsandboxed. Fix the host, or set SWENY_SANDBOX=auto to fall back with a warning.`,
+          `Agent sandbox is required (${strictSource(opts)}) but unavailable: ${reason}. ` +
+          `Refusing to run the agent unsandboxed. ${SANDBOX_FIX_HINT}`,
       };
     }
     return {

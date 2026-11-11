@@ -627,6 +627,80 @@ describe("agent sandbox dependencies step", () => {
     expect(step.run).toContain("::notice title=SWEny agent sandbox::");
     expect(step.run).toContain("::warning title=SWEny agent sandbox::bubblewrap still cannot");
   });
+
+  // Runs the step's own script against a stub sandbox-userns.sh and stub bwrap/socat, on a
+  // host that cannot sandbox (probe fails, relax refused).
+  const runStep = (mode: string, explicit: string, probe = 1) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-deps-step-"));
+    for (const bin of ["bwrap", "socat"]) {
+      fs.writeFileSync(path.join(dir, bin), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    }
+    const stub = path.join(dir, "userns.sh");
+    fs.writeFileSync(
+      stub,
+      `case "$1" in mode) echo ${mode} ;; explicit) echo ${explicit} ;; probe) exit ${probe} ;; relax) exit 3 ;; esac\n`,
+    );
+    const r = spawnSync("bash", ["-c", step.run], {
+      env: { PATH: `${dir}${path.delimiter}${process.env.PATH ?? ""}`, SANDBOX_USERNS: stub },
+      encoding: "utf8",
+    });
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { status: r.status, out: r.stdout };
+  };
+
+  it("an explicit SWENY_SANDBOX=strict on a host that cannot sandbox fails the step with the fix (#599)", () => {
+    const r = runStep("strict", "strict");
+    expect(r.status).toBe(1);
+    expect(r.out).toContain(
+      "::error title=SWEny agent sandbox::SWENY_SANDBOX is strict and this runner cannot sandbox agent commands.",
+    );
+    expect(r.out).toContain("sudo apt-get install -y bubblewrap socat");
+    expect(r.out).toContain("apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict");
+    expect(r.out).toContain("opt out with SWENY_SANDBOX: off (or sandbox: off in .sweny.yml) and harness-policy: warn");
+  });
+
+  it("the Action's strict default warns with the fix and leaves the refusal to the CLI, which reads .sweny.yml", () => {
+    const r = runStep("strict", "");
+    expect(r.status).toBe(0);
+    expect(r.out).toContain(
+      "::warning title=SWEny agent sandbox::This runner cannot sandbox agent commands, and the Action",
+    );
+    expect(r.out).toContain("harness-policy: warn");
+    expect(r.out).not.toContain("::error");
+  });
+
+  it("auto warns that agents run unsandboxed; off and a host that sandboxes say nothing", () => {
+    const auto = runStep("auto", "auto");
+    expect(auto.status).toBe(0);
+    expect(auto.out).toContain("under SWENY_SANDBOX=auto they run unsandboxed");
+    for (const r of [runStep("off", "off"), runStep("strict", "strict", 0), runStep("strict", "", 0)]) {
+      expect(r.status).toBe(0);
+      expect(r.out).not.toContain("::warning");
+      expect(r.out).not.toContain("::error");
+    }
+  });
+});
+
+describe("strict sandbox by default (#599)", () => {
+  const DEFAULT = "${{ runner.os != 'Windows' && 'strict' || '' }}";
+
+  it("every step that reads the sandbox mode gets SWENY_SANDBOX_DEFAULT=strict, except on Windows", () => {
+    for (const name of [
+      "Install agent sandbox dependencies",
+      "Install and probe the agent sandbox wrapper (srt)",
+      "Run workflow",
+    ]) {
+      expect(steps.find((s) => s.name === name)!.env.SWENY_SANDBOX_DEFAULT, name).toBe(DEFAULT);
+    }
+  });
+
+  it("never sets SWENY_SANDBOX itself, so the caller's env and .sweny.yml keep precedence", () => {
+    for (const s of steps) {
+      expect(Object.keys(s.env ?? {})).not.toContain("SWENY_SANDBOX");
+      expect(String(s.run ?? "")).not.toMatch(/export SWENY_SANDBOX=|SWENY_SANDBOX=strict sweny/);
+    }
+    expect(Object.keys(action.inputs)).not.toContain("sandbox");
+  });
 });
 
 describe("scripts/sandbox-userns.sh", () => {
@@ -654,6 +728,12 @@ describe("scripts/sandbox-userns.sh", () => {
   it("relaxes nothing on self-hosted without strict, or under off", () => {
     expect(relax({ RUNNER_ENVIRONMENT: "self-hosted", SWENY_SANDBOX: "auto" }).status).toBe(3);
     expect(relax({ RUNNER_ENVIRONMENT: "self-hosted" }).status).toBe(3);
+    // The Action's strict default is not the operator's strict: a persistent host is left alone (#599).
+    expect(relax({ RUNNER_ENVIRONMENT: "self-hosted", SWENY_SANDBOX_DEFAULT: "strict" }).status).toBe(3);
+    expect(
+      relax({ RUNNER_ENVIRONMENT: "self-hosted", SWENY_SANDBOX: "bogus", SWENY_SANDBOX_DEFAULT: "strict" }).status,
+    ).toBe(3);
+    expect(relax({ RUNNER_ENVIRONMENT: "github-hosted", SWENY_SANDBOX_DEFAULT: "off" }).status).toBe(3);
     expect(relax({ RUNNER_ENVIRONMENT: "github-hosted", SWENY_SANDBOX: "off" }).status).toBe(3);
     expect(relax({ RUNNER_ENVIRONMENT: "self-hosted", SWENY_SANDBOX: "off" }).status).toBe(3);
   });
@@ -690,13 +770,28 @@ describe("scripts/sandbox-userns.sh", () => {
     ];
     for (const ci of ["true", ""]) {
       for (const v of values) {
-        const env = { SWENY_SANDBOX: v, CI: ci };
-        expect(`${JSON.stringify(v)} CI=${ci}: ${mode(env)}`).toBe(
-          `${JSON.stringify(v)} CI=${ci}: ${resolveSandboxMode(env)}`,
-        );
+        for (const d of [undefined, "strict", " Off\n", "auto", "bogus", ""]) {
+          const env: Record<string, string> = { SWENY_SANDBOX: v, CI: ci };
+          if (d !== undefined) env.SWENY_SANDBOX_DEFAULT = d;
+          const label = `${JSON.stringify(v)} default=${JSON.stringify(d)} CI=${ci}`;
+          expect(`${label}: ${mode(env)}`).toBe(`${label}: ${resolveSandboxMode(env)}`);
+        }
       }
     }
     expect(mode({ CI: "true" })).toBe(resolveSandboxMode({ CI: "true" }));
+    expect(mode({ CI: "true", SWENY_SANDBOX_DEFAULT: "strict" })).toBe("strict");
+  });
+
+  it("explicit prints SWENY_SANDBOX's mode only, never the default", () => {
+    const explicit = (env: Record<string, string>) =>
+      spawnSync("bash", [script, "explicit"], {
+        env: { PATH: process.env.PATH ?? "", ...env },
+        encoding: "utf8",
+      }).stdout.trim();
+    expect(explicit({ SWENY_SANDBOX: " On " })).toBe("strict");
+    expect(explicit({ SWENY_SANDBOX: "auto", SWENY_SANDBOX_DEFAULT: "strict" })).toBe("auto");
+    expect(explicit({ SWENY_SANDBOX_DEFAULT: "strict", CI: "true" })).toBe("");
+    expect(explicit({ SWENY_SANDBOX: "bogus", SWENY_SANDBOX_DEFAULT: "strict" })).toBe("");
   });
 
   it("never relaxes the host when sandboxing is off under any alias", () => {

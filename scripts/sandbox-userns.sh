@@ -2,18 +2,23 @@
 # Host check and relaxation for the agent sandbox (bubblewrap, and srt on top of it).
 # One implementation for action.yml's two sandbox steps and CI's sandbox jobs.
 #
-#   sandbox-userns.sh mode    Print SWENY_SANDBOX as core reads it (resolveSandboxMode in
-#                             packages/core/src/agent-env.ts): off|false|0|no is off,
-#                             strict|on|true|1 is strict, auto is auto, case and spaces
-#                             ignored; anything else is auto when CI is truthy, else off.
+#   sandbox-userns.sh mode    Print the sandbox mode as core reads it (resolveSandboxMode in
+#                             packages/core/src/agent-env.ts): SWENY_SANDBOX when it is a
+#                             mode (off|false|0|no is off, strict|on|true|1 is strict, auto
+#                             is auto, case and spaces ignored), else SWENY_SANDBOX_DEFAULT
+#                             when it is a mode (the Action sets strict, #599), else auto
+#                             when CI is truthy, else off. It does not read .sweny.yml.
+#   sandbox-userns.sh explicit  Print SWENY_SANDBOX's mode when it is one, else nothing:
+#                             strict here is the operator's choice, not the Action default.
 #   sandbox-userns.sh probe   Exit 0 when bwrap can sandbox on this host: a plain
 #                             bwrap run, then a user namespace nested inside bwrap,
 #                             which srt's seccomp helper (apply-seccomp) needs. The
 #                             nested run is skipped when there is no system unshare or
 #                             it lacks --map-root-user (busybox).
 #   sandbox-userns.sh relax   Relax the host's user-namespace restrictions. Only on a
-#                             GitHub-hosted runner (ephemeral VM) or when the mode is
-#                             strict, never when it is off, and never by default on
+#                             GitHub-hosted runner (ephemeral VM) or when SWENY_SANDBOX is
+#                             strict (the Action's strict default does not count), never
+#                             when the mode is off, and never by default on
 #                             self-hosted (persistent host): exits 3 without touching
 #                             anything there. Exits 0 once it has tried; run probe again
 #                             to see whether it worked.
@@ -33,14 +38,25 @@ lower() {
   printf '%s' "$v" | tr '[:upper:]' '[:lower:]'
 }
 
-mode() {
-  local raw ci
-  raw=$(lower "${SWENY_SANDBOX:-}")
-  case "$raw" in
-    off | false | 0 | no) echo off; return ;;
-    strict | on | true | 1) echo strict; return ;;
-    auto) echo auto; return ;;
+# One mode value, or nothing when it is empty or not a mode.
+parse_mode() {
+  case "$(lower "$1")" in
+    off | false | 0 | no) echo off ;;
+    strict | on | true | 1) echo strict ;;
+    auto) echo auto ;;
   esac
+}
+
+explicit() { parse_mode "${SWENY_SANDBOX:-}"; }
+
+mode() {
+  local m ci
+  m=$(explicit)
+  [ -z "$m" ] && m=$(parse_mode "${SWENY_SANDBOX_DEFAULT:-}")
+  if [ -n "$m" ]; then
+    echo "$m"
+    return
+  fi
   ci=$(lower "${CI:-}")
   case "$ci" in
     "" | 0 | false | no | off) echo off ;;
@@ -74,7 +90,7 @@ relax() {
   local m
   m=$(mode)
   [ "$m" != "off" ] || return 3
-  { [ "$m" = "strict" ] || [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; } || return 3
+  { [ "$(explicit)" = "strict" ] || [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; } || return 3
   local SUDO=""
   if [ "$(id -u)" != "0" ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo -n"; fi
   # Ubuntu 23.10+ restricts unprivileged user namespaces via AppArmor, which bubblewrap needs.
@@ -92,10 +108,11 @@ relax() {
 
 case "${1:-}" in
   mode) mode ;;
+  explicit) explicit ;;
   probe) probe ;;
   relax) relax ;;
   *)
-    echo "usage: $0 mode|probe|relax" >&2
+    echo "usage: $0 mode|explicit|probe|relax" >&2
     exit 2
     ;;
 esac

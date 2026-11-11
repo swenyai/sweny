@@ -29,9 +29,11 @@ Claude Code, Codex, pi or any [ACP](https://agentclientprotocol.com) agent and a
 each; what an agent cannot enforce itself is reported as degraded, or the node is refused in strict mode
 (see [Supported agents](#supported-agents)).
 
-- **Security.** In CI, the agent sees only the env vars a node's skills need, and its commands run
-  sandboxed when the host supports it (both opt-in locally). Inputs reach the model fenced as untrusted
-  data. `--dry-run` withholds shell, write and edit tools.
+- **Security.** In CI, the agent sees only the env vars a node's skills need. In the GitHub Action every
+  agent runs sandboxed, or the node is refused; in other CI it is sandboxed when the host supports it (both
+  opt-in locally). Only the sandbox stops an agent reading SWEny's own env, skill credentials included,
+  through `/proc` on Linux; [CI proves it](https://docs.sweny.ai/advanced/agent-sandbox/#why-the-action-is-strict-proc).
+  Inputs reach the model fenced as untrusted data. `--dry-run` withholds shell, write and edit tools.
 - **Quality.** A node's declared output schema is a contract: a missing required field fails the node
   (or retries it), and a step that returns no result fails instead of passing.
 - **Proof.** Every run ends with a receipt: nodes, tool calls, duration, tokens, cost. The GitHub Action

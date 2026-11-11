@@ -152,6 +152,25 @@ describe("resolveSandboxMode", () => {
     expect(resolveSandboxMode({ SWENY_SANDBOX: "off" }, "strict")).toBe("strict");
   });
 
+  it("SWENY_SANDBOX_DEFAULT (the Action's strict) is the default; any explicit value still wins (#599)", () => {
+    expect(resolveSandboxMode({ CI: "true", SWENY_SANDBOX_DEFAULT: "strict" })).toBe("strict");
+    expect(resolveSandboxMode({ SWENY_SANDBOX_DEFAULT: " Strict\n" })).toBe("strict");
+    expect(resolveSandboxMode({ SWENY_SANDBOX_DEFAULT: "auto" })).toBe("auto");
+    expect(resolveSandboxMode({ CI: "true", SWENY_SANDBOX_DEFAULT: "off" })).toBe("off");
+    // .sweny.yml `sandbox:` arrives as SWENY_SANDBOX, so it beats the Action's default.
+    expect(resolveSandboxMode({ CI: "true", SWENY_SANDBOX: "off", SWENY_SANDBOX_DEFAULT: "strict" })).toBe("off");
+    expect(resolveSandboxMode({ CI: "true", SWENY_SANDBOX: "auto", SWENY_SANDBOX_DEFAULT: "strict" })).toBe("auto");
+    expect(resolveSandboxMode({ SWENY_SANDBOX_DEFAULT: "strict" }, "off")).toBe("off");
+    // Not a mode: ignored, the CI rule applies.
+    expect(resolveSandboxMode({ CI: "true", SWENY_SANDBOX_DEFAULT: "bogus" })).toBe("auto");
+    expect(resolveSandboxMode({ SWENY_SANDBOX_DEFAULT: "" })).toBe("off");
+    const warn = vi.fn();
+    expect(resolveSandboxMode({ SWENY_SANDBOX: "maybe", SWENY_SANDBOX_DEFAULT: "strict" }, undefined, { warn })).toBe(
+      "strict",
+    );
+    expect(warn).toHaveBeenCalledWith('SWENY_SANDBOX="maybe" is not one of off|auto|strict; using strict');
+  });
+
   it("unknown value warns and falls back to the default", () => {
     const warn = vi.fn();
     expect(resolveSandboxMode({ CI: "true", SWENY_SANDBOX: "maybe" }, undefined, { warn })).toBe("auto");
@@ -347,6 +366,19 @@ describe("resolveAgentSandbox", () => {
     const r = resolveAgentSandbox({ env: { SWENY_SANDBOX: "strict" }, probe: () => "missing bwrap on PATH" });
     expect(r.settings).toBeUndefined();
     expect(r.error).toMatch(/required \(SWENY_SANDBOX=strict\) but unavailable: missing bwrap/);
+  });
+
+  it("strict by the Action's default on an unsupported host: fails closed and names the fix and the opt-out (#599)", () => {
+    const r = resolveAgentSandbox({
+      env: { CI: "true", SWENY_SANDBOX_DEFAULT: "strict" },
+      probe: () => "missing bwrap on PATH",
+    });
+    expect(r.mode).toBe("strict");
+    expect(r.settings).toBeUndefined();
+    expect(r.warning).toBeUndefined();
+    expect(r.error).toContain("SWENY_SANDBOX_DEFAULT=strict, the GitHub Action's default");
+    expect(r.error).toContain("apt-get install -y bubblewrap socat");
+    expect(r.error).toContain("SWENY_SANDBOX=off (`sandbox: off` in .sweny.yml) with harness-policy warn");
   });
 });
 

@@ -229,8 +229,7 @@ function reply(res: http.ServerResponse, stream: boolean, model: string, block: 
     res.end(JSON.stringify(message));
     return;
   }
-  const start =
-    block.type === "tool_use" ? { ...block, input: {} } : { type: "text", text: "" };
+  const start = block.type === "tool_use" ? { ...block, input: {} } : { type: "text", text: "" };
   const delta =
     block.type === "tool_use"
       ? { type: "input_json_delta", partial_json: JSON.stringify(block.input) }
