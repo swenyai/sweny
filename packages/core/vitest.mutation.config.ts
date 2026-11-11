@@ -10,6 +10,7 @@ export default defineConfig({
       "src/__tests__/when-routing.test.ts",
       "src/safe-outputs.test.ts",
       "src/__tests__/safe-outputs-executor.test.ts",
+      "src/__tests__/approval-publish.test.ts",
       "src/__tests__/budget.test.ts",
       "src/journal.test.ts",
       "src/__tests__/run-journal.test.ts",

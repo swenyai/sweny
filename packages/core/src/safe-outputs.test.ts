@@ -415,7 +415,8 @@ describe("write stage: deterministic refusals", () => {
     });
     const r = await applySafeOutputs(o);
     expect(r.receipts[0].status).toBe("applied");
-    expect(gh.calls[0].input.repo).toBe("acme/other");
+    // #576: the write goes to the author's spelling of the pin, not the agent's casing.
+    expect(gh.calls[0].input.repo).toBe("Acme/Other");
   });
 
   it("expired intents are dropped", async () => {

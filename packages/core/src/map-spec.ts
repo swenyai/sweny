@@ -176,8 +176,10 @@ export function mapNodeProblems(workflow: Workflow, nodeId: string, specVersion:
     }
     for (const [id, n] of Object.entries(child.nodes ?? {})) {
       if (n.kind === "map") say(`runs a child workflow with a map node ("${id}"); nested maps are not supported`);
-      if ((n.outputs?.length ?? 0) > 0) {
-        say(`runs a child workflow whose node "${id}" declares outputs; children are read-only in M1`);
+      // Child write requests (#576) go up to the map, which plans them per item; only when
+      // every item runs (collect), so one failure cannot leave a half-written batch to chance.
+      if ((n.outputs?.length ?? 0) > 0 && (node.on_item_fail ?? "fail_fast") !== "collect") {
+        say(`runs a child workflow whose node "${id}" declares outputs, which needs on_item_fail: collect`);
       }
       if (declaresWrite(n.permissions)) {
         say(`runs a child workflow whose node "${id}" declares write permissions; children are read-only in M1`);

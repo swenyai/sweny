@@ -114,7 +114,7 @@ describe("emit_output tool", () => {
     expect(EMIT_OUTPUT_TOOL).toBe("emit_output");
     expect(tool.access).toBe("read");
     expect(tool.description).toBe(
-      "Request a write (comment, issue, pr, label or issue_state). This does NOT write anything now: sweny checks the request " +
+      "Request a write (comment, issue, pr, label, issue_state, slack_message or email). This does NOT write anything now: sweny checks the request " +
         "against this step's declared outputs and limits, and applies it after the step finishes. Call once per write. " +
         "Allowed types here: comment, issue.",
     );
@@ -122,8 +122,11 @@ describe("emit_output tool", () => {
       type: "object",
       properties: {
         type: { type: "string", enum: ["comment", "issue"], description: "Kind of write" },
-        title: { type: "string", description: "Issue or PR title" },
-        body: { type: "string", description: "Markdown body (comment, issue or PR)" },
+        title: { type: "string", description: "Issue or PR title, or the email subject" },
+        body: {
+          type: "string",
+          description: "Markdown body (comment, issue or PR), Slack message text, or email body",
+        },
         target: {
           type: "string",
           description: "GitHub owner/repo or Linear team id. Omit to use the declared target.",
@@ -442,7 +445,8 @@ describe("write stage: target", () => {
       intents: [intent({ target: "ACME/API" })],
     });
     expect(ok).toStrictEqual([
-      { type: "issue", status: "applied", via: "github", target: "ACME/API", ref: 7, url: "https://example.test/7" },
+      // #576: the author's spelling of the pin, not the agent's casing.
+      { type: "issue", status: "applied", via: "github", target: "acme/api", ref: 7, url: "https://example.test/7" },
     ]);
   });
 

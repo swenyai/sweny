@@ -9,6 +9,55 @@
  */
 
 import type { Skill, ToolContext, SkillCategory } from "../types.js";
+// Pure (no node:* imports): the browser entry can carry it.
+import addressparser from "nodemailer/lib/addressparser";
+
+/** A variable specifier, so a browser bundler never pulls the SMTP stack (node:*) into the browser entry. */
+const NODEMAILER = "nodemailer";
+
+/** A plain address: no quotes, spaces, brackets, comments or separators; a dotted domain. */
+const PLAIN_ADDRESS = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+
+/**
+ * The recipients nodemailer would deliver `to` to, parsed with nodemailer's own
+ * address parser (so `;`, groups and comments split exactly as they would on
+ * send), as written. Undefined when any entry is not a plain address.
+ */
+export function emailRecipients(to: string | undefined): string[] | undefined {
+  const parsed = addressparser(to ?? "", { flatten: true });
+  const out: string[] = [];
+  for (const a of parsed) {
+    const address = (a.address ?? "").trim();
+    if (!PLAIN_ADDRESS.test(address)) return undefined;
+    // A display name or comment that holds an address reads as two recipients to a person: refused.
+    if ((a.name ?? "").includes("@")) return undefined;
+    out.push(address);
+  }
+  return out;
+}
+
+/**
+ * Why `notify_email` may not send to `to`, or undefined when every recipient
+ * nodemailer would deliver to is on `SMTP_ALLOWED_RECIPIENTS`: an exact
+ * address, or an `@domain` entry. Case-insensitive. An unset or empty list
+ * allows nobody; anything that does not parse to plain addresses is refused.
+ * Fixed wording: it becomes a refusal reason on receipts.
+ */
+export function emailRecipientRefusal(to: string | undefined, allowed: string | undefined): string | undefined {
+  const list = (allowed ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0);
+  if (list.length === 0) return "SMTP_ALLOWED_RECIPIENTS is not set, so no email is sent";
+  const recipients = emailRecipients(to);
+  if (recipients === undefined) return "recipient is not a plain email address";
+  if (recipients.length === 0) return "no recipient";
+  const ok = (raw: string) => {
+    const r = raw.toLowerCase();
+    return list.includes(r) || list.includes(r.slice(r.lastIndexOf("@")));
+  };
+  return recipients.every(ok) ? undefined : "recipient not on SMTP_ALLOWED_RECIPIENTS";
+}
 
 /**
  * Resolve the destination URL for `notify_webhook`.
@@ -95,9 +144,20 @@ export const notification: Skill = {
       env: "TEAMS_WEBHOOK_URL",
     },
     SMTP_URL: {
-      description: "SMTP connection URL for email notifications",
+      description: "SMTP connection URL for email (smtp:// or smtps://, nodemailer's URL form)",
       required: false,
       env: "SMTP_URL",
+    },
+    SMTP_FROM: {
+      description: "From address for email sent over SMTP_URL",
+      required: false,
+      env: "SMTP_FROM",
+    },
+    SMTP_ALLOWED_RECIPIENTS: {
+      description:
+        "Comma-separated addresses (ops@acme.com) or domains (@acme.com) notify_email may send to. Unset: it sends nothing.",
+      required: false,
+      env: "SMTP_ALLOWED_RECIPIENTS",
     },
   },
   tools: [
@@ -206,6 +266,47 @@ export const notification: Skill = {
         });
         if (!res.ok) throw new Error(`[Notification] Teams webhook failed (HTTP ${res.status}): ${await res.text()}`);
         return { ok: true };
+      },
+    },
+    {
+      name: "notify_email",
+      access: "write",
+      description:
+        "Send a plain-text email over SMTP_URL (nodemailer), from SMTP_FROM, only to recipients on " +
+        "SMTP_ALLOWED_RECIPIENTS. Exactly one send per call; SMTP has no lookup, so a send whose outcome is " +
+        "unknown is never repeated.",
+      input_schema: {
+        type: "object",
+        properties: {
+          to: { type: "string", description: "Recipient address (comma-separated for several)" },
+          subject: { type: "string", description: "Subject line" },
+          text: { type: "string", description: "Plain-text body" },
+        },
+        required: ["to", "subject", "text"],
+      },
+      handler: async (input: { to: string; subject: string; text: string }, ctx) => {
+        // The recipient list is the operator's: an agent (or a prompt injection) cannot mail anyone else.
+        const refusal = emailRecipientRefusal(input.to, ctx.config.SMTP_ALLOWED_RECIPIENTS);
+        if (refusal) return { refused: true, reason: refusal };
+        if (!ctx.config.SMTP_URL) throw new Error("[Notification] SMTP_URL not configured");
+        if (!ctx.config.SMTP_FROM) throw new Error("[Notification] SMTP_FROM not configured (the From address)");
+        // Loaded on first use, and kept out of browser bundles: nothing else pays for the SMTP stack.
+        const { default: nodemailer } = (await import(/* @vite-ignore */ NODEMAILER)) as typeof import("nodemailer");
+        const transport = nodemailer.createTransport(ctx.config.SMTP_URL);
+        // Deliver to exactly the addresses that were checked, never a re-parse of the raw field.
+        const recipients = emailRecipients(input.to)!;
+        const info = await transport.sendMail({
+          from: ctx.config.SMTP_FROM,
+          to: recipients.join(", "),
+          envelope: { from: ctx.config.SMTP_FROM, to: recipients },
+          subject: input.subject,
+          text: input.text,
+        });
+        return {
+          id: info.messageId,
+          accepted: (info.accepted ?? []).map(String),
+          rejected: (info.rejected ?? []).map(String),
+        };
       },
     },
   ],

@@ -763,8 +763,12 @@ export interface NodePermissionsSpec {
 /** `read` / `write` shorthand, or the object form. */
 export type NodePermissions = NodeAccess | NodePermissionsSpec;
 
-/** Write operations a node may request through `emit_output`. */
-export const SAFE_OUTPUT_TYPES = ["comment", "issue", "pr", "label", "issue_state"] as const;
+/**
+ * Write operations a node may request through `emit_output`. `slack_message`
+ * and `email` (spec v3, #576) send to a pinned destination only, and have no
+ * provider lookup: they are sent at most once, never re-sent on doubt.
+ */
+export const SAFE_OUTPUT_TYPES = ["comment", "issue", "pr", "label", "issue_state", "slack_message", "email"] as const;
 export type SafeOutputType = (typeof SAFE_OUTPUT_TYPES)[number];
 
 /** What an `issue_state` output may do to an issue: reopen a closed one, or close an open one. */
@@ -778,7 +782,12 @@ export type SafeOutputState = (typeof SAFE_OUTPUT_STATES)[number];
 export const SAFE_OUTPUT_APPLIERS: Readonly<Record<string, readonly SafeOutputType[]>> = {
   github: ["comment", "issue", "pr", "label", "issue_state"],
   linear: ["comment", "issue", "issue_state"],
+  slack: ["slack_message"],
+  notification: ["email"],
 };
+
+/** Output types whose destination must be pinned by the declaration (`target`), never chosen by the agent (#576). */
+export const SAFE_OUTPUT_PINNED_TARGET: readonly SafeOutputType[] = ["slack_message", "email"];
 
 /** GitHub author associations accepted by `safe_outputs.trusted_associations`. */
 export const AUTHOR_ASSOCIATIONS = [
@@ -849,14 +858,36 @@ export interface SafeOutputsPolicy {
   trusted_associations?: AuthorAssociation[];
   /** One model call that may veto the writes. It can never authorize one. */
   screen?: boolean;
+  /**
+   * Approval mode (spec v3, RFC 0002 M2, #576): writes are frozen into a bundle
+   * and sent only by `sweny publish <run> --approve`. See {@link SafeOutputsApproval}.
+   */
+  approval?: SafeOutputsApproval;
 }
+
+/** `safe_outputs.approval`: freeze every write for a human to approve before anything is sent. */
+export interface SafeOutputsApproval {
+  /** Every write of the run goes into a bundle; nothing is sent during the run. */
+  required: boolean;
+  /** How long a bundle stays publishable after its visit's checkpoint (e.g. `2h`, `7d`). Default `7d`. */
+  expires?: string;
+  /**
+   * Who may approve with `sweny publish` (`local:<os user>` on the CLI). Absent:
+   * any local user (the local user is the trust root).
+   */
+  approvers?: string[];
+}
+
+/** Bundle lifetime when `safe_outputs.approval.expires` is absent. */
+export const SAFE_OUTPUT_APPROVAL_EXPIRES_DEFAULT = "7d";
 
 /** What the write stage did with one intent. Metadata only: never a title or body. */
 export interface SafeOutputReceipt {
   type: string;
   /** Skill that applied (or would apply) it. */
   via?: string;
-  status: "applied" | "staged" | "skipped" | "refused" | "vetoed" | "failed";
+  /** `pending`: frozen into an approval bundle (#576), sent only by `sweny publish`. */
+  status: "applied" | "staged" | "pending" | "skipped" | "refused" | "vetoed" | "failed";
   /** Why it was skipped, refused, vetoed or failed. Fixed wording, never model text. */
   reason?: string;
   target?: string;
@@ -864,6 +895,10 @@ export interface SafeOutputReceipt {
   ref?: string | number;
   /** Web URL of what the write produced, as the API returned it. */
   url?: string;
+  /** `pending` only: sha256 of the approval bundle that holds the write (#576). */
+  digest?: string;
+  /** A map child's write (#576): the item it came from. */
+  item?: string;
 }
 
 /**
@@ -1055,6 +1090,12 @@ export interface NodeUsage {
 
 export interface NodeResult {
   status: "success" | "skipped" | "failed";
+  /**
+   * A map child's write requests (RFC 0002 M2, #576): a child does not apply
+   * its outputs; its map re-plans them per item, in item order, under
+   * per-item caps. Absent everywhere else.
+   */
+  intents?: import("./safe-outputs.js").SafeOutputIntent[];
   /** Arbitrary data produced by this node */
   data: Record<string, unknown>;
   /** Tool calls made during this node's execution */

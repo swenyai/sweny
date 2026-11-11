@@ -261,6 +261,7 @@ describe("built-in skill tools declare access explicitly (#380)", () => {
       "notify_webhook",
       "notify_discord",
       "notify_teams",
+      "notify_email",
       "supabase_insert",
       "supabase_update",
       "supabase_delete",

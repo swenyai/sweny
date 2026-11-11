@@ -1,5 +1,6 @@
 /**
  * sweny publish — Interactive CLI for publishing workflows and skills to the marketplace.
+ * With a run id, it is the approval publisher instead (`publishRunAction`, #576).
  *
  * Supports:
  * - Workflow YAML files → marketplace community submission
@@ -15,9 +16,11 @@ import chalk from "chalk";
 import { parse as parseYaml } from "yaml";
 import type { Command } from "commander";
 import { parseWorkflow, validateWorkflow } from "../schema.js";
-import { builtinSkills } from "../skills/index.js";
+import { builtinSkills, createSkillMap } from "../skills/index.js";
 import { discoverSkillsWithDiagnostics } from "../skills/custom-loader.js";
-import { isValidSkillId } from "../types.js";
+import { publishRun } from "../approval.js";
+import { startupEnv } from "../startup-env.js";
+import { isValidSkillId, type Skill } from "../types.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -512,9 +515,74 @@ export function copySkillDir(sourceDir: string, destDir: string): void {
 
 export function registerPublishCommand(program: Command): void {
   program
-    .command("publish")
-    .description("Publish a workflow or skill to the SWEny Marketplace")
-    .action(async () => {
+    .command("publish [run-id]")
+    .description(
+      "Publish a workflow or skill to the SWEny Marketplace; with a run id, send the writes that run froze for approval",
+    )
+    .option(
+      "--approve <digest...>",
+      "With a run id: send the bundles with these digests, as the preview printed them (the run must have ended)",
+    )
+    .action(async (runId: string | undefined, opts: { approve?: string[] }) => {
+      if (runId) {
+        process.exitCode = await publishRunAction(runId, opts.approve ?? []);
+        return;
+      }
       await runPublish();
     });
+}
+
+/**
+ * The skills and transport credentials `sweny publish` sends with: built-in
+ * skills only (a workspace skill is agent-writable), and every credential from
+ * the environment as it was at startup, before the workspace `.env` was read.
+ * A run's agent can write that `.env`; it must not choose the token, SMTP
+ * server or API a frozen write goes out through.
+ */
+export function publishTransport(env: Readonly<NodeJS.ProcessEnv> = startupEnv()): {
+  skills: Skill[];
+  config: Record<string, string>;
+  githubApiUrl?: string;
+} {
+  const config: Record<string, string> = {};
+  for (const skill of builtinSkills) {
+    for (const [key, field] of Object.entries(skill.config)) {
+      const v = field.env ? env[field.env] : undefined;
+      if (v !== undefined && v !== "") config[key] = v;
+    }
+  }
+  return { skills: builtinSkills, config, ...(env.GITHUB_API_URL ? { githubApiUrl: env.GITHUB_API_URL } : {}) };
+}
+
+/**
+ * `sweny publish <run-id> [--approve <digest>...]` (RFC 0002 M2, #576): verify
+ * and print the run's approval bundles, and send the approved ones once. Exit 1
+ * when anything was refused or did not send.
+ */
+export async function publishRunAction(runId: string, approve: string[]): Promise<number> {
+  const transport = publishTransport();
+  const logger = {
+    info: () => {},
+    debug: () => {},
+    warn: (m: string) => console.error(chalk.yellow(m)),
+    error: (m: string) => console.error(chalk.red(m)),
+  };
+  try {
+    const out = await publishRun({
+      runId,
+      approve,
+      skills: createSkillMap(transport.skills),
+      config: transport.config,
+      logger,
+      print: (line) => console.log(line),
+      ...(transport.githubApiUrl ? { githubApiUrl: transport.githubApiUrl } : {}),
+    });
+    const bad =
+      out.bundles.some((b) => b.state === "refused" || b.state === "incomplete") ||
+      out.bundles.some((b) => (b.receipts ?? []).some((r) => r.status !== "sent"));
+    return bad ? 1 : 0;
+  } catch (err) {
+    console.error(chalk.red(`  ${err instanceof Error ? err.message : String(err)}`));
+    return 1;
+  }
 }
