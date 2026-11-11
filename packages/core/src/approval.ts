@@ -108,7 +108,8 @@ export function approvalsDir(stateRoot: string = runStateRoot()): string {
   return path.join(path.dirname(stateRoot), "approvals");
 }
 
-interface LogLine {
+/** One line of a publish log (`<state>/approvals/<proposal key>`). */
+export interface LogLine {
   t: "approved" | "intent" | "sent" | "failed" | "refused";
   n?: number;
   digest?: string;
