@@ -638,7 +638,8 @@ describe("agent sandbox dependencies step", () => {
     const stub = path.join(dir, "userns.sh");
     fs.writeFileSync(
       stub,
-      `case "$1" in mode) echo ${mode} ;; explicit) echo ${explicit} ;; probe) exit ${probe} ;; relax) exit 3 ;; esac\n`,
+      `case "$1" in mode) echo ${mode} ;; explicit) echo ${explicit} ;; probe) exit ${probe} ;; relax) exit 3 ;; ` +
+        `hint) bash '${path.join(repoRoot, "scripts/sandbox-userns.sh")}' hint ;; esac\n`,
     );
     const r = spawnSync("bash", ["-c", step.run], {
       env: { PATH: `${dir}${path.delimiter}${process.env.PATH ?? ""}`, SANDBOX_USERNS: stub },

@@ -15,6 +15,8 @@
 #                             which srt's seccomp helper (apply-seccomp) needs. The
 #                             nested run is skipped when there is no system unshare or
 #                             it lacks --map-root-user (busybox).
+#   sandbox-userns.sh hint    Print how to make this host sandbox, or opt out (#599): one
+#                             line for the Action's warnings and errors.
 #   sandbox-userns.sh relax   Relax the host's user-namespace restrictions. Only on a
 #                             GitHub-hosted runner (ephemeral VM) or when SWENY_SANDBOX is
 #                             strict (the Action's strict default does not count), never
@@ -106,13 +108,18 @@ relax() {
   return 0
 }
 
+hint() {
+  echo "Install bubblewrap and socat (sudo apt-get install -y bubblewrap socat) and allow unprivileged user namespaces (Ubuntu 23.10+: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; Ubuntu 26.04 also: sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict), or set SWENY_SANDBOX: strict in the step env to let the Action do that on this host, or opt out with SWENY_SANDBOX: off (or sandbox: off in .sweny.yml) and harness-policy: warn. See https://docs.sweny.ai/advanced/agent-sandbox/"
+}
+
 case "${1:-}" in
   mode) mode ;;
   explicit) explicit ;;
+  hint) hint ;;
   probe) probe ;;
   relax) relax ;;
   *)
-    echo "usage: $0 mode|explicit|probe|relax" >&2
+    echo "usage: $0 mode|explicit|hint|probe|relax" >&2
     exit 2
     ;;
 esac

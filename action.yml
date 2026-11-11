@@ -253,7 +253,7 @@ runs:
           fi
         fi
         if [ "$SANDBOX_MODE" != "off" ] && { ! command -v socat >/dev/null 2>&1 || ! bash "$SANDBOX_USERNS" probe; }; then
-          FIX="Install bubblewrap and socat (sudo apt-get install -y bubblewrap socat) and allow unprivileged user namespaces (Ubuntu 23.10+: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; Ubuntu 26.04 also: sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict), or set SWENY_SANDBOX: strict in the step env to let the Action do that on this host, or opt out with SWENY_SANDBOX: off (or sandbox: off in .sweny.yml) and harness-policy: warn. See https://docs.sweny.ai/advanced/agent-sandbox/"
+          FIX=$(bash "$SANDBOX_USERNS" hint)
           if [ "$(bash "$SANDBOX_USERNS" explicit)" = "strict" ]; then
             echo "::error title=SWEny agent sandbox::SWENY_SANDBOX is strict and this runner cannot sandbox agent commands. $FIX"
             exit 1
