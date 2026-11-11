@@ -1179,9 +1179,23 @@ describe("agent access and sandbox", () => {
           "Agent sandbox is required (SWENY_SANDBOX=strict) but unavailable: missing bwrap. " +
           "Refusing to run the agent unsandboxed. Fix the host (Linux: sudo apt-get install -y bubblewrap socat, " +
           "and allow unprivileged user namespaces; see https://docs.sweny.ai/advanced/agent-sandbox/), " +
-          "or opt out explicitly: SWENY_SANDBOX=off (`sandbox: off` in .sweny.yml) with harness-policy warn " +
-          "runs agents unsandboxed, and SWENY_SANDBOX=auto falls back with a warning.",
+          "or opt out explicitly: SWENY_SANDBOX=off in the workflow's env (in CI, .sweny.yml and .env cannot " +
+          "lower the sandbox) with harness-policy warn runs agents unsandboxed, and SWENY_SANDBOX=auto falls back " +
+          "with a warning.",
       });
+    });
+
+    it("sandboxStrictSource names the Action default only when that default is what made it strict", async () => {
+      const { sandboxStrictSource } = await import("../../agent-env.js");
+      const action = "SWENY_SANDBOX_DEFAULT=strict, the GitHub Action's default";
+      expect(sandboxStrictSource({ SWENY_SANDBOX_DEFAULT: "strict" })).toBe(action);
+      expect(sandboxStrictSource({ SWENY_SANDBOX_DEFAULT: " TRUE " })).toBe(action);
+      expect(sandboxStrictSource({})).toBe("SWENY_SANDBOX=strict");
+      expect(sandboxStrictSource({ SWENY_SANDBOX_DEFAULT: "auto" })).toBe("SWENY_SANDBOX=strict");
+      expect(sandboxStrictSource({ SWENY_SANDBOX: "on", SWENY_SANDBOX_DEFAULT: "strict" })).toBe(
+        "SWENY_SANDBOX=strict",
+      );
+      expect(sandboxStrictSource({ SWENY_SANDBOX_DEFAULT: "strict" }, "strict")).toBe("SWENY_SANDBOX=strict");
     });
 
     it("strict from the Action's default says so; an explicit or client mode does not (#599)", () => {

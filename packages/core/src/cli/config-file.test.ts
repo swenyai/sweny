@@ -45,6 +45,54 @@ describe("loadDotenv denylist", () => {
     expect(isDotenvDenied(key)).toBe(true);
   });
 
+  it("denies SWENY_SANDBOX_DEFAULT, the Action's default, which is operator state (#599)", () => {
+    expect(isDotenvDenied("SWENY_SANDBOX_DEFAULT")).toBe(true);
+  });
+
+  it("in CI, a .env value that loosens the agent floor is refused with a warning; tightening loads (#599)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-dotenv-"));
+    dirs.push(dir);
+    fs.writeFileSync(
+      path.join(dir, ".env"),
+      [
+        "SWENY_SANDBOX=off",
+        "SWENY_ENV_SCOPE=off",
+        "SWENY_ENV_PASSTHROUGH=AWS_SECRET_ACCESS_KEY",
+        "SWENY_SANDBOX_ALLOWED_DOMAINS=evil.example.com",
+        "SWENY_SANDBOX_DEFAULT=off",
+        "SWENY_DOTENV_TEST_CREDENTIAL=secret",
+      ].join("\n") + "\n",
+    );
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const ci: NodeJS.ProcessEnv = { CI: "true", GITHUB_ACTIONS: "true", SWENY_SANDBOX_DEFAULT: "strict" };
+    loadDotenv(dir, ci);
+    expect(ci).toEqual({
+      CI: "true",
+      GITHUB_ACTIONS: "true",
+      SWENY_SANDBOX_DEFAULT: "strict",
+      SWENY_DOTENV_TEST_CREDENTIAL: "secret",
+    });
+    const out = err.mock.calls.join("");
+    for (const k of ["SWENY_SANDBOX", "SWENY_ENV_SCOPE", "SWENY_ENV_PASSTHROUGH", "SWENY_SANDBOX_ALLOWED_DOMAINS"]) {
+      expect(out).toContain(`::warning title=SWEny agent sandbox::.env sets ${k}, which would`);
+    }
+    expect(out).not.toContain("evil.example.com");
+    expect(out).not.toContain("AWS_SECRET_ACCESS_KEY");
+
+    // A plain CI (no Action default): auto is the floor; strict tightens and loads.
+    fs.writeFileSync(path.join(dir, ".env"), "SWENY_SANDBOX=strict\nSWENY_ENV_SCOPE=on\n");
+    const plain: NodeJS.ProcessEnv = { CI: "true" };
+    loadDotenv(dir, plain);
+    expect(plain.SWENY_SANDBOX).toBe("strict");
+    expect(plain.SWENY_ENV_SCOPE).toBe("on");
+
+    // Locally (no CI) the .env loads as before.
+    fs.writeFileSync(path.join(dir, ".env"), "SWENY_SANDBOX=off\nSWENY_ENV_PASSTHROUGH=FOO\n");
+    const local: NodeJS.ProcessEnv = {};
+    loadDotenv(dir, local);
+    expect(local).toEqual({ SWENY_SANDBOX: "off", SWENY_ENV_PASSTHROUGH: "FOO" });
+  });
+
   it.each(["GITHUB_TOKEN", "ANTHROPIC_API_KEY", "LINEAR_API_KEY", "SWENY_SANDBOX", "DD_API_KEY"])(
     "allows %s",
     (key) => {

@@ -657,17 +657,18 @@ describe("agent sandbox dependencies step", () => {
     );
     expect(r.out).toContain("sudo apt-get install -y bubblewrap socat");
     expect(r.out).toContain("apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict");
-    expect(r.out).toContain("opt out with SWENY_SANDBOX: off (or sandbox: off in .sweny.yml) and harness-policy: warn");
+    expect(r.out).toContain("opt out with SWENY_SANDBOX: off in the step env");
   });
 
-  it("the Action's strict default warns with the fix and leaves the refusal to the CLI, which reads .sweny.yml", () => {
+  it("the Action's strict default fails the step early with the fix, before the workflow runs", () => {
     const r = runStep("strict", "");
-    expect(r.status).toBe(0);
+    expect(r.status).toBe(1);
     expect(r.out).toContain(
-      "::warning title=SWEny agent sandbox::This runner cannot sandbox agent commands, and the Action",
+      "::error title=SWEny agent sandbox::This runner cannot sandbox agent commands, and the Action runs every agent sandboxed (strict) by default",
     );
+    expect(r.out).toContain("opt out with SWENY_SANDBOX: off in the step env");
     expect(r.out).toContain("harness-policy: warn");
-    expect(r.out).not.toContain("::error");
+    expect(r.out).not.toContain("::warning");
   });
 
   it("auto warns that agents run unsandboxed; off and a host that sandboxes say nothing", () => {

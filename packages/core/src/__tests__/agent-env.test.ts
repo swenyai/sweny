@@ -378,7 +378,9 @@ describe("resolveAgentSandbox", () => {
     expect(r.warning).toBeUndefined();
     expect(r.error).toContain("SWENY_SANDBOX_DEFAULT=strict, the GitHub Action's default");
     expect(r.error).toContain("apt-get install -y bubblewrap socat");
-    expect(r.error).toContain("SWENY_SANDBOX=off (`sandbox: off` in .sweny.yml) with harness-policy warn");
+    expect(r.error).toContain(
+      "SWENY_SANDBOX=off in the workflow's env (in CI, .sweny.yml and .env cannot lower the sandbox) with harness-policy warn",
+    );
   });
 });
 
@@ -405,6 +407,120 @@ describe("applyAgentFileConfig (.sweny.yml -> SWENY_* env)", () => {
     applyAgentFileConfig({ env_passthrough: ["BAR"], sandbox: "false" }, env);
     expect(env.SWENY_ENV_PASSTHROUGH).toBe("BAR");
     expect(resolveSandboxMode(env)).toBe("off");
+  });
+
+  describe("in CI, .sweny.yml only tightens (#599)", () => {
+    const run = async (file: Record<string, unknown>, env: NodeJS.ProcessEnv) => {
+      const { applyAgentFileConfig } = await import("../cli/config-file.js");
+      const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      try {
+        applyAgentFileConfig(file, env);
+        return err.mock.calls.join("");
+      } finally {
+        err.mockRestore();
+      }
+    };
+
+    it("sandbox: off cannot lower the Action's strict default, nor auto in CI", async () => {
+      const action: NodeJS.ProcessEnv = { CI: "true", GITHUB_ACTIONS: "true", SWENY_SANDBOX_DEFAULT: "strict" };
+      const out = await run({ sandbox: "off" }, action);
+      expect(action.SWENY_SANDBOX).toBeUndefined();
+      expect(resolveSandboxMode(action)).toBe("strict");
+      expect(out).toContain("::warning title=SWEny agent sandbox::.sweny.yml sets SWENY_SANDBOX");
+      expect(out).toContain("lower the agent sandbox from strict to off");
+      expect(out).toContain("the step's env:");
+      for (const v of ["auto", "false"]) {
+        const e: NodeJS.ProcessEnv = { CI: "true", SWENY_SANDBOX_DEFAULT: "strict" };
+        await run({ sandbox: v }, e);
+        expect(resolveSandboxMode(e), v).toBe("strict");
+      }
+      const ci: NodeJS.ProcessEnv = { CI: "true" };
+      const plain = await run({ sandbox: "off" }, ci);
+      expect(resolveSandboxMode(ci)).toBe("auto");
+      expect(plain).toContain(
+        "  warning: .sweny.yml sets SWENY_SANDBOX, which would lower the agent sandbox from auto to off",
+      );
+    });
+
+    it("tightening and same-level values apply; outside CI everything applies as before", async () => {
+      const ci: NodeJS.ProcessEnv = { CI: "true" };
+      expect(await run({ sandbox: "strict", "env-scope": "on" }, ci)).toBe("");
+      expect(ci.SWENY_SANDBOX).toBe("strict");
+      expect(ci.SWENY_ENV_SCOPE).toBe("on");
+      const action: NodeJS.ProcessEnv = { CI: "true", SWENY_SANDBOX_DEFAULT: "strict" };
+      await run({ sandbox: "strict" }, action);
+      expect(action.SWENY_SANDBOX).toBe("strict");
+      const local: NodeJS.ProcessEnv = {};
+      expect(await run({ sandbox: "off", "env-scope": "off" }, local)).toBe("");
+      expect(local.SWENY_SANDBOX).toBe("off");
+      expect(local.SWENY_ENV_SCOPE).toBe("off");
+    });
+
+    it("env-scope: off is refused in CI; env-passthrough and allowed domains stay as documented", async () => {
+      const ci: NodeJS.ProcessEnv = { CI: "true" };
+      const out = await run(
+        { "env-scope": "off", "env-passthrough": ["NPM_TOKEN"], "sandbox-allowed-domains": ["x.example.com"] },
+        ci,
+      );
+      expect(ci.SWENY_ENV_SCOPE).toBeUndefined();
+      expect(resolveEnvScope(ci)).toBe(true);
+      expect(out).toContain("turn agent env scoping off");
+      expect(ci.SWENY_ENV_PASSTHROUGH).toBe("NPM_TOKEN");
+      expect(ci.SWENY_SANDBOX_ALLOWED_DOMAINS).toBe("x.example.com");
+    });
+
+    it("the workflow's own env still wins, loosening included", async () => {
+      const env: NodeJS.ProcessEnv = { CI: "true", SWENY_SANDBOX_DEFAULT: "strict", SWENY_SANDBOX: "off" };
+      expect(await run({ sandbox: "strict" }, env)).toBe("");
+      expect(resolveSandboxMode(env)).toBe("off");
+    });
+  });
+});
+
+describe("repoFileLoosening (#599)", () => {
+  it("names the key and the effect, never the raw value", async () => {
+    const { repoFileLoosening } = await import("../agent-env.js");
+    const ci = { CI: "true" };
+    expect(repoFileLoosening("SWENY_SANDBOX", "off", ci, ".env")).toBe(
+      ".env sets SWENY_SANDBOX, which would lower the agent sandbox from auto to off in CI; ignored. " +
+        "In CI a repository file can only tighten the agent sandbox. To change it, set SWENY_SANDBOX in the " +
+        "workflow's env (for the swenyai/sweny Action, the step's env:).",
+    );
+    const evil = "a\n::error::pwned";
+    for (const k of ["SWENY_ENV_PASSTHROUGH", "SWENY_SANDBOX_ALLOWED_DOMAINS"]) {
+      const msg = repoFileLoosening(k, evil, ci, ".env");
+      expect(msg).toContain(`.env sets ${k}`);
+      expect(msg).not.toContain("pwned");
+    }
+    expect(repoFileLoosening("SWENY_ENV_PASSTHROUGH", "NPM_TOKEN", ci, ".env")).toContain(
+      "pass more variables to the agent",
+    );
+    expect(repoFileLoosening("SWENY_SANDBOX_ALLOWED_DOMAINS", "x.io", ci, ".env")).toContain(
+      "widen the agent's network allowlist",
+    );
+  });
+
+  it("accepts: outside CI, tightening, same level, non-modes, empty lists, and unrelated keys", async () => {
+    const { repoFileLoosening } = await import("../agent-env.js");
+    expect(repoFileLoosening("SWENY_SANDBOX", "off", {}, ".env")).toBeUndefined();
+    expect(repoFileLoosening("SWENY_SANDBOX", "off", { CI: "false" }, ".env")).toBeUndefined();
+    expect(repoFileLoosening("SWENY_SANDBOX", "auto", { CI: "true" }, ".env")).toBeUndefined();
+    expect(repoFileLoosening("SWENY_SANDBOX", "strict", { CI: "true" }, ".env")).toBeUndefined();
+    expect(repoFileLoosening("SWENY_SANDBOX", "bogus", { CI: "true" }, ".env")).toBeUndefined();
+    expect(repoFileLoosening("SWENY_SANDBOX", "auto", { CI: "1", SWENY_SANDBOX_DEFAULT: "strict" }, ".env")).toContain(
+      "from strict to auto",
+    );
+    expect(
+      repoFileLoosening("SWENY_SANDBOX", "No", { CI: "1", SWENY_SANDBOX_DEFAULT: "auto" }, ".sweny.yml"),
+    ).toContain(".sweny.yml sets SWENY_SANDBOX, which would lower the agent sandbox from auto to off");
+    expect(repoFileLoosening("SWENY_ENV_SCOPE", "on", { CI: "true" }, ".env")).toBeUndefined();
+    for (const v of ["off", " FALSE ", "0"]) {
+      expect(repoFileLoosening("SWENY_ENV_SCOPE", v, { CI: "true" }, ".env"), v).toContain("env scoping off");
+    }
+    expect(repoFileLoosening("SWENY_ENV_PASSTHROUGH", " ", { CI: "true" }, ".env")).toBeUndefined();
+    expect(repoFileLoosening("SWENY_ENV_PASSTHROUGH", "X", { CI: "true" }, ".sweny.yml")).toBeUndefined();
+    expect(repoFileLoosening("SWENY_SANDBOX_ALLOWED_DOMAINS", "x", { CI: "true" }, ".sweny.yml")).toBeUndefined();
+    expect(repoFileLoosening("GITHUB_TOKEN", "x", { CI: "true" }, ".env")).toBeUndefined();
   });
 });
 

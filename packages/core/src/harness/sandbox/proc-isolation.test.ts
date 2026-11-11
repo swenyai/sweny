@@ -13,11 +13,17 @@
  *
  * - Unsandboxed, the read is expected to succeed: that is the risk, asserted so
  *   the sandboxed cases cannot pass on a probe that never works.
- * - srt wrapper path (pi, ACP, Codex egress): the agent spawn prepareAgentSpawn
+ * - srt wrapper path (Codex, pi, ACP): the agent spawn prepareAgentSpawn
  *   returns, strict mode. The read must fail.
  * - Claude SDK sandbox path: sweny's own ClaudeCodeHarness (built dist) runs one
  *   node against a local fake model that asks for one Bash command, the probe.
- *   Sandbox off: the read succeeds; strict: it must fail.
+ *   Sandbox off: the read succeeds; strict: it must fail. The same for the Read
+ *   tool on /proc/<parent pid>/environ: the file tools run in the Claude Code
+ *   process, outside Bash's PID namespace, so strict must refuse /proc to them.
+ * - The CLI entry end to end: `sweny workflow run` with only the Action's
+ *   SWENY_SANDBOX_DEFAULT=strict (no mode passed in) in a workspace whose
+ *   .sweny.yml and .env both set the sandbox off. In CI they are refused and
+ *   the agent's Bash runs sandboxed.
  *
  * Linux only. Skips when the host cannot sandbox, except under
  * SWENY_REQUIRE_SANDBOX_WRAPPER=1 (the `sandbox-wrapper` CI job), where a
@@ -27,7 +33,7 @@
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -43,6 +49,7 @@ const LINUX = process.platform === "linux";
 const FAKE_AGENT = fileURLToPath(new URL("./fake-agent.mjs", import.meta.url));
 const PARENT = fileURLToPath(new URL("./proc-parent.mjs", import.meta.url));
 const DIST_INDEX = fileURLToPath(new URL("../../../dist/index.js", import.meta.url));
+const DIST_CLI = fileURLToPath(new URL("../../../dist/cli/main.js", import.meta.url));
 const CANARY_NAME = "SWENY_PROC_PARENT_SECRET";
 const CANARY_VALUE = `proc-canary-${process.pid}-${Date.now()}`;
 
@@ -195,12 +202,23 @@ describe.skipIf(!LINUX || !wrapper)("/proc isolation, srt wrapper path", () => {
 
 const TOOL_ID = "toolu_sweny_proc_probe";
 
+/** One tool call the fake model asks for. */
+interface ToolCall {
+  name: "Bash" | "Read";
+  input: Record<string, unknown>;
+}
+
+interface ToolResult {
+  text: string;
+  isError: boolean;
+}
+
 interface FakeModel {
   url: string;
-  /** Bash tool results the model received, in order. */
-  toolResults: string[];
-  /** Set the command once the parent's pid is known. */
-  command: string;
+  /** Results of the probe tool call the model received, in order. */
+  toolResults: ToolResult[];
+  /** The call to ask for, set once the parent's pid is known. */
+  call?: ToolCall;
   close(): Promise<void>;
 }
 
@@ -253,12 +271,12 @@ function textOf(content: unknown): string {
 }
 
 /**
- * A model that asks for one Bash call (the probe), records its result, then
- * ends the turn. Any request without the Bash tool (Claude Code's side calls)
- * gets a plain "ok".
+ * A model that asks for one tool call (the probe), records its result, then
+ * ends the turn. Any request that does not offer that tool (Claude Code's side
+ * calls) gets a plain "ok".
  */
 async function startFakeModel(): Promise<FakeModel> {
-  const fake: FakeModel = { url: "", toolResults: [], command: "", close: async () => {} };
+  const fake: FakeModel = { url: "", toolResults: [], close: async () => {} };
   const server = http.createServer((req, res) => {
     let raw = "";
     req.on("data", (c) => (raw += c));
@@ -287,23 +305,21 @@ async function startFakeModel(): Promise<FakeModel> {
       }
       const model = body.model ?? "claude-sonnet-4-5";
       const stream = body.stream === true;
-      let result: string | undefined;
+      let result: ToolResult | undefined;
       for (const m of body.messages ?? []) {
         if (!Array.isArray(m.content)) continue;
         for (const c of m.content as Array<Record<string, unknown>>) {
-          if (c?.type === "tool_result" && c.tool_use_id === TOOL_ID) result = textOf(c.content);
+          if (c?.type === "tool_result" && c.tool_use_id === TOOL_ID) {
+            result = { text: textOf(c.content), isError: c.is_error === true };
+          }
         }
       }
+      const call = fake.call;
       if (result !== undefined) {
         fake.toolResults.push(result);
         reply(res, stream, model, { type: "text", text: "done" });
-      } else if ((body.tools ?? []).some((t) => t?.name === "Bash") && fake.command) {
-        reply(res, stream, model, {
-          type: "tool_use",
-          id: TOOL_ID,
-          name: "Bash",
-          input: { command: fake.command, description: "sweny /proc isolation probe" },
-        });
+      } else if (call && (body.tools ?? []).some((t) => t?.name === call.name)) {
+        reply(res, stream, model, { type: "tool_use", id: TOOL_ID, name: call.name, input: call.input });
       } else {
         reply(res, stream, model, { type: "text", text: "ok" });
       }
@@ -317,8 +333,22 @@ async function startFakeModel(): Promise<FakeModel> {
 
 const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
+/** The Bash call that runs the probe against the parent `pid`. */
+function bashProbe(pid: number): ToolCall {
+  const plan = PLAN.split("__PARENT_PID__").join(String(pid));
+  return {
+    name: "Bash",
+    input: { command: `${shq(process.execPath)} ${shq(FAKE_AGENT)} ${shq(plan)}`, description: "sweny /proc probe" },
+  };
+}
+
+/** The Read call on the parent's environ: the file tools run outside Bash's PID namespace. */
+function readProbe(pid: number): ToolCall {
+  return { name: "Read", input: { file_path: `/proc/${pid}/environ` } };
+}
+
 const claudeSandboxReason = LINUX ? checkSandboxSupport() : "not Linux";
-const claudeReady = LINUX && existsSync(DIST_INDEX) && !claudeSandboxReason;
+const claudeReady = LINUX && existsSync(DIST_INDEX) && existsSync(DIST_CLI) && !claudeSandboxReason;
 
 if (LINUX && REQUIRED && !claudeReady) {
   describe("/proc isolation, Claude SDK sandbox (required)", () => {
@@ -344,10 +374,8 @@ describe.skipIf(!claudeReady)("/proc isolation, Claude SDK sandbox path", () => 
     await fake?.close();
   });
 
-  async function claudeAgent(sandbox: "off" | "strict"): Promise<{ probe: ProcParentResult; contained: unknown }> {
-    fake.toolResults = [];
-    fake.command = "";
-    const env = {
+  function modelEnv(): Record<string, string> {
+    return {
       ...baseEnv(),
       HOME: home,
       CI: "true",
@@ -357,22 +385,35 @@ describe.skipIf(!claudeReady)("/proc isolation, Claude SDK sandbox path", () => 
       DISABLE_AUTOUPDATER: "1",
       DISABLE_TELEMETRY: "1",
     };
-    const r = await runParent({ kind: "claude", dist: DIST_INDEX, cwd: workspace, sandbox }, env, (pid) => {
-      const plan = PLAN.split("__PARENT_PID__").join(String(pid));
-      fake.command = `${shq(process.execPath)} ${shq(FAKE_AGENT)} ${shq(plan)}`;
+  }
+
+  function lastResult(what: string, detail: string): ToolResult {
+    if (fake.toolResults.length === 0) throw new Error(`the agent never returned the ${what} result.\n${detail}`);
+    return fake.toolResults[fake.toolResults.length - 1];
+  }
+
+  /** One node on sweny's ClaudeCodeHarness, started by a parent that holds the canary. */
+  async function claudeAgent(
+    sandbox: "off" | "strict",
+    callFor: (pid: number) => ToolCall,
+  ): Promise<{ result: ToolResult; contained: unknown }> {
+    fake.toolResults = [];
+    fake.call = undefined;
+    const r = await runParent({ kind: "claude", dist: DIST_INDEX, cwd: workspace, sandbox }, modelEnv(), (pid) => {
+      fake.call = callFor(pid);
     });
     const line = r.stdout.split("\n").find((l) => l.startsWith("PARENT_RESULT "));
     const parent = line ? JSON.parse(line.slice("PARENT_RESULT ".length)) : undefined;
-    if (fake.toolResults.length === 0) {
-      throw new Error(
-        `the agent never returned the Bash result.\nparent: ${JSON.stringify(parent)}\nstderr: ${r.stderr.slice(-4000)}`,
-      );
-    }
-    return { probe: parseProbe(fake.toolResults[fake.toolResults.length - 1]), contained: parent?.contained };
+    const result = lastResult(
+      fake.call?.name ?? "tool",
+      `parent: ${JSON.stringify(parent)}\nstderr: ${r.stderr.slice(-4000)}`,
+    );
+    return { result, contained: parent?.contained };
   }
 
   it("sandbox off: the agent's Bash reads sweny's env through /proc (the risk)", async () => {
-    const { probe, contained } = await claudeAgent("off");
+    const { result, contained } = await claudeAgent("off", bashProbe);
+    const probe = parseProbe(result.text);
     console.log(summary("Claude SDK path, off", probe));
     expect(contained).toBe(false);
     expect(probe.self).toBe(false);
@@ -381,12 +422,82 @@ describe.skipIf(!claudeReady)("/proc isolation, Claude SDK sandbox path", () => 
   }, 180_000);
 
   it("strict: the sandboxed Bash cannot read sweny's env by any /proc route", async () => {
-    const { probe, contained } = await claudeAgent("strict");
+    const { result, contained } = await claudeAgent("strict", bashProbe);
+    const probe = parseProbe(result.text);
     console.log(summary("Claude SDK path, strict", probe));
     expect(contained).toBe(true);
     expect(probe.self).toBe(false);
     expect(probe.target.found).toBe(false);
     expect(probe.ancestors.filter((a) => a.found)).toEqual([]);
     expect(probe.scan.found).toBe(false);
+  }, 180_000);
+
+  it("sandbox off: the Read tool reads sweny's env from /proc/<pid>/environ (the risk)", async () => {
+    const { result, contained } = await claudeAgent("off", readProbe);
+    console.log(
+      `PROC RESULT Claude Read tool, off: isError=${result.isError} leaked=${result.text.includes(CANARY_VALUE)}`,
+    );
+    expect(contained).toBe(false);
+    expect(result.text).toContain(CANARY_VALUE);
+  }, 180_000);
+
+  it("strict: the Read tool is refused /proc, so it cannot read sweny's env (#599)", async () => {
+    const { result, contained } = await claudeAgent("strict", readProbe);
+    console.log(
+      `PROC RESULT Claude Read tool, strict: isError=${result.isError} leaked=${result.text.includes(CANARY_VALUE)} ` +
+        `result=${JSON.stringify(result.text.slice(0, 200))}`,
+    );
+    expect(contained).toBe(true);
+    expect(result.text).not.toContain(CANARY_VALUE);
+    expect(result.isError).toBe(true);
+  }, 180_000);
+
+  // #599 end to end: the CLI entry, with nothing but the Action's env default
+  // (SWENY_SANDBOX_DEFAULT=strict, no SWENY_SANDBOX, no mode passed in), and a
+  // workspace whose .sweny.yml and .env both try to turn the sandbox off.
+  it("the CLI under the Action's default sandboxes the agent; .sweny.yml and .env cannot turn it off in CI", async () => {
+    fake.toolResults = [];
+    fake.call = undefined;
+    const ws = await mkdtemp(path.join(root, "cli-ws-"));
+    await writeFile(
+      path.join(ws, "wf.yml"),
+      [
+        "id: proc-probe",
+        "name: proc probe",
+        "description: d",
+        "entry: probe",
+        "permissions: write",
+        "nodes:",
+        "  probe:",
+        "    name: Probe",
+        "    instruction: Run the probe command with Bash.",
+        "edges: []",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(path.join(ws, ".sweny.yml"), "sandbox: off\n");
+    await writeFile(path.join(ws, ".env"), "SWENY_SANDBOX=off\n");
+    const r = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn(process.execPath, [DIST_CLI, "workflow", "run", "wf.yml"], {
+        cwd: ws,
+        env: { ...modelEnv(), NO_COLOR: "1", SWENY_SANDBOX_DEFAULT: "strict", [CANARY_NAME]: CANARY_VALUE },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      if (child.pid) fake.call = bashProbe(child.pid);
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (c) => (stdout += c));
+      child.stderr.on("data", (c) => (stderr += c));
+      child.on("error", reject);
+      child.on("exit", (code) => resolve({ code, stdout, stderr }));
+    });
+    const out = r.stdout + r.stderr;
+    const probe = parseProbe(lastResult("Bash", `exit ${r.code}\n${out.slice(-4000)}`).text);
+    console.log(summary("CLI, Action default, repo files say off", probe));
+    expect(out).toContain(".env sets SWENY_SANDBOX, which would lower the agent sandbox from strict to off");
+    expect(out).toContain(".sweny.yml sets SWENY_SANDBOX, which would lower the agent sandbox from strict to off");
+    expect(probe.self).toBe(false);
+    expect(leaked(probe)).toBe(false);
+    expect(probe.target.readable).toBe(false);
   }, 180_000);
 });
