@@ -59,6 +59,8 @@ export type {
   // Core public field types (the types of Node's own fields)
   Evaluator,
   EvaluatorRule,
+  OutputGroundedRule,
+  OutputGroundedQuote,
   EvalResult,
   EvaluatorKind,
   NodeRequires,

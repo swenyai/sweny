@@ -345,6 +345,69 @@ export interface EvaluatorRule {
   output_required?: string[];
   /** Each assertion must hold against `result.data`. (`value` rules.) */
   output_matches?: OutputMatch[];
+  /**
+   * Every id and URL in `result.data` must appear in what the agent saw: its
+   * successful read-tool outputs, its own instruction, plus (by default) the
+   * workflow input and prior nodes' context. (`function` rules only.) See
+   * {@link OutputGroundedRule}.
+   */
+  output_grounded?: OutputGroundedRule;
+}
+
+/**
+ * Config for the `output_grounded` check (#580). Every field is optional;
+ * `{}` scans the whole output for URLs and `owner/repo#N` refs.
+ */
+export interface OutputGroundedRule {
+  /** Paths into `result.data` whose strings are scanned with `patterns`. Default: the whole output. */
+  paths?: string[];
+  /** Paths whose string or number values are each one id, checked whole (e.g. `items[*].ticket_id`). */
+  ids?: string[];
+  /**
+   * What counts as an id in scanned text: built-in names `url`, `github_ref`
+   * (`owner/repo#123`), `issue_key` (`ENG-123`), or a JavaScript regex source
+   * (its first capture group is the id when it has one). Default: `url` and
+   * `github_ref`; issue keys only when listed (prose is full of `UTF-8`-style
+   * tokens), or at `ids` paths. `[]` turns the scan off.
+   */
+  patterns?: string[];
+  /** Constants that always pass (URLs compared normalized). */
+  allow?: string[];
+  /**
+   * Only these tools' outputs count as evidence, whatever their class. A bare
+   * name matches sweny's own or a built-in tool; an MCP tool is named
+   * `server/tool` (or `mcp__server__tool`). Default: every successful read tool.
+   */
+  tools?: string[];
+  /** The workflow input counts as evidence. Default `true`. */
+  inputs?: boolean;
+  /** Prior nodes' context (what this node's prompt was given) counts as evidence. Default `true`. */
+  context?: boolean;
+  /**
+   * Fail an id seen only in the input or prior context when this node's tool
+   * outputs returned other ids of the same kind (same issue-key prefix, same
+   * repo, same URL collection) but not this one. Default `false`.
+   */
+  stale?: boolean;
+  /** Values that must appear verbatim in a tool's output (never in the input or context). */
+  quotes?: OutputGroundedQuote[];
+}
+
+/** One `output_grounded.quotes` entry: the values at `path` must be copied from a tool's output. */
+export interface OutputGroundedQuote {
+  /** Path into `result.data`; every string or number value under it is one quote. */
+  path: string;
+  /** Tools whose outputs the quote must come from, named as in the rule's `tools`. Default: the rule's `tools`, else any read tool. */
+  tools?: string[];
+  /** Shortest quote accepted, counted after whitespace normalization. Default 8. */
+  min_length?: number;
+  /**
+   * How whitespace compares. `exact`: byte for byte. `trim` (default): the
+   * quote's leading and trailing whitespace is ignored. `collapse`: every run
+   * of whitespace, in the quote and the tool output, counts as one space, and
+   * the quote is trimmed.
+   */
+  whitespace?: "exact" | "trim" | "collapse";
 }
 
 /**
@@ -967,6 +1030,12 @@ export interface ToolCall {
    * evaluators fall back to inspecting `output` for an `error` key.
    */
   status?: "success" | "error";
+  /**
+   * The MCP server an external tool came from (`linear` for
+   * `mcp__linear__get_issue`). Absent for sweny's own tools, built-ins, and
+   * harnesses that do not report it. `output_grounded` matches `tools` on it.
+   */
+  server?: string;
 }
 
 export type ExecutionEvent =

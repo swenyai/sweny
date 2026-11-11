@@ -858,7 +858,7 @@ describe("ClaudeClient", () => {
       const result = await client.run({ instruction: "x", context: {}, tools: [] });
 
       expect(result.toolCalls).toHaveLength(1);
-      expect(result.toolCalls[0]).toMatchObject({ tool: "search", status: "success" });
+      expect(result.toolCalls[0]).toMatchObject({ tool: "search", server: "linear", status: "success" });
     });
 
     it("records an external MCP tool error as status:error", async () => {
@@ -922,6 +922,8 @@ describe("ClaudeClient", () => {
       // created by the assistant tool_use should be the only one.
       const names = result.toolCalls.map((c: { tool: string }) => c.tool);
       expect(names).toEqual(["fetch_data"]);
+      // sweny's own server is not recorded: only external MCP tools carry a server (#580).
+      expect(result.toolCalls[0]).not.toHaveProperty("server");
     });
 
     it("leaves status undefined for a tool_use with no matching tool_result", async () => {
