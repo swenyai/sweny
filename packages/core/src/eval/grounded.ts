@@ -41,12 +41,14 @@ const URL_RE = /https?:\/\/[^\s<>"'`()[\]{}|\\^]+/g;
 const TRAILING_PUNCT_RE = /[.,;:!?]+$/;
 const GITHUB_REF_RE = /(?<![\w./-])([\w.-]+)\/([\w.-]+)#(\d+)(?!\w)/g;
 const ISSUE_KEY_RE = /(?<![\w-])([A-Z][A-Z0-9]{1,9})-\d+(?![\w-])/g;
-const GITHUB_URL_RE = /^https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/(?:issues|pull)\/(\d+)$/;
+/** Matched against a normalized URL: `//host/owner/repo/(issues|pull)/N` at the end. */
+const GITHUB_URL_RE = /\/\/[^/]+\/([^/]+)\/([^/]+)\/(?:issues|pull)\/(\d+)$/;
 const WORD_CHAR = /[\w-]/;
 const SEGMENT_RE = /^([A-Za-z_]\w*)(\[\*\])?$/;
 const IDENT_RE = /^[A-Za-z_]\w*$/;
 
 type Verdict = { pass: boolean; reasoning?: string };
+type Located = { path: string; value: unknown };
 
 // ─── URLs ────────────────────────────────────────────────────────────
 
@@ -73,39 +75,32 @@ function urlCollection(normalized: string): string | undefined {
 
 // ─── Walking values ──────────────────────────────────────────────────
 
+/** `a.b`, `a[0]`, `a["not an identifier"]`. */
 function childPath(parent: string, key: string | number): string {
-  if (typeof key === "number") return `${parent}[${key}]`;
-  if (!IDENT_RE.test(key)) return `${parent}[${JSON.stringify(key)}]`;
-  return parent === "" ? key : `${parent}.${key}`;
+  if (!IDENT_RE.test(String(key))) return `${parent}[${JSON.stringify(key)}]`;
+  return parent === "" ? `${key}` : `${parent}.${key}`;
+}
+
+/** Every string (and, with `numbers`, number) leaf under a value of the output, with its concrete path. */
+function leaves(value: unknown, path: string, numbers: boolean): Array<{ path: string; text: string }> {
+  if (typeof value === "string") return [{ path, text: value }];
+  if (numbers && typeof value === "number") return [{ path, text: String(value) }];
+  if (typeof value !== "object" || value === null) return [];
+  if (Array.isArray(value)) return value.flatMap((v, i) => leaves(v, childPath(path, i), numbers));
+  return Object.entries(value).flatMap(([k, v]) => leaves(v, childPath(path, k), numbers));
 }
 
 /**
- * Visit every string leaf (and, with `numbers`, number leaf) under a value,
- * with its concrete path. `onKey` sees object keys, never array indexes.
+ * Every string and number in a tool output or context value, plus object keys
+ * when `keys` (never array indexes). Cycles are read once.
  */
-function walk(
-  value: unknown,
-  path: string,
-  numbers: boolean,
-  onText: (path: string, text: string) => void,
-  onKey?: (key: string) => void,
-  seen: WeakSet<object> = new WeakSet(),
-): void {
-  if (typeof value === "string") {
-    onText(path, value);
-  } else if (numbers && typeof value === "number") {
-    onText(path, String(value));
-  } else if (typeof value === "object" && value !== null && !seen.has(value)) {
-    seen.add(value);
-    if (Array.isArray(value)) {
-      value.forEach((v, i) => walk(v, childPath(path, i), numbers, onText, onKey, seen));
-    } else {
-      for (const [k, v] of Object.entries(value)) {
-        onKey?.(k);
-        walk(v, childPath(path, k), numbers, onText, onKey, seen);
-      }
-    }
-  }
+function strings(value: unknown, keys: boolean, seen: WeakSet<object> = new WeakSet()): string[] {
+  if (typeof value === "string") return [value];
+  if (typeof value === "number") return [String(value)];
+  if (typeof value !== "object" || value === null || seen.has(value)) return [];
+  seen.add(value);
+  if (Array.isArray(value)) return value.flatMap((v) => strings(v, keys, seen));
+  return Object.entries(value).flatMap(([k, v]) => [...(keys ? [k] : []), ...strings(v, keys, seen)]);
 }
 
 /**
@@ -114,57 +109,54 @@ function walk(
  * `items[*].url`. A path that does not resolve has nothing to check. A
  * malformed path throws.
  */
-function resolveConcrete(data: unknown, path: string): Array<{ path: string; value: unknown }> {
-  let current: Array<{ path: string; value: unknown }> = [{ path: "", value: data }];
+function resolveConcrete(data: unknown, path: string): Located[] {
+  let current: Located[] = [{ path: "", value: data }];
   for (const part of path.replace(/^(all|any):/, "").split(".")) {
     const m = SEGMENT_RE.exec(part);
     if (!m) throw new Error(`malformed path '${path}'`);
     const name = m[1]!;
-    const next: Array<{ path: string; value: unknown }> = [];
-    for (const c of current) {
-      const obj = c.value as Record<string, unknown> | null;
-      if (typeof obj !== "object" || obj === null || Array.isArray(obj) || !(name in obj)) continue;
+    current = current.flatMap((c): Located[] => {
+      const obj = c.value as Record<string, unknown>;
+      if (typeof obj !== "object" || obj === null || Array.isArray(obj) || !(name in obj)) return [];
       const p = childPath(c.path, name);
       const child = obj[name];
-      if (m[2] === undefined) next.push({ path: p, value: child });
-      else if (Array.isArray(child)) child.forEach((el, i) => next.push({ path: childPath(p, i), value: el }));
-    }
-    current = next;
+      if (m[2] === undefined) return [{ path: p, value: child }];
+      return Array.isArray(child) ? child.map((el, i) => ({ path: childPath(p, i), value: el })) : [];
+    });
   }
   return current;
 }
 
 // ─── Candidates: ids and URLs in the output ──────────────────────────
 
-/** One id or URL found in the output. `cls` groups ids of one kind, for `stale`. */
+/** One id or URL found in the output. `cls` groups ids of one kind, for `stale`. Other ids have no `type`. */
 interface Candidate {
   path: string;
   value: string;
-  type: "url" | "github_ref" | "token";
+  type?: "url" | "github_ref";
   cls?: string;
 }
 
 interface Compiled {
-  builtins: Set<string>;
+  builtins: string[];
   custom: Array<{ name: string; re: RegExp }>;
 }
 
-function compilePatterns(patterns: readonly string[] = BUILTIN_PATTERNS): Compiled {
-  const compiled: Compiled = { builtins: new Set(), custom: [] };
-  for (const p of patterns) {
-    if ((BUILTIN_PATTERNS as readonly string[]).includes(p)) {
-      compiled.builtins.add(p);
-    } else if (p.length > MAX_REGEX_SOURCE_LENGTH) {
-      throw new Error(`invalid pattern: regex source exceeds ${MAX_REGEX_SOURCE_LENGTH} characters`);
-    } else {
-      try {
-        compiled.custom.push({ name: p, re: new RegExp(p, "g") });
-      } catch (e) {
-        throw new Error(`invalid pattern /${p}/: ${(e as Error).message}`);
-      }
-    }
+const isBuiltin = (p: string): boolean => (BUILTIN_PATTERNS as readonly string[]).includes(p);
+
+function compileRegex(p: string): { name: string; re: RegExp } {
+  if (p.length > MAX_REGEX_SOURCE_LENGTH) {
+    throw new Error(`invalid pattern: regex source exceeds ${MAX_REGEX_SOURCE_LENGTH} characters`);
   }
-  return compiled;
+  try {
+    return { name: p, re: new RegExp(p, "g") };
+  } catch (e) {
+    throw new Error(`invalid pattern /${p}/: ${(e as Error).message}`);
+  }
+}
+
+function compilePatterns(patterns: readonly string[] = BUILTIN_PATTERNS): Compiled {
+  return { builtins: patterns.filter(isBuiltin), custom: patterns.filter((p) => !isBuiltin(p)).map(compileRegex) };
 }
 
 /**
@@ -172,37 +164,36 @@ function compilePatterns(patterns: readonly string[] = BUILTIN_PATTERNS): Compil
  * inside a URL is checked once, as the URL. Masking happens even when the url
  * pattern is off, so other patterns never match inside a URL.
  */
-function extract(text: string, path: string, compiled: Compiled, out: Candidate[]): void {
+function extract(text: string, compiled: Compiled, path = ""): Candidate[] {
+  const out: Candidate[] = [];
   let rest = text.replace(URL_RE, (m) => {
-    if (compiled.builtins.has("url")) {
+    if (compiled.builtins.includes("url")) {
       const value = m.replace(TRAILING_PUNCT_RE, "");
       out.push({ path, value, type: "url", cls: urlCollection(normalizeUrl(value)) });
     }
     return " ";
   });
-  if (compiled.builtins.has("github_ref")) {
+  if (compiled.builtins.includes("github_ref")) {
     rest = rest.replace(GITHUB_REF_RE, (m, owner: string, repo: string) => {
       out.push({ path, value: m, type: "github_ref", cls: `gh:${owner}/${repo}`.toLowerCase() });
       return " ";
     });
   }
-  if (compiled.builtins.has("issue_key")) {
-    for (const m of rest.matchAll(ISSUE_KEY_RE)) out.push({ path, value: m[0], type: "token", cls: `key:${m[1]}` });
+  if (compiled.builtins.includes("issue_key")) {
+    for (const m of rest.matchAll(ISSUE_KEY_RE)) out.push({ path, value: m[0], cls: `key:${m[1]}` });
   }
   for (const c of compiled.custom) {
     for (const m of rest.matchAll(c.re)) {
       const value = m[1] ?? m[0];
-      if (value !== "") out.push({ path, value, type: "token", cls: `re:${c.name}` });
+      if (value !== "") out.push({ path, value, cls: `re:${c.name}` });
     }
   }
+  return out;
 }
 
 /** A whole value at an `ids` path, classified (for `stale`) when it has a recognizable kind. */
 function wholeValue(value: string, path: string): Candidate {
-  const found: Candidate[] = [];
-  extract(value, path, compilePatterns(), found);
-  const same = found.find((c) => c.value === value);
-  return same ?? { path, value, type: "token" };
+  return extract(value, compilePatterns(), path).find((c) => c.value === value) ?? { path, value };
 }
 
 // ─── Evidence ────────────────────────────────────────────────────────
@@ -214,7 +205,8 @@ class Corpus {
   private readonly refs = new Set<string>();
 
   add(value: unknown): void {
-    const addText = (s: string): void => {
+    // Object keys can carry ids too (`{ "ENG-1": {...} }`).
+    for (const s of strings(value, true)) {
       this.texts.push(s);
       for (const m of s.matchAll(URL_RE)) {
         const url = normalizeUrl(m[0].replace(TRAILING_PUNCT_RE, ""));
@@ -223,9 +215,7 @@ class Corpus {
         if (gh) this.refs.add(`${gh[1]}/${gh[2]}#${gh[3]}`.toLowerCase());
       }
       for (const m of s.matchAll(GITHUB_REF_RE)) this.refs.add(m[0].toLowerCase());
-    };
-    // Object keys can carry ids too (`{ "ENG-1": {...} }`).
-    walk(value, "", true, (_p, s) => addText(s), addText);
+    }
   }
 
   has(c: Candidate): boolean {
@@ -234,11 +224,9 @@ class Corpus {
     return this.texts.some((t) => containsToken(t, c.value));
   }
 
-  /** Every id kind this corpus holds, by the same extraction as the output. */
-  classes(compiled: Compiled): Set<string> {
-    const found: Candidate[] = [];
-    for (const t of this.texts) extract(t, "", compiled, found);
-    return new Set(found.flatMap((f) => (f.cls === undefined ? [] : [f.cls])));
+  /** Every id kind this corpus holds, by the same extraction as the output (undefined for a kindless one). */
+  kinds(compiled: Compiled): Set<string | undefined> {
+    return new Set(this.texts.flatMap((t) => extract(t, compiled)).map((c) => c.cls));
   }
 }
 
@@ -284,19 +272,16 @@ function listed(failures: string[]): string {
 
 function checkIds(rule: OutputGroundedRule, data: unknown, evidence: GroundingEvidence): string[] {
   const compiled = compilePatterns(rule.patterns);
-  const candidates: Candidate[] = [];
   const roots =
     rule.paths === undefined ? [{ path: "", value: data }] : rule.paths.flatMap((p) => resolveConcrete(data, p));
-  for (const root of roots)
-    walk(root.value, root.path, false, (path, text) => extract(text, path, compiled, candidates));
-  for (const p of rule.ids ?? []) {
-    for (const root of resolveConcrete(data, p)) {
-      walk(root.value, root.path, true, (path, text) => {
-        if (text.trim() !== "") candidates.push(wholeValue(text.trim(), path));
-      });
-    }
-  }
-  if (candidates.length === 0) return [];
+  const scanned = roots
+    .flatMap((r) => leaves(r.value, r.path, false))
+    .flatMap((l) => extract(l.text, compiled, l.path));
+  const whole = (rule.ids ?? [])
+    .flatMap((p) => resolveConcrete(data, p))
+    .flatMap((r) => leaves(r.value, r.path, true))
+    .filter((l) => l.text.trim() !== "")
+    .map((l) => wholeValue(l.text.trim(), l.path));
 
   const tools = new Corpus();
   for (const c of evidenceCalls(evidence, rule.tools)) tools.add(c.output);
@@ -306,17 +291,19 @@ function checkIds(rule: OutputGroundedRule, data: unknown, evidence: GroundingEv
   for (const [k, v] of Object.entries(evidence.context ?? {})) {
     if (k !== evidence.nodeId && (k === "input" ? useInputs : useContext)) given.add(v);
   }
-  const allow = new Set((rule.allow ?? []).map(normalizeUrl));
-  const staleKinds = rule.stale === true ? tools.classes(compiled) : undefined;
+  const allow = new Set(rule.allow?.map(normalizeUrl));
+  // Kinds come from every built-in plus the rule's own patterns, so a whole value at an ids path has a kind to match.
+  const staleKinds =
+    rule.stale === true ? tools.kinds(compilePatterns([...BUILTIN_PATTERNS, ...(rule.patterns ?? [])])) : undefined;
 
   const failures: string[] = [];
   const seen = new Set<string>();
-  for (const c of candidates) {
+  for (const c of [...scanned, ...whole]) {
     const key = JSON.stringify([c.path, c.value]);
     if (seen.has(key) || allow.has(normalizeUrl(c.value)) || tools.has(c)) continue;
     seen.add(key);
     if (!given.has(c)) failures.push(label(c.path, c.value));
-    else if (c.cls !== undefined && staleKinds?.has(c.cls) === true) {
+    else if (c.cls !== undefined && staleKinds?.has(c.cls)) {
       failures.push(
         `${label(c.path, c.value)} (stale: this node's tools returned other ids of its kind, not this one)`,
       );
@@ -342,17 +329,15 @@ function checkQuotes(rule: OutputGroundedRule, data: unknown, evidence: Groundin
   for (const q of rule.quotes ?? []) {
     const mode = q.whitespace ?? "trim";
     const names = q.tools ?? rule.tools;
-    const hay: string[] = [];
-    for (const c of evidenceCalls(evidence, names)) {
-      walk(c.output, "", true, (_p, s) => hay.push(mode === "collapse" ? normalizeQuote(s, mode) : s));
-    }
+    // Normalizing the output under trim changes nothing a trimmed quote can match; under collapse it is the rule.
+    const hay = evidenceCalls(evidence, names).flatMap((c) =>
+      strings(c.output, false).map((s) => normalizeQuote(s, mode)),
+    );
     const failures: string[] = [];
-    for (const root of resolveConcrete(data, q.path)) {
-      walk(root.value, root.path, true, (path, text) => {
-        const needle = normalizeQuote(text, mode);
-        if (!/\S/.test(needle)) failures.push(`${label(path, text)} (empty)`);
-        else if (!hay.some((h) => h.includes(needle))) failures.push(label(path, text));
-      });
+    for (const l of resolveConcrete(data, q.path).flatMap((r) => leaves(r.value, r.path, true))) {
+      const needle = normalizeQuote(l.text, mode);
+      if (!/\S/.test(needle)) failures.push(`${label(l.path, l.text)} (empty)`);
+      else if (!hay.some((h) => h.includes(needle))) failures.push(label(l.path, l.text));
     }
     if (failures.length > 0) {
       const from = names === undefined ? "any tool's" : names.join(", ");

@@ -319,6 +319,18 @@ describe("ids: stale (opt-in)", () => {
     expect(why({ stale: true, patterns: ["T\\d+"] }, { t: "T5" }, ev([ok("t", "T6")], input))).toBe(stale('t "T5"'));
   });
 
+  it("keeps two custom patterns apart", () => {
+    const input = { input: { t: "T5" } };
+    expect(why({ stale: true, patterns: ["T\\d+", "U\\d+"] }, { t: "T5" }, ev([ok("t", "U6")], input))).toBe("PASS");
+  });
+
+  it("classifies a whole value with the scan off", () => {
+    const input = { input: { t: "OPS-7" } };
+    expect(why({ stale: true, patterns: [], ids: ["t"] }, { t: "OPS-7" }, ev([ok("t", "OPS-8")], input))).toBe(
+      stale('t "OPS-7"'),
+    );
+  });
+
   it("classifies whole values at ids paths when they have a kind", () => {
     const input = { input: { t: "OPS-7", n: 7 } };
     expect(why({ stale: true, ids: ["t"] }, { t: "OPS-7" }, ev([ok("t", "OPS-8")], input))).toBe(stale('t "OPS-7"'));
@@ -341,7 +353,8 @@ describe("ids: URL normalization", () => {
 
   it("strips sentence punctuation after a URL, not dots inside it", () => {
     expect(why({}, { s: "Read https://e.com/a." }, ev([ok("t", "(https://e.com/a)")]))).toBe("PASS");
-    expect(why({}, { s: "Really https://e.com/a?!" }, ev([ok("t", "https://e.com/a")]))).toBe("PASS");
+    expect(why({}, { s: "Really https://e.com/a!!" }, ev([ok("t", "https://e.com/a")]))).toBe("PASS");
+    expect(why({}, { u: "https://e.com/a" }, ev([ok("t", "See https://e.com/a.")]))).toBe("PASS");
     expect(why({ allow: ["https://e.com/file.txt"] }, { s: "https://e.com/file.txt" }, ev([]))).toBe("PASS");
   });
 });
@@ -390,6 +403,13 @@ describe("ids: paths", () => {
     );
   });
 
+  it("reads an all:/any: prefix only at the start, and segments only as identifiers", () => {
+    expect(why({ paths: ["a.all:b"] }, { a: { b: "ENG-1" } }, ev([]))).toBe(
+      "output_grounded: malformed path 'a.all:b'",
+    );
+    expect(why({ paths: ["1a"] }, { a: "ENG-1" }, ev([]))).toBe("output_grounded: malformed path '1a'");
+  });
+
   it("fails a malformed path", () => {
     expect(why({ paths: ["items[0]"] }, { items: [] }, ev([]))).toBe("output_grounded: malformed path 'items[0]'");
     expect(why({ ids: ["a..b"] }, {}, ev([]))).toBe("output_grounded: malformed path 'a..b'");
@@ -398,6 +418,16 @@ describe("ids: paths", () => {
   it("checks whole values at ids paths: strings trimmed, numbers, not booleans or blanks", () => {
     const data = { items: [{ t: 4821 }, { t: " 4822 " }, { t: true }, { t: "  " }] };
     expect(why({ ids: ["items[*].t"] }, data, ev([ok("t", { rows: [{ id: 4821 }] })]))).toBe(ids('items[1].t "4822"'));
+  });
+
+  it("skips a blank whole value", () => {
+    expect(why({ ids: ["t"] }, { t: "  " }, ev([]))).toBe("PASS");
+  });
+
+  it("checks a whole value as itself, not as the URL inside it", () => {
+    expect(why({ patterns: [], ids: ["u"] }, { u: "https://e.com/a." }, ev([ok("t", ["https://e.com/a"])]))).toBe(
+      ids('u "https://e.com/a."'),
+    );
   });
 
   it("does not ground a whole value by a longer number", () => {
@@ -422,6 +452,23 @@ describe("ids: allow, patterns, tools", () => {
     expect(why({ patterns: ["issue_key"] }, data, ev([]))).toBe(ids('s "ENG-1"'));
     expect(why({ patterns: ["github_ref"] }, data, ev([]))).toBe(ids('s "acme/api#1"'));
     expect(why({ patterns: [] }, data, ev([]))).toBe("PASS");
+  });
+
+  it("masks a URL or ref with a space, so its neighbours never join", () => {
+    expect(why({ patterns: ["a\\|"] }, { s: "ahttps://e.com/x|" }, ev([]))).toBe("PASS");
+    expect(why({ patterns: ["github_ref", "@\\|"] }, { s: "@acme/api#1|" }, ev([ok("t", "acme/api#1")]))).toBe("PASS");
+  });
+
+  it("grounds only a ref candidate by a ref, never a custom id that looks like one", () => {
+    expect(why({ patterns: ["\\w+/\\w+#\\d+"] }, { s: "acme/api#1" }, ev([ok("t", "Acme/Api#1")]))).toBe(
+      ids('s "acme/api#1"'),
+    );
+  });
+
+  it("reads no evidence from nulls, booleans or empty objects", () => {
+    expect(why({ patterns: ["here"] }, { s: "here" }, ev([ok("t", { a: null, b: [true], c: {} })]))).toBe(
+      ids('s "here"'),
+    );
   });
 
   it("masks URLs even when the url pattern is off", () => {
@@ -509,6 +556,18 @@ describe("quotes", () => {
   it("never comes from the input or context", () => {
     expect(why(q(), { notes: [{ quote: "only in input" }] }, ev([], { input: { s: "only in input" } }))).toBe(
       missing('notes[0].quote "only in input"'),
+    );
+  });
+
+  it("does not take a quote from an object key, a null or a boolean", () => {
+    expect(why({ patterns: [], quotes: [{ path: "q" }] }, { q: "api" }, ev([ok("t", { api: null, x: [false] })]))).toBe(
+      'output_grounded: 1 quote(s) not found verbatim in any tool\'s output (whitespace: trim): q "api"',
+    );
+  });
+
+  it("checks a number quote", () => {
+    expect(why(q(), { notes: [{ quote: 43 }] }, ev([ok("github_get_pr_patches", { n: 42 })]))).toBe(
+      missing('notes[0].quote "43"'),
     );
   });
 
