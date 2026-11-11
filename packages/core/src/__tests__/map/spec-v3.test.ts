@@ -11,7 +11,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 
 import { CURRENT_SPEC_VERSION, MIGRATIONS, assertRegistryValid, migrateWorkflow } from "../../migrations.js";
 import { validateParsed, loadAndValidateWorkflow } from "../../loader.js";
-import { workflowZ, workflowJsonSchema, validateWorkflow } from "../../schema.js";
+import { workflowZ, workflowJsonSchema, validateWorkflow, isAgentNode } from "../../schema.js";
 import { workflowHashOf } from "../../journal.js";
 import { MAP_OUTPUT_SCHEMA, childWorkflowOf, itemKeyOf, withMapOutputs } from "../../map-spec.js";
 import type { Workflow } from "../../types.js";
@@ -151,6 +151,17 @@ describe("the map node schema", () => {
     expect([n.over, n.key, n.result, n.concurrency, n.max_items]).toEqual(["list.items", "id", "draft", 2, 10]);
     expect(n.with).toEqual({ team: "input.team" });
     expect(r.warnings).toBeUndefined();
+  });
+
+  it("isAgentNode narrows a raw workflowZ parse back to agent-node fields", () => {
+    const parsed = workflowZ.parse(mapWorkflow());
+    const list = parsed.nodes.list;
+    expect(isAgentNode(list)).toBe(true);
+    // Only typechecks once narrowed: a raw parse types each node as agent | map.
+    if (isAgentNode(list)) expect(list.instruction).toBe("List the todos.");
+    expect(isAgentNode(parsed.nodes.draft_all)).toBe(false);
+    expect(isAgentNode({ kind: "agent" })).toBe(true);
+    expect(isAgentNode({})).toBe(true);
   });
 
   it("an agent node may say kind: agent", () => {
