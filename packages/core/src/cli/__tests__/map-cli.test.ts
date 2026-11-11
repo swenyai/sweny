@@ -15,6 +15,7 @@ const fake = vi.hoisted(() => ({
   /** Per item key, what each call does (the last repeats). */
   plan: {} as Record<string, Act[]>,
   calls: [] as string[],
+  inputs: [] as unknown[],
   readOnly: [] as boolean[],
   aborted: [] as string[],
   harnesses: 0,
@@ -34,6 +35,7 @@ vi.mock("../../harness/index.js", async (importOriginal) => {
         const key = (req.context as { input?: { item_key?: string } }).input?.item_key ?? "?";
         const n = fake.calls.filter((c) => c === key).length;
         fake.calls.push(key);
+        fake.inputs.push((req.context as { input?: unknown }).input);
         fake.readOnly.push(req.readOnly === true);
         const acts = fake.plan[key] ?? ["ok"];
         if (acts[Math.min(n, acts.length - 1)] === "hang") {
@@ -74,24 +76,21 @@ vi.mock("../version-check.js", () => ({ maybeNudge: async () => {}, defaultCache
 
 vi.setConfig({ testTimeout: 30_000 });
 
-class Exit extends Error {
-  constructor(readonly code: number) {
-    super(`exit ${code}`);
-  }
-}
-
 const dirs: string[] = [];
 let state = "";
 /** Everything the CLI printed, shown when an exit code is not the expected one. */
 let printed: string[] = [];
+let exitCode: number | undefined;
 const keep = (...args: unknown[]) => void printed.push(args.map(String).join(" "));
 beforeEach(() => {
   state = mkdtempSync(join(tmpdir(), "sweny-map-cli-state-"));
   dirs.push(state);
   vi.stubEnv("SWENY_STATE_DIR", state);
   vi.stubEnv("GITHUB_STEP_SUMMARY", "");
+  exitCode = undefined;
+  // Record the first exit code and carry on: the CLI calls exit inside its own try blocks.
   vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-    throw new Exit(code ?? 0);
+    exitCode ??= code ?? 0;
   }) as never);
   printed = [];
   vi.spyOn(console, "log").mockImplementation(keep);
@@ -101,6 +100,7 @@ beforeEach(() => {
   vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => (keep(chunk), true));
   fake.plan = {};
   fake.calls = [];
+  fake.inputs = [];
   fake.readOnly = [];
   fake.aborted = [];
   fake.harnesses = 0;
@@ -121,6 +121,7 @@ nodes:
     name: Draft all
     items: [{ id: a }, { id: b }, { id: c }, { id: d }]
     key: id
+    with: { team: input.team }
     concurrency: 1
     workflow:
       entry: draft
@@ -152,10 +153,7 @@ async function cli(...args: string[]): Promise<number> {
   process.argv = ["node", "sweny", ...args];
   try {
     await import("../main.js");
-    return -1;
-  } catch (err) {
-    if (err instanceof Exit) return err.code;
-    throw err;
+    return exitCode ?? -1;
   } finally {
     process.argv = argv;
   }
@@ -174,9 +172,11 @@ async function journaled() {
 
 describe("sweny workflow run with a map node", () => {
   it("runs every item as a read-only, journaled child with a fresh harness", async () => {
-    const code = await cli("workflow", "run", workflowFile(), "--no-history");
+    const code = await cli("workflow", "run", workflowFile(), "--no-history", "--input", '{"team":"T"}');
     expect(code, printed.join("\n")).toBe(0);
     expect(fake.calls).toEqual(["a", "b", "c", "d"]);
+    // --input reaches the run, and a child gets exactly its item, its key and the with values.
+    expect(fake.inputs[0]).toEqual({ item: { id: "a" }, item_key: "a", team: "T" });
     expect(fake.readOnly).toEqual([true, true, true, true]);
     // The parent's harness plus one per child.
     expect(fake.harnesses).toBe(5);
@@ -188,7 +188,7 @@ describe("sweny workflow run with a map node", () => {
     const file = workflowFile();
     fake.plan = { b: ["hang", "ok"] };
     // The wall-clock budget stops the run while b is running.
-    const first = await cli("workflow", "run", file, "--no-history", "--timeout", "500");
+    const first = await cli("workflow", "run", file, "--no-history", "--timeout", "500", "--input", '{"team":"T"}');
     expect(first, printed.join("\n")).toBe(1);
     await vi.waitFor(() => expect(fake.aborted).toEqual(["b"]));
     await new Promise((r) => setTimeout(r, 50));

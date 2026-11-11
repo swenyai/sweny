@@ -1474,7 +1474,12 @@ workflowCmd
 const workflowRunCmd = workflowCmd
   .command("run [file]")
   .description(WORKFLOW_RUN_DESCRIPTION)
-  .action(workflowRunAction);
+  // Not `.action(workflowRunAction)`: commander passes the Command as a third
+  // argument, which workflowRunAction would take for a resume context (#575),
+  // dropping --input and the config-derived input.
+  .action((file: string | undefined, options: Parameters<typeof workflowRunAction>[1]) =>
+    workflowRunAction(file, options),
+  );
 for (const [flags, description] of WORKFLOW_RUN_OPTIONS) {
   workflowRunCmd.option(flags, description);
 }
