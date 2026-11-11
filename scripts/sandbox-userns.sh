@@ -109,7 +109,7 @@ relax() {
 }
 
 hint() {
-  echo "Install bubblewrap and socat (sudo apt-get install -y bubblewrap socat) and allow unprivileged user namespaces (Ubuntu 23.10+: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; Ubuntu 26.04 also: sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict), or set SWENY_SANDBOX: strict in the step env to let the Action do that on this host, or opt out with SWENY_SANDBOX: off (or sandbox: off in .sweny.yml) and harness-policy: warn. See https://docs.sweny.ai/advanced/agent-sandbox/"
+  echo "Install bubblewrap and socat (sudo apt-get install -y bubblewrap socat) and allow unprivileged user namespaces (Ubuntu 23.10+: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; Ubuntu 26.04 also: sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict), or set SWENY_SANDBOX: strict in the step env to let the Action do that on this host, or opt out with SWENY_SANDBOX: off in the step env (in CI, .sweny.yml and .env cannot lower the sandbox) and harness-policy: warn. See https://docs.sweny.ai/advanced/agent-sandbox/"
 }
 
 case "${1:-}" in

@@ -13,6 +13,7 @@
  *   watchdog in place of a native turn limit). Reported, never refused.
  */
 
+import { SANDBOX_FIX_HINT, sandboxStrictSource } from "../agent-env.js";
 import type { SpendLimits } from "../budget.js";
 import type { HarnessCapabilities, NodePolicy, PolicyGateResult, PolicyWrappers, ToolClass } from "./types.js";
 
@@ -170,9 +171,8 @@ export function policyGate(
     return {
       degraded,
       refuse:
-        `strict sandbox (SWENY_SANDBOX=strict): ${sandboxGap}. Install srt ` +
-        `(npm i -g @anthropic-ai/sandbox-runtime, plus bubblewrap, socat and ripgrep on Linux), ` +
-        `or set SWENY_SANDBOX=auto to run with a warning.`,
+        `strict sandbox (${sandboxStrictSource(process.env)}): ${sandboxGap}. Install srt ` +
+        `(npm i -g @anthropic-ai/sandbox-runtime, plus bubblewrap, socat and ripgrep on Linux). ${SANDBOX_FIX_HINT}`,
     };
   }
   return { degraded };

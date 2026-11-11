@@ -163,6 +163,15 @@ export function claudeReadDenyRule(absPath: string): string {
 }
 
 /**
+ * Deny rules keeping Read, Grep and Glob out of `/proc` while the sandbox is on
+ * (#599). Bash runs in the sandbox's PID namespace, where no process outside it
+ * is visible; the file tools run in the Claude Code process itself, which is
+ * not in that namespace, so without these rules `Read(/proc/<pid>/environ)`
+ * would hand the agent the sweny process's env, skill credentials included.
+ */
+export const CLAUDE_PROC_DENY_RULES: readonly string[] = ["Read(//proc)", "Read(//proc/**)"];
+
+/**
  * Deny rules keeping every built-in file tool out of the run journals' state
  * dir ({@link runStateRoot}): an agent that could read a run key could forge
  * journal records, and one that could write there could cut a journal or
@@ -724,6 +733,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     // Read deny rules keep it from Read, Grep and Glob; the SDK sandbox's
     // filesystem deny keeps it from Bash (and stops a rename around the deny).
     // A node with Bash and no sandbox cannot be held to it.
+    // #599: the sandbox holds Bash; the file tools get the /proc deny rules.
+    if (sandbox.settings) disallowedTools = [...new Set([...(disallowedTools ?? []), ...CLAUDE_PROC_DENY_RULES])];
     let sandboxSettings = sandbox.settings;
     const credentialFiles = opts.gitCredentials ?? [];
     if (credentialFiles.length > 0) {

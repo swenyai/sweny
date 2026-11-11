@@ -89,11 +89,15 @@ MCP servers that SWEny wires for a skill get their credentials explicitly, so th
 
 ## Sandbox
 
+:::caution[Breaking change in v5 (#599)]
+The `swenyai/sweny` Action now runs every agent sandboxed by default. On a runner that cannot sandbox (most often a self-hosted runner without `bubblewrap` and `socat`, or with restricted user namespaces) the Action's setup step now fails with the fix, where it used to warn and run the agent unsandboxed. GitHub-hosted Linux runners are not affected. To keep the old behavior, set `SWENY_SANDBOX: auto` in the step's `env` (see [Opting out](#opting-out)).
+:::
+
 The defaults:
 
 | Where | Default | Host cannot sandbox |
 |-------|---------|---------------------|
-| The `swenyai/sweny` GitHub Action (Linux, macOS) | `strict` | The node is refused, with the fix in the error |
+| The `swenyai/sweny` GitHub Action (Linux, macOS) | `strict` | The Action's setup step fails with the fix, before the workflow runs; the CLI also refuses the node |
 | The Action on Windows, and the CLI in any other CI (`CI=true`) | `auto` | Warns, runs unsandboxed |
 | Locally | `off` | Not sandboxed, so nothing changes on your laptop (private registries, docker, cargo and go keep working) |
 
@@ -102,7 +106,7 @@ Sandboxed means Claude Code's shell commands run in its own sandbox, and Codex, 
 - Network egress is limited to an allowlist: source hosting and package registries (`github.com`, `api.github.com`, `*.githubusercontent.com`, `registry.npmjs.org`, `pypi.org`, `proxy.golang.org`, `crates.io`, `rubygems.org`, ...), plus the provider hosts of the node's skills (`api.linear.app` for `linear`, `*.sentry.io` for `sentry`, `*.datadoghq.com` for `datadog`, ...), plus your `sandbox-allowed-domains`.
 - Commands cannot opt out of the sandbox.
 - The agent's own Anthropic credentials are unset inside sandboxed commands, and `~/.claude/.credentials.json` is unreadable.
-- On Linux the agent runs in its own PID namespace, so it cannot read the environment of the SWEny process (or any process outside the sandbox) through `/proc/<pid>/environ`.
+- On Linux, the agent's shell commands (Claude Code's Bash) and the whole agent process (Codex, pi, ACP under `srt`) run in their own PID namespace, so they cannot read the environment of the SWEny process, or of any process outside the sandbox, through `/proc/<pid>/environ`. Claude Code's file tools (Read, Grep, Glob) run in the Claude Code process, outside that namespace, so SWEny denies them `/proc` while the sandbox is on: Read is refused there (tested), and Grep and Glob get the same deny rule, which Claude Code applies to them on a best-effort basis (not tested).
 
 ### Why the Action is strict: `/proc`
 
@@ -110,8 +114,10 @@ SWEny keeps skill credentials (`GITHUB_TOKEN`, `LINEAR_API_KEY`, ...) out of the
 
 | Agent path | Unsandboxed (`off`, or `auto` on a host that cannot sandbox) | Sandboxed (`auto` or `strict` on a host that can) |
 |------------|--------------------------------------------------|-------------------------------------|
-| Claude Code (SDK sandbox), sweny's own harness | Reads the parent's secret | Cannot: the parent's pid does not exist in the agent's namespace, and no visible process holds the secret |
-| Process sandbox (`srt`: Codex, pi, ACP) | Reads the parent's secret | Cannot, same result |
+| Claude Code's Bash (SDK sandbox), sweny's own harness | Reads the parent's secret | Cannot: the parent's pid does not exist in the agent's namespace, and no visible process holds the secret |
+| Claude Code's Read tool on `/proc/<parent pid>/environ` | Reads the parent's secret | Refused by the `/proc` deny rule |
+| The `sweny` CLI under the Action's default, with `.sweny.yml` and `.env` both setting the sandbox off | n/a | Cannot: the repo files are refused (see below) and the agent runs sandboxed |
+| Process sandbox (`srt`: Codex, pi, ACP) | Reads the parent's secret | Cannot: same as Bash |
 
 The test covers Linux. macOS has no `/proc`, and this test does not cover other ways a same-user process can read another's environment there.
 
@@ -124,6 +130,19 @@ The test covers Linux. macOS has no `/proc`, and this test does not cover other 
 | `off` (default locally) | Not sandboxed | Not sandboxed |
 
 Env scoping is controlled separately by `env-scope`. Untrusted-input fencing always applies.
+
+### In CI, repository files can only tighten
+
+`.sweny.yml` and a committed `.env` are repository content, which a pull request controls. In CI (`CI` set, which a `.env` cannot set) SWEny takes from them only values that tighten the agent floor:
+
+| Setting | From `.sweny.yml` or `.env` in CI |
+|---------|-----------------------------------|
+| `sandbox` / `SWENY_SANDBOX` | Accepted at or above the default (`strict` in the Action, `auto` in other CI); a lower value is ignored |
+| `env-scope` / `SWENY_ENV_SCOPE` | `on` is accepted; `off` is ignored |
+| `env-passthrough` / `SWENY_ENV_PASSTHROUGH`, `sandbox-allowed-domains` / `SWENY_SANDBOX_ALLOWED_DOMAINS` | Accepted from `.sweny.yml`; ignored from `.env` |
+| `SWENY_SANDBOX_DEFAULT` | Never from `.env` |
+
+An ignored value prints one warning naming the file and the setting (a `::warning::` annotation under GitHub Actions). To lower any of them in CI, set the env var in the workflow itself (for the Action, the step's `env:`), which a repository file cannot override. Locally nothing changes: both files apply as before.
 
 ### Host requirements
 
@@ -150,7 +169,7 @@ Same default: `strict`. Those settings belong to a persistent host, so the Actio
 2. On Ubuntu 23.10+, run the two commands above, and make them stick across reboots (a file in `/etc/sysctl.d/` for the sysctl; on 26.04, remove or disable the `bwrap-userns-restrict` profile).
 3. Check with `bwrap --ro-bind / / --dev /dev --proc /proc unshare --user --map-root-user true` as the runner's user. It exits 0 when the host can sandbox.
 
-Or set `SWENY_SANDBOX: strict` in the step's `env` to let the Action apply step 2 on each run (it needs passwordless `sudo`). On a host that cannot sandbox, the Action's dependency step warns with the fix, and the run refuses its first agent node; with `SWENY_SANDBOX: strict` set explicitly, the step itself fails.
+Or set `SWENY_SANDBOX: strict` in the step's `env` to let the Action apply step 2 on each run (it needs passwordless `sudo`). On a host that cannot sandbox, the Action's dependency step fails with the fix before the workflow runs.
 
 ### Opting out
 
@@ -162,12 +181,12 @@ To run agents unsandboxed in the Action, say so explicitly, and relax the harnes
     workflow: triage
     harness-policy: warn
   env:
-    SWENY_SANDBOX: off      # or `sandbox: off` in .sweny.yml
+    SWENY_SANDBOX: off      # in CI, .sweny.yml and .env cannot lower the sandbox
 ```
 
 `SWENY_SANDBOX: auto` keeps the old behavior: sandboxed when the host can, unsandboxed with a warning when it cannot. Unsandboxed, an agent can read SWEny's environment, skill credentials included, through `/proc` (see above).
 
-The Action's default travels as `SWENY_SANDBOX_DEFAULT=strict`, which `SWENY_SANDBOX` and `.sweny.yml` `sandbox:` override. A CLI older than this default (set with `cli-version`) ignores it and runs `auto`.
+The Action's default travels as `SWENY_SANDBOX_DEFAULT=strict`, which only a `SWENY_SANDBOX` in the workflow's env lowers. The Action's setup step enforces it whatever the CLI version; a CLI older than this change (set with `cli-version`) does not read it itself, and still lets `.sweny.yml` and `.env` lower the mode.
 
 :::note[Scope]
 The sandbox covers the agent's shell commands. SWEny's own skill tools run in the SWEny process, and MCP servers run outside the sandbox; both only receive the credentials wired for them.
@@ -179,7 +198,7 @@ Workflow input (issues, alerts, tickets), earlier steps' output, and `context:` 
 
 ## Configuration
 
-`.sweny.yml`, or the matching env var (env wins):
+`.sweny.yml`, or the matching env var (env wins; in CI a repository file can only tighten, see [above](#in-ci-repository-files-can-only-tighten)):
 
 | `.sweny.yml` | Env var | Values | Default |
 |--------------|---------|--------|---------|

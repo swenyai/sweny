@@ -36,6 +36,8 @@ import {
   agentEnvOverlay,
   applyEnvOverlay,
   checkSandboxSupport,
+  SANDBOX_FIX_HINT,
+  sandboxStrictSource,
   finishAgentEnv,
   resolveExecutable,
   heldCredentials,
@@ -685,7 +687,9 @@ export class CodexHarness implements AgentHarness {
     if (mode === "strict") {
       return {
         mode: "workspace-write",
-        error: `SWENY_SANDBOX=strict but the Codex sandbox cannot run on this host: ${reason}`,
+        error:
+          `${sandboxStrictSource(process.env, this.sandboxMode)} but the Codex sandbox cannot run on this host: ${reason}. ` +
+          SANDBOX_FIX_HINT,
       };
     }
     if (!this.sandboxWarned) {
