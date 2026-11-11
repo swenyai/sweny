@@ -33,6 +33,17 @@ export interface Migration {
   migrate: (raw: RawWorkflow) => RawWorkflow;
   /** Optional, pure: what the author should know about this step's changes to `raw` (its input). */
   notes?: (raw: RawWorkflow) => MigrationNote[];
+  /**
+   * Optional, pure: the first field of version `to` found in `raw`, a file
+   * that declares an older version. Such a file fails to load: a field never
+   * changes meaning by being migrated into the version that introduced it.
+   */
+  newerField?: (raw: RawWorkflow) => string | undefined;
+  /**
+   * The step changes nothing but the version. The loader says nothing about
+   * it: the file runs exactly as written, so there is nothing to upgrade for.
+   */
+  identity?: boolean;
 }
 
 /** One spot a migration made explicit that the author should review. */
@@ -48,7 +59,7 @@ export interface MigrationNote {
 }
 
 /** The spec version this build of sweny reads natively. */
-export const CURRENT_SPEC_VERSION = 2;
+export const CURRENT_SPEC_VERSION = 3;
 
 /**
  * The spec version a workflow object runs as: its `spec_version`, or 1 when
@@ -162,11 +173,34 @@ const v1ToV2: Migration = {
     ),
 };
 
+// ─── v2 -> v3: map nodes (RFC 0002 M1, #575) ─────────────────────
+
+/** The first map node of a raw workflow, if any. */
+function firstMapNode(raw: RawWorkflow): string | undefined {
+  if (!isRecord(raw.nodes)) return undefined;
+  for (const [id, node] of Object.entries(raw.nodes)) {
+    if (isRecord(node) && node.kind === "map") return id;
+  }
+  return undefined;
+}
+
+const v2ToV3: Migration = {
+  from: 2,
+  to: 3,
+  description: "map nodes: identity (spec v2 files run unchanged)",
+  migrate: (raw) => ({ ...raw }),
+  identity: true,
+  newerField: (raw) => {
+    const id = firstMapNode(raw);
+    return id === undefined ? undefined : `node "${id}" is a map node (kind: map)`;
+  },
+};
+
 /**
  * Ordered registry, one entry per version step.
  * Append only; never edit a shipped migration.
  */
-export const MIGRATIONS: readonly Migration[] = [v1ToV2];
+export const MIGRATIONS: readonly Migration[] = [v1ToV2, v2ToV3];
 
 export interface MigrationConfig {
   current: number;
@@ -179,7 +213,7 @@ export const DEFAULT_MIGRATION_CONFIG: MigrationConfig = {
 };
 
 export type MigrateError = {
-  code: "INVALID_VERSION" | "TOO_NEW" | "MIGRATION_FAILED";
+  code: "INVALID_VERSION" | "TOO_NEW" | "MIGRATION_FAILED" | "NEEDS_NEWER_VERSION";
   message: string;
 };
 
@@ -198,6 +232,8 @@ export type MigrateResult =
       applied: Migration[];
       /** Notes from the applied migrations, in order. Empty when there are none. */
       notes: MigrationNote[];
+      /** Whether any applied migration changed more than the version (the loader warns only then). */
+      changed: boolean;
     }
   | ({ ok: false } & MigrateError);
 
@@ -241,6 +277,21 @@ export function migrateWorkflow(raw: RawWorkflow, config: MigrationConfig = DEFA
     };
   }
 
+  // A field a later version introduced, in a file that declares an older one.
+  for (const step of config.migrations) {
+    if (step.to <= from || !step.newerField) continue;
+    const field = step.newerField(raw);
+    if (field === undefined) continue;
+    const declaredAs = declared ? `declares spec_version "${from}"` : `declares no spec_version (so "1")`;
+    return {
+      ok: false,
+      code: "NEEDS_NEWER_VERSION",
+      message:
+        `${field}, which needs spec_version "${step.to}", but this file ${declaredAs}. ` +
+        `Set spec_version: "${step.to}" (run \`sweny workflow upgrade <file>\` first if it is older).`,
+    };
+  }
+
   let current: RawWorkflow = declared ? { ...raw, spec_version: String(from) } : raw;
   const applied: Migration[] = [];
   const notes: MigrationNote[] = [];
@@ -262,7 +313,8 @@ export function migrateWorkflow(raw: RawWorkflow, config: MigrationConfig = DEFA
     }
     applied.push(step);
   }
-  return { ok: true, workflow: current, from, to: config.current, declared, applied, notes };
+  const changed = applied.some((m) => m.identity !== true);
+  return { ok: true, workflow: current, from, to: config.current, declared, applied, notes, changed };
 }
 
 /** The single warning the loader emits when it migrated in memory. */

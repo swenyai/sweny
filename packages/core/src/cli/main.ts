@@ -63,6 +63,7 @@ import { registerRunsCommand } from "./runs.js";
 import { formatSinceLast, formatSinceLastMarkdown, recordRunAnswers, type SinceLast } from "./run-answers.js";
 import { registerTryCommand } from "./try.js";
 import { JournalLockedError, JournalMismatchError, RunJournal, runSecretValues } from "../journal.js";
+import { createJournalChildHost, createMemoryChildHost } from "../child-host.js";
 import {
   journalDisabled,
   prepareResume,
@@ -989,18 +990,22 @@ export async function workflowRunAction(
   const runLogger = createRunLogger({ verbose: Boolean(options.verbose), tty: isTTY });
 
   // --agent picks the harness (#331): claude (default) or codex.
-  const claude = await harnessFor(
-    config.codingAgentProvider,
-    {
-      maxTurns: config.maxInvestigateTurns || 50,
-      cwd: process.cwd(),
-      logger: runLogger,
-      defaultMcpServers: mcpServers,
-      mcpServers: config.mcpServers,
-      model: workflow.model,
-    },
-    typeof options.harnessPolicy === "string" ? options.harnessPolicy : undefined,
-  );
+  const harnessOptions = {
+    maxTurns: config.maxInvestigateTurns || 50,
+    cwd: process.cwd(),
+    logger: runLogger,
+    defaultMcpServers: mcpServers,
+    mcpServers: config.mcpServers,
+    model: workflow.model,
+  };
+  const harnessPolicyFlag = typeof options.harnessPolicy === "string" ? options.harnessPolicy : undefined;
+  const claude = await harnessFor(config.codingAgentProvider, harnessOptions, harnessPolicyFlag);
+  // Map nodes (#575): each child gets a fresh harness of the same agent, options and policy (preflighted above).
+  const childHarness = (): AgentHarness =>
+    createHarness(config.codingAgentProvider, {
+      ...harnessOptions,
+      policy: resolveHarnessPolicy(process.env, harnessPolicyFlag, runLogger),
+    });
 
   // Track per-node entry time to compute elapsed on exit
   const nodeEnterTimes = new Map<string, number>();
@@ -1155,6 +1160,19 @@ export async function workflowRunAction(
           env: process.env,
           logger: runLogger,
         }));
+  // Map nodes (#575): children are journaled runs in slots under this run's directory
+  // (the same state dir, run and resume alike), or unjournaled with --no-journal.
+  const children =
+    journal instanceof RunJournal
+      ? createJournalChildHost({
+          parentRunId: runId,
+          parentDir: journal.dir,
+          swenyVersion: version,
+          env: process.env,
+          logger: runLogger,
+          harness: childHarness,
+        })
+      : createMemoryChildHost({ runId, harness: childHarness });
   let historyRecorded = false;
   const recordHistory = (results: Map<string, NodeResult>, trace: ExecutionTrace | undefined, crashed: boolean) => {
     if (historyRecorded || historyDisabled(options.history, fileConfig["history"])) return;
@@ -1221,6 +1239,7 @@ export async function workflowRunAction(
           ),
           stageOutputs: options.stage === true,
           journal,
+          children,
           ...(spendBudget ? { budget: spendBudget } : {}),
           harnessPolicy: resolveHarnessPolicy(
             process.env,
@@ -1455,7 +1474,12 @@ workflowCmd
 const workflowRunCmd = workflowCmd
   .command("run [file]")
   .description(WORKFLOW_RUN_DESCRIPTION)
-  .action(workflowRunAction);
+  // Not `.action(workflowRunAction)`: commander passes the Command as a third
+  // argument, which workflowRunAction would take for a resume context (#575),
+  // dropping --input and the config-derived input.
+  .action((file: string | undefined, options: Parameters<typeof workflowRunAction>[1]) =>
+    workflowRunAction(file, options),
+  );
 for (const [flags, description] of WORKFLOW_RUN_OPTIONS) {
   workflowRunCmd.option(flags, description);
 }

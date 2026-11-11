@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/core",
-  "version": "0.1.215",
+  "version": "0.1.217",
   "type": "module",
   "bin": {
     "sweny": "./dist/cli/main.js"
@@ -70,6 +70,7 @@
     "ajv-draft-04": "^1.0.0",
     "chalk": "^5",
     "commander": "^13",
+    "p-limit": "^7.3.3",
     "yaml": "^2.9.1",
     "zod": "^4.0.0"
   },

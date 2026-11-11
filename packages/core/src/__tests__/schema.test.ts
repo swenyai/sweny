@@ -784,7 +784,7 @@ describe("Zod schemas", () => {
         nodes: { a: { name: "A", instruction: "Do A", model: "claude-haiku-4-5" } },
         edges: [],
       };
-      const result = workflowZ.parse(raw);
+      const result = workflowZ.parse(raw) as Workflow;
       expect(result.model).toBe("claude-opus-4-6");
       expect(result.nodes.a.model).toBe("claude-haiku-4-5");
     });
@@ -1186,8 +1186,8 @@ describe("workflowJsonSchema", () => {
     expect(edgeProps.max_iterations.minimum).toBe(1);
   });
 
-  it("node items require name and instruction", () => {
+  it("node items require name; agent nodes an instruction", () => {
     expect((workflowJsonSchema.properties.nodes.additionalProperties as any).required).toContain("name");
-    expect((workflowJsonSchema.properties.nodes.additionalProperties as any).required).toContain("instruction");
+    expect((workflowJsonSchema.$defs as any).AgentNodeRules.required).toContain("instruction");
   });
 });

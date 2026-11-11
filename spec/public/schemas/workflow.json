@@ -51,6 +51,209 @@
         }
       ]
     },
+    "AgentNodeRules": {
+      "required": ["instruction"],
+      "properties": {
+        "kind": {
+          "const": "agent"
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": ["over"]
+          },
+          {
+            "required": ["items"]
+          },
+          {
+            "required": ["key"]
+          },
+          {
+            "required": ["workflow"]
+          },
+          {
+            "required": ["result"]
+          },
+          {
+            "required": ["with"]
+          },
+          {
+            "required": ["concurrency"]
+          },
+          {
+            "required": ["max_items"]
+          },
+          {
+            "required": ["on_item_fail"]
+          },
+          {
+            "required": ["min_success"]
+          },
+          {
+            "required": ["on_empty"]
+          },
+          {
+            "required": ["item_budget"]
+          },
+          {
+            "required": ["isolation"]
+          }
+        ]
+      }
+    },
+    "MapNodeRules": {
+      "required": ["kind", "name", "key", "workflow", "result"],
+      "properties": {
+        "skills": {
+          "maxItems": 0
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": ["instruction"]
+          },
+          {
+            "required": ["output"]
+          },
+          {
+            "required": ["max_turns"]
+          },
+          {
+            "required": ["budget"]
+          },
+          {
+            "required": ["disallowed_tools"]
+          },
+          {
+            "required": ["agent_env"]
+          },
+          {
+            "required": ["tools"]
+          },
+          {
+            "required": ["fail_soft"]
+          },
+          {
+            "required": ["route_by"]
+          },
+          {
+            "required": ["permissions"]
+          },
+          {
+            "required": ["outputs"]
+          },
+          {
+            "required": ["rules"]
+          },
+          {
+            "required": ["context"]
+          },
+          {
+            "required": ["eval"]
+          },
+          {
+            "required": ["eval_policy"]
+          },
+          {
+            "required": ["judge_model"]
+          },
+          {
+            "required": ["model"]
+          },
+          {
+            "required": ["requires"]
+          },
+          {
+            "required": ["retry"]
+          }
+        ]
+      }
+    },
+    "ChildWorkflow": {
+      "type": "object",
+      "description": "A child workflow written inline in a map node: a workflow whose id and name default to the map node's.",
+      "required": ["entry", "nodes", "edges"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        "entry": {
+          "type": "string",
+          "minLength": 1
+        },
+        "nodes": {
+          "type": "object",
+          "additionalProperties": {
+            "allOf": [
+              {
+                "$ref": "#/properties/nodes/additionalProperties"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "agent"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "edges": {
+          "$ref": "#/properties/edges"
+        },
+        "skills": {
+          "$ref": "#/properties/skills"
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Source"
+          }
+        },
+        "context": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Source"
+          }
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "judge_model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "budget": {
+          "$ref": "#/$defs/Budget"
+        },
+        "context_mode": {
+          "type": "string",
+          "enum": ["bounded", "full"]
+        },
+        "inputs": {
+          "$ref": "#/properties/inputs"
+        },
+        "permissions": {
+          "$ref": "#/$defs/Permissions"
+        }
+      }
+    },
     "NodeSources": {
       "oneOf": [
         {
@@ -165,6 +368,93 @@
                 "$ref": "#/$defs/OutputMatch"
               },
               "minItems": 1
+            },
+            "output_grounded": {
+              "type": "object",
+              "description": "function only. Every id and URL in the output must appear in the node's successful read-tool outputs, its instruction, the workflow input or prior nodes' context.",
+              "additionalProperties": false,
+              "properties": {
+                "paths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minItems": 1
+                },
+                "ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minItems": 1
+                },
+                "patterns": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minItems": 1
+                },
+                "tools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minItems": 1
+                },
+                "inputs": {
+                  "type": "boolean"
+                },
+                "context": {
+                  "type": "boolean"
+                },
+                "stale": {
+                  "type": "boolean"
+                },
+                "quotes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "description": "Values that must appear verbatim in a tool's output.",
+                  "items": {
+                    "type": "object",
+                    "required": ["path"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "tools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "minItems": 1
+                      },
+                      "whitespace": {
+                        "type": "string",
+                        "enum": ["exact", "trim", "collapse"]
+                      },
+                      "min_length": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
         },
@@ -223,6 +513,24 @@
             "required": ["rubric"],
             "not": {
               "required": ["rule"]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "value"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "rule": {
+                "not": {
+                  "required": ["output_grounded"]
+                }
+              }
             }
           }
         }
@@ -412,7 +720,7 @@
     "spec_version": {
       "type": "string",
       "pattern": "^[1-9][0-9]*$",
-      "description": "Workflow spec version as a positive integer string. Absent means 1. Version 2 is safe by default: a node that declares no permissions and no outputs, in a workflow that declares no permissions, is read-only. Version 1 files are migrated in memory on load, keeping write on such nodes with one warning each; newer than the CLI supports is refused. Run `sweny workflow upgrade <file>` to rewrite a file at the current version."
+      "description": "Workflow spec version as a positive integer string. Absent means 1. Version 2 is safe by default: a node that declares no permissions and no outputs, in a workflow that declares no permissions, is read-only. Version 1 files are migrated in memory on load, keeping write on such nodes with one warning each; newer than the CLI supports is refused. Version 3 adds map nodes (kind: map); version 2 files run unchanged. Run `sweny workflow upgrade <file>` to rewrite a file at the current version."
     },
     "entry": {
       "type": "string",
@@ -656,9 +964,110 @@
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "required": ["name", "instruction"],
+        "required": ["name"],
         "additionalProperties": false,
+        "if": {
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "const": "map"
+            }
+          }
+        },
+        "then": {
+          "$ref": "#/$defs/MapNodeRules"
+        },
+        "else": {
+          "$ref": "#/$defs/AgentNodeRules"
+        },
         "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["agent", "map"],
+            "description": "'agent' (default): one agent run. 'map' (spec_version 3): one complete, read-only child SWEny run per item, results keyed by item."
+          },
+          "over": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Map nodes: path to the item array, input.<field> or <node>.<field>. Exactly one of over and items."
+          },
+          "items": {
+            "type": "array",
+            "description": "Map nodes: a literal item list. Exactly one of over and items."
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Map nodes: the item field whose value keys each item (unique, [A-Za-z0-9_-]{1,64}), or $index for the position."
+          },
+          "workflow": {
+            "description": "Map nodes: the child workflow each item runs, a file path (relative to this file) or an inline workflow. Its nodes run read-only and declare no outputs; it may not contain a map.",
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "$ref": "#/$defs/ChildWorkflow"
+              }
+            ]
+          },
+          "result": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Map nodes: the child node whose output is the item's result."
+          },
+          "with": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Map nodes: the only parent values a child receives, child input name -> input.<field> or <node>.<field>. A child's input is exactly { item, item_key, ...with }."
+          },
+          "concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16,
+            "description": "Map nodes: children running at once. Default 4."
+          },
+          "max_items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Map nodes: more items than this fail the map before any spend. Default 50."
+          },
+          "on_item_fail": {
+            "type": "string",
+            "enum": ["fail_fast", "collect"],
+            "description": "Map nodes: 'fail_fast' (default) cancels the rest at the first failed item; 'collect' runs every item."
+          },
+          "min_success": {
+            "description": "Map nodes, collect only: successes the map needs. Default all.",
+            "oneOf": [
+              {
+                "const": "all"
+              },
+              {
+                "type": "integer",
+                "minimum": 1
+              }
+            ]
+          },
+          "on_empty": {
+            "type": "string",
+            "enum": ["succeed", "fail"],
+            "description": "Map nodes: an empty item list 'succeed's (default) with empty results, or 'fail's."
+          },
+          "item_budget": {
+            "$ref": "#/$defs/Budget",
+            "description": "Map nodes: spend ceiling for each child run. The workflow's budget caps all of them together."
+          },
+          "isolation": {
+            "type": "string",
+            "enum": ["inputs"],
+            "description": "Map nodes: what a child sees. 'inputs' (default): its item, its key and the with values, nothing else of the parent. Its skills' read tools still reach whatever their credentials can read."
+          },
           "name": {
             "type": "string",
             "minLength": 1

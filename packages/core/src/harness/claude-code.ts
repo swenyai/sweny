@@ -993,9 +993,13 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
           if (am.message?.content && Array.isArray(am.message.content)) {
             for (const block of am.message.content) {
               if (block.type === "tool_use") {
+                const server = mcpServerOf(block.name ?? "");
                 const call: ToolCall = {
                   tool: stripMcpPrefix(block.name ?? ""),
                   input: block.input,
+                  // External MCP tools keep their server, so output_grounded can tell
+                  // linear's get_issue from another server's (#580).
+                  ...(server !== undefined && server !== "sweny-core" ? { server } : {}),
                 };
                 toolCalls.push(call);
                 if (typeof block.id === "string") pendingByUseId.set(block.id, call);
@@ -1308,6 +1312,12 @@ export function coreToolToSdkTool(coreTool: Tool, defaultCtx: ToolContext) {
 }
 
 /** Strip MCP server prefix: "mcp__server__tool" → "tool" */
+/** The server of an `mcp__server__tool` name, else undefined. */
+function mcpServerOf(name: string): string | undefined {
+  const parts = name.split("__");
+  return parts.length >= 3 && parts[0] === "mcp" ? parts[1] : undefined;
+}
+
 function stripMcpPrefix(name: string): string {
   const parts = name.split("__");
   if (parts.length >= 3 && parts[0] === "mcp") return parts.slice(2).join("__");

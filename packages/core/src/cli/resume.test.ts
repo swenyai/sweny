@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHmac } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { JOURNAL_FILE, RunJournal, journalDir } from "../journal.js";
@@ -26,12 +27,12 @@ const wf: Workflow = {
 };
 
 /** A journal killed after node `a` finished and routed to `b`. */
-function crashedRun(input: Record<string, unknown>, env: Record<string, string> = {}): string {
+function crashedRun(input: Record<string, unknown>, env: Record<string, string> = {}, workflow: Workflow = wf): string {
   const cwd = mkdtempSync(join(tmpdir(), "sweny-resume-"));
   dirs.push(cwd);
   const j = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "w.yml", env });
   j.begin({
-    workflow: wf,
+    workflow,
     input,
     sources: {},
     skills: new Map(),
@@ -102,6 +103,68 @@ describe("prepareResume", () => {
     prepareResume(RUN_ID, { plan: true }, { cwd, loadWorkflow });
     prepareResume(RUN_ID, { plan: true, workflow: "moved.yml" }, { cwd, loadWorkflow });
     expect(seen).toEqual(["w.yml", "moved.yml"]);
+  });
+});
+
+/**
+ * Rewrite a run's journal as a sweny before spec v3 wrote it (#575): no
+ * `spec_version` on run:start, an older `sweny_version`, every record re-chained
+ * and the head re-signed under the run's own key.
+ */
+function asPreV3Journal(cwd: string, swenyVersion: string): void {
+  const dir = journalDir(cwd, RUN_ID);
+  const file = join(dir, JOURNAL_FILE);
+  const key = Buffer.from(readFileSync(join(dir, "key"), "utf-8").trim(), "hex");
+  const mac = (s: string) => createHmac("sha256", key).update(s).digest("hex");
+  let prev = "";
+  const out: Record<string, unknown>[] = [];
+  for (const line of readFileSync(file, "utf-8").trim().split("\n")) {
+    const { h: _h, ...body } = JSON.parse(line) as Record<string, unknown>;
+    if (body.type === "run:start") {
+      delete body.spec_version;
+      body.sweny_version = swenyVersion;
+    }
+    const h = mac(`sweny-journal\n${RUN_ID}\n${String(body.seq)}\n${prev}\n${JSON.stringify(body)}`);
+    out.push({ ...body, h });
+    prev = h;
+  }
+  writeFileSync(file, out.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  const head = { v: 1, run_id: RUN_ID, seq: out.length, record: out[out.length - 1] };
+  writeFileSync(
+    join(dir, "head.json"),
+    JSON.stringify({ ...head, h: mac(`sweny-journal-head\n${JSON.stringify(head)}`) }) + "\n",
+  );
+}
+
+describe("a run journaled before spec v3 (#575)", () => {
+  it("is refused with both versions and the command that resumes it, before the workflow hash check", () => {
+    // The old sweny hashed the workflow as spec_version 2; this one loads the same file as 3.
+    const cwd = crashedRun({}, {}, { ...wf, spec_version: "2" });
+    asPreV3Journal(cwd, "0.1.215");
+    for (const force of [false, true]) {
+      const r = prepareResume(
+        RUN_ID,
+        { force },
+        { cwd, loadWorkflow: () => ({ ...wf, spec_version: "3" }), swenyVersion: "0.2.0" },
+      );
+      expect(r.ok).toBe(false);
+      expect(!r.ok && r.error).toBe(
+        `run ${RUN_ID} was journaled by sweny 0.1.215, before spec_version "3"; this sweny (0.2.0) runs the ` +
+          `workflow as spec_version "3" and cannot resume it. Resume it with the sweny that started it: ` +
+          `npx @sweny-ai/core@0.1.215 workflow resume ${RUN_ID}`,
+      );
+    }
+  });
+
+  it("a v3 journal of the same run still resumes", () => {
+    const cwd = crashedRun({}, {}, { ...wf, spec_version: "3" });
+    const r = prepareResume(
+      RUN_ID,
+      {},
+      { cwd, loadWorkflow: () => ({ ...wf, spec_version: "3" }), swenyVersion: "0.2.0" },
+    );
+    expect(r.ok && "ctx" in r).toBe(true);
+    if (r.ok && "ctx" in r) r.ctx.journal.end("crashed");
   });
 });
 

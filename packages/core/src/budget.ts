@@ -26,6 +26,16 @@
  *   final), and each metered completion (judge, route, reflection, screen)
  *   as its own record; `sweny workflow resume` seeds the run total with all
  *   of it, split by kind.
+ *
+ * Map children (#575): every child run has its own guard (its item cap,
+ * `item_budget`) over one {@link SpendTally} shared by the map. A settled
+ * spend is committed once to the child's own counters and once to the tally;
+ * the run cap is checked against the tally's committed spend plus every
+ * running attempt's live spend; a crossing aborts the tally's signal, which
+ * every running child sees. What this promises, and no more: no child
+ * attempt starts once settled spend has reached the cap. Live reports are
+ * lower bounds and some units arrive only at the end, so concurrent children
+ * can overrun the cap; `strict` harness policy runs a budgeted map serially.
  */
 
 import type { NodeUsage } from "./types.js";
@@ -164,15 +174,149 @@ export function describeOverrun(o: BudgetOverrun, nodeId?: string): string {
   return `${what} exceeded: ${o.unit} ${fmt(o.spent)} of ${fmt(o.limit)}`;
 }
 
+const ZERO: Spend = { tokens: 0, costUsd: 0 };
+const plus = (a: Spend, b: Spend): Spend => ({ tokens: a.tokens + b.tokens, costUsd: a.costUsd + b.costUsd });
+
+/** One running attempt's live spend, registered with a {@link SpendTally}. */
+export interface LiveSpend {
+  /** The attempt's cumulative live spend so far. */
+  set(s: Spend): void;
+  /** The attempt settled (or ended): its spend is committed, or was never reported. */
+  close(): void;
+}
+
+/**
+ * The spend a map's children share (#575): one run cap over the parent's
+ * spend before the map, every earlier generation's journaled spend, every
+ * settled child attempt, and every running attempt's live spend. A crossing
+ * trips it once: {@link signal} aborts and {@link breach} names the crossing.
+ */
+export class SpendTally {
+  private spent: Spend;
+  private readonly kids = new Map<SpendKind, Spend>();
+  private readonly live = new Set<{ s: Spend }>();
+  private readonly controller = new AbortController();
+  private stop: BudgetOverrun | undefined;
+
+  /** `base`: what the run spent before the map (the parent's totals). */
+  constructor(
+    readonly limits: SpendLimits,
+    base: Spend = ZERO,
+  ) {
+    this.spent = { ...base };
+  }
+
+  /** Aborts when the tally trips: every running child sees it. */
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+
+  /** The crossing that tripped the tally, if any. */
+  get breach(): BudgetOverrun | undefined {
+    return this.stop;
+  }
+
+  /** Settled spend: the base, earlier generations and settled child attempts. */
+  get committed(): Spend {
+    return { ...this.spent };
+  }
+
+  /** What the children spent (earlier generations included), by kind: what the parent folds in after the map. */
+  get children(): Partial<Record<SpendKind, Spend>> {
+    return Object.fromEntries([...this.kids].map(([k, v]) => [k, { ...v }]));
+  }
+
+  /** The children's total (earlier generations included). */
+  get childTotal(): Spend {
+    return [...this.kids.values()].reduce(plus, ZERO);
+  }
+
+  /** Spend earlier generations journaled (resume): counted against the cap, never a call. */
+  seed(s: Spend): void {
+    const ok = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
+    this.commit({ tokens: ok(s.tokens), costUsd: ok(s.costUsd) }, "node");
+  }
+
+  /** The cap is already reached: no child attempt may start. */
+  exhausted(): BudgetOverrun | undefined {
+    return breachOf("run", this.limits, this.spent, false);
+  }
+
+  /** Register one running attempt's live spend. */
+  open(): LiveSpend {
+    const entry = { s: { ...ZERO } };
+    this.live.add(entry);
+    const handle: LiveSpend = {
+      set: (s) => {
+        entry.s = { ...s };
+      },
+      close: () => {
+        this.live.delete(entry);
+      },
+    };
+    this.entries.set(handle, entry);
+    return handle;
+  }
+
+  /**
+   * Settled plus live spend, plus `extra` in place of `self`'s live spend,
+   * strictly over a limit: the tally trips and the crossing is returned.
+   */
+  check(extra: Spend = ZERO, self?: LiveSpend): BudgetOverrun | undefined {
+    const skip = self ? this.entries.get(self) : undefined;
+    let total = plus(this.spent, extra);
+    for (const e of this.live) if (e !== skip) total = plus(total, e.s);
+    const b = breachOf("run", this.limits, total, true);
+    if (b) this.trip(b);
+    return b;
+  }
+
+  private readonly entries = new WeakMap<LiveSpend, { s: Spend }>();
+
+  /** @internal A settled spend of a child (once per attempt or completion). */
+  commit(s: Spend, kind: SpendKind): void {
+    this.spent = plus(this.spent, s);
+    this.kids.set(kind, plus(this.kids.get(kind) ?? ZERO, s));
+  }
+
+  private trip(b: BudgetOverrun): void {
+    if (this.stop) return;
+    this.stop = b;
+    this.controller.abort(new BudgetRefusal(b));
+  }
+}
+
 /**
  * Tracks spend for one run. `node()` opens a visit to a node; `attempt()` opens
  * one agent run inside it. Spend is committed once, when an attempt settles.
+ * A map child's guard also commits to the map's shared {@link SpendTally}.
  */
 export class BudgetGuard {
   private spent: Spend = { tokens: 0, costUsd: 0 };
   private kinds = new Map<SpendKind, KindSpend>();
 
-  constructor(readonly runLimits: SpendLimits) {}
+  constructor(
+    readonly runLimits: SpendLimits,
+    readonly tally?: SpendTally,
+  ) {}
+
+  /** The tightest run cap: this run's own, and a map child's shared cap. */
+  get ceiling(): SpendLimits {
+    return this.tally ? minLimits(this.runLimits, this.tally.limits) : this.runLimits;
+  }
+
+  /** A tally for a map visit of this run: its cap, starting from what the run spent so far. */
+  shareWithChildren(): SpendTally {
+    return new SpendTally(this.ceiling, this.totals);
+  }
+
+  /** Fold a map's children's spend into this run, by kind (seeded spend: not calls). */
+  absorb(byKind: Partial<Record<SpendKind, Spend>>): void {
+    for (const k of SPEND_KINDS) {
+      const v = byKind[k];
+      if (v) this.commitLocal(v, k, false);
+    }
+  }
 
   get totals(): Spend {
     return { ...this.spent };
@@ -215,7 +359,8 @@ export class BudgetGuard {
             true,
           )
         : undefined) ??
-      breachOf("run", this.runLimits, { tokens: r.tokens + s.tokens, costUsd: r.costUsd + s.costUsd }, true);
+      breachOf("run", this.runLimits, { tokens: r.tokens + s.tokens, costUsd: r.costUsd + s.costUsd }, true) ??
+      this.tally?.check(s);
     if (breach && kind !== "node") breach.kind = kind;
     if (nodeBudget) nodeBudget.commit(s, kind, true);
     else this.commit(s, kind, true);
@@ -224,12 +369,12 @@ export class BudgetGuard {
 
   /** True when any limit exists at all, so the executor can skip the machinery. */
   active(nodeLimits: SpendLimits): boolean {
-    return hasLimits(this.runLimits) || hasLimits(nodeLimits);
+    return hasLimits(this.ceiling) || hasLimits(nodeLimits);
   }
 
-  /** The run ceiling is already reached: no further attempt may start. */
+  /** The run ceiling (or a map's shared one) is already reached: no further attempt may start. */
   runExhausted(): BudgetOverrun | undefined {
-    return breachOf("run", this.runLimits, this.spent, false);
+    return breachOf("run", this.runLimits, this.spent, false) ?? this.tally?.exhausted();
   }
 
   node(nodeLimits: SpendLimits): NodeBudget {
@@ -246,13 +391,14 @@ export class BudgetGuard {
    */
   seed(s: SeedSpend): void {
     const ok = (n: number | undefined) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0);
+    // Seeded spend is this run's own: a map child's never reaches the tally (the parent seeds that).
     if (!s.byKind) {
-      this.commit({ tokens: ok(s.tokens), costUsd: ok(s.costUsd) }, "node", false);
+      this.commitLocal({ tokens: ok(s.tokens), costUsd: ok(s.costUsd) }, "node", false);
       return;
     }
     for (const k of SPEND_KINDS) {
       const v = s.byKind[k];
-      if (v) this.commit({ tokens: ok(v.tokens), costUsd: ok(v.costUsd) }, k, false);
+      if (v) this.commitLocal({ tokens: ok(v.tokens), costUsd: ok(v.costUsd) }, k, false);
     }
   }
 
@@ -263,6 +409,11 @@ export class BudgetGuard {
    * the split is the same with and without a limit.
    */
   commit(s: Spend, kind: SpendKind, counted: boolean): void {
+    this.commitLocal(s, kind, counted);
+    this.tally?.commit(s, kind);
+  }
+
+  private commitLocal(s: Spend, kind: SpendKind, counted: boolean): void {
     this.spent = { tokens: this.spent.tokens + s.tokens, costUsd: this.spent.costUsd + s.costUsd };
     const k = this.kinds.get(kind);
     if (!k && !counted && s.tokens === 0 && s.costUsd === 0) return;
@@ -329,6 +480,8 @@ export class BudgetAttempt {
   private stopped: BudgetOverrun | undefined;
   private settled: { breach: BudgetOverrun | undefined } | undefined;
   private readonly onOuterAbort = () => this.controller.abort();
+  /** A map child's attempt (#575): its live spend counts toward the shared tally until it settles. */
+  private readonly shared: LiveSpend | undefined;
 
   constructor(
     private readonly guard: BudgetGuard,
@@ -337,6 +490,7 @@ export class BudgetAttempt {
   ) {
     if (outer?.aborted) this.controller.abort();
     else outer?.addEventListener("abort", this.onOuterAbort, { once: true });
+    this.shared = guard.tally?.open();
   }
 
   get signal(): AbortSignal {
@@ -364,6 +518,7 @@ export class BudgetAttempt {
       tokens: Math.max(this.live.tokens, s.tokens ?? 0),
       costUsd: Math.max(this.live.costUsd, s.costUsd ?? 0),
     };
+    this.shared?.set(this.live);
     const b = this.check(this.live);
     if (b) {
       this.stopped = b;
@@ -386,7 +541,8 @@ export class BudgetAttempt {
         this.guard.runLimits,
         { tokens: r.tokens + attempt.tokens, costUsd: r.costUsd + attempt.costUsd },
         true,
-      )
+      ) ??
+      this.guard.tally?.check(attempt, this.shared)
     );
   }
 
@@ -409,6 +565,7 @@ export class BudgetAttempt {
     };
     const breach = this.stopped ?? this.check(spent);
     this.settled = { breach };
+    this.shared?.close();
     // A call only when the attempt reported usage, live or final: an attempt
     // that reported none is not counted, the same as without a limit.
     this.node.commit(spent, "node", this.liveReported || f.tokens !== undefined || f.costUsd !== undefined);

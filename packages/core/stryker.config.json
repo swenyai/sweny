@@ -11,7 +11,8 @@
     "src/agent-env.ts",
     "src/node-policy.ts",
     "src/harness/policy.ts",
-    "src/output-contract.ts"
+    "src/output-contract.ts",
+    "src/eval/grounded.ts"
   ],
   "coverageAnalysis": "perTest",
   "incremental": true,

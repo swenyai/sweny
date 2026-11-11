@@ -55,6 +55,11 @@ export interface LoaderOptions {
   migration?: MigrationConfig;
   /** Path shown in the migration warning. Set by loadAndValidateWorkflow. */
   filePath?: string;
+  /**
+   * Set while loading a map node's child workflow file (#575): a child's own
+   * map nodes are not read further (nested maps are refused by validation).
+   */
+  child?: boolean;
 }
 
 /**
@@ -100,7 +105,8 @@ export function validateParsed(raw: unknown, options: LoaderOptions = {}): Loade
     return { ok: false, errors: [{ message: migrated.message, code: "SPEC_VERSION" }] };
   }
   raw = migrated.workflow;
-  const warnings = migrated.applied.length > 0 ? [migrationWarning(migrated.from, migrated.to, options.filePath)] : [];
+  // An identity step (v2 -> v3) changes nothing the file does: no warning for it.
+  const warnings = migrated.changed ? [migrationWarning(migrated.from, migrated.to, options.filePath)] : [];
   for (const note of migrated.notes) if (note.warning) warnings.push(note.warning);
 
   // Detect legacy `verify:` blocks (renamed to `eval:` in v0.2.0) before the
@@ -132,6 +138,14 @@ export function validateParsed(raw: unknown, options: LoaderOptions = {}): Loade
     return { ok: false, errors: [{ message: msg, code: "SCHEMA" }] };
   }
 
+  // Map nodes (#575): a `workflow:` file path is read here, relative to this
+  // file, and replaced by the loaded child workflow, so the run, its journal
+  // hash and resume all bind to the child's content.
+  if (!options.child) {
+    const childErrors = readMapChildren(parsed, options);
+    if (childErrors.length > 0) return { ok: false, errors: childErrors };
+  }
+
   const schemaWarnings: WorkflowWarning[] = [];
   const structural = validateWorkflow(parsed, options.knownSkills, { warnings: schemaWarnings });
   if (structural.length > 0) {
@@ -144,4 +158,28 @@ export function validateParsed(raw: unknown, options: LoaderOptions = {}): Loade
   warnings.push(...schemaWarnings.map((w) => `${w.code}: ${w.message}`));
   warnings.push(...approveDirectiveWarnings(parsed));
   return warnings.length > 0 ? { ok: true, workflow: parsed, warnings } : { ok: true, workflow: parsed };
+}
+
+/**
+ * Replace each map node's `workflow: <file>` with the workflow that file holds
+ * (loaded and validated like any workflow file, read relative to the parent
+ * file). Without a parent file the path stays, and validation says so.
+ */
+function readMapChildren(workflow: Workflow, options: LoaderOptions): LoaderError[] {
+  const errors: LoaderError[] = [];
+  if (!options.filePath) return errors;
+  const base = path.dirname(path.resolve(options.filePath));
+  for (const [id, node] of Object.entries(workflow.nodes)) {
+    if (node.kind !== "map" || typeof node.workflow !== "string") continue;
+    const file = path.resolve(base, node.workflow);
+    const child = loadAndValidateWorkflow(file, { ...options, filePath: file, child: true });
+    if (!child.ok) {
+      for (const e of child.errors) {
+        errors.push({ ...e, message: `Map node "${id}" workflow "${node.workflow}": ${e.message}`, nodeId: id });
+      }
+      continue;
+    }
+    workflow.nodes[id] = { ...node, workflow: child.workflow };
+  }
+  return errors;
 }

@@ -911,7 +911,9 @@ export class CodexHarness implements AgentHarness {
               : kind === "mcp_tool_call" || kind === "collab_tool_call"
                 ? String(item.tool ?? "")
                 : "web_search";
-        call = { tool, input };
+        const server = kind === "mcp_tool_call" && typeof item.server === "string" ? item.server : undefined;
+        // External MCP tools keep their server for output_grounded (#580).
+        call = { tool, input, ...(server !== undefined && server !== "sweny-core" ? { server } : {}) };
         startCall(id, call);
         const detail = kind === "command_execution" ? `shell: ${String(item.command ?? "")}` : tool;
         opts.onProgress?.(detail.length > 80 ? detail.slice(0, 79) + "…" : detail);

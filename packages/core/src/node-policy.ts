@@ -118,6 +118,8 @@ const REVIEW = /\bpull requests?\b|\bPRs?\b|\breview/i;
 export function approveDirectiveWarnings(workflow: Workflow): string[] {
   const warnings: string[] = [];
   for (const [id, node] of Object.entries(workflow.nodes)) {
+    // A map node (#575) has no instruction and its children are read-only.
+    if (node.instruction === undefined) continue;
     const text =
       typeof node.instruction === "string"
         ? node.instruction

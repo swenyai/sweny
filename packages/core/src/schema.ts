@@ -20,6 +20,12 @@ import {
   DECIDER_PROVIDER_MOVED,
   EVALUATOR_KINDS,
   EVAL_POLICIES,
+  NODE_KINDS,
+  MAP_CONCURRENCY_CEILING,
+  MAP_ISOLATION,
+  MAP_MAX_ITEMS_CEILING,
+  MAP_ON_EMPTY,
+  MAP_ON_ITEM_FAIL,
   MCP_TRANSPORTS,
   NODE_ACCESS,
   NODE_NATIVE,
@@ -43,6 +49,8 @@ import { resolveNodePermissions } from "./node-policy.js";
 import { workflowInputsZ, WORKFLOW_INPUT_TYPES } from "./inputs.js";
 import { checkExpression, isWhenExpression, WHEN_EXPR_MAX_LENGTH } from "./when.js";
 import { outputSchemaError } from "./output-contract.js";
+import { childWorkflowOf, isMapNode, mapNodeProblems, withMapOutputs } from "./map-spec.js";
+import { effectiveSpecVersion } from "./migrations.js";
 
 // Studio and other schema-only consumers label edges without importing the root entry.
 export { isWhenExpression, whenLabel } from "./when.js";
@@ -174,6 +182,34 @@ export const evalPolicyZ = z.enum(EVAL_POLICIES);
  */
 const SUPPORTED_EVAL_POLICIES = new Set<string>(["all_pass"]);
 
+/** `output_grounded` config (#580). Mirrors `OutputGroundedRule` in types.ts. */
+export const outputGroundedZ = z
+  .object({
+    paths: z.array(z.string().min(1)).min(1).optional(),
+    ids: z.array(z.string().min(1)).min(1).optional(),
+    // `[]` is allowed: it turns the pattern scan off.
+    patterns: z.array(z.string().min(1)).optional(),
+    allow: z.array(z.string().min(1)).min(1).optional(),
+    tools: z.array(z.string().min(1)).min(1).optional(),
+    inputs: z.boolean().optional(),
+    context: z.boolean().optional(),
+    stale: z.boolean().optional(),
+    quotes: z
+      .array(
+        z
+          .object({
+            path: z.string().min(1),
+            tools: z.array(z.string().min(1)).min(1).optional(),
+            whitespace: z.enum(["exact", "trim", "collapse"]).optional(),
+            min_length: z.number().int().min(1).optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .optional(),
+  })
+  .strict();
+
 export const evaluatorRuleZ = z
   .object({
     any_tool_called: z.array(z.string().min(1)).min(1).optional(),
@@ -181,6 +217,7 @@ export const evaluatorRuleZ = z
     no_tool_called: z.array(z.string().min(1)).min(1).optional(),
     output_required: z.array(z.string().min(1)).min(1).optional(),
     output_matches: z.array(outputMatchZ).min(1).optional(),
+    output_grounded: outputGroundedZ.optional(),
   })
   .strict()
   .refine(
@@ -189,10 +226,11 @@ export const evaluatorRuleZ = z
       r.all_tools_called !== undefined ||
       r.no_tool_called !== undefined ||
       r.output_required !== undefined ||
-      r.output_matches !== undefined,
+      r.output_matches !== undefined ||
+      r.output_grounded !== undefined,
     {
       message:
-        "evaluator rule must declare at least one of: any_tool_called, all_tools_called, no_tool_called, output_required, output_matches",
+        "evaluator rule must declare at least one of: any_tool_called, all_tools_called, no_tool_called, output_required, output_matches, output_grounded",
     },
   );
 
@@ -227,6 +265,14 @@ export const evaluatorZ = z
           code: z.ZodIssueCode.custom,
           message: `evaluator '${e.name}' (kind: ${e.kind}) must declare a rule`,
           path: ["rule"],
+        });
+      }
+      // output_grounded reads the tool trace; a value evaluator would skip it and pass silently.
+      if (e.kind === "value" && e.rule?.output_grounded !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `evaluator '${e.name}' declares output_grounded on kind: value; output_grounded reads the tool trace, so declare it on kind: function`,
+          path: ["rule", "output_grounded"],
         });
       }
       if (e.rubric !== undefined || e.pass_when !== undefined || e.model !== undefined) {
@@ -395,6 +441,7 @@ export const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export const nodeZ = z
   .object({
+    kind: z.literal("agent").optional(),
     name: z.string().min(1),
     instruction: sourceZ,
     skills: z.array(z.string()).default([]),
@@ -433,6 +480,83 @@ export const edgeZ = z
   .strict();
 
 /**
+ * The child workflow a map node runs, written inline (#575): a workflow
+ * whose id and name default to the map node's. Its nodes are agent nodes:
+ * a child workflow may not contain a map.
+ */
+export const childWorkflowZ = z
+  .object({
+    id: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+    description: z.string().optional(),
+    spec_version: z
+      .string()
+      .regex(/^[1-9]\d*$/, "spec_version must be a positive integer string")
+      .optional(),
+    entry: z.string().min(1),
+    nodes: z.record(z.string(), nodeZ),
+    edges: z.array(edgeZ),
+    skills: z.record(z.string(), skillDefinitionZ).optional(),
+    rules: z.array(sourceZ).optional(),
+    context: z.array(sourceZ).optional(),
+    model: z.string().min(1).optional(),
+    judge_model: z.string().min(1).optional(),
+    budget: budgetZ.optional(),
+    context_mode: z.enum(CONTEXT_MODES).optional(),
+    inputs: workflowInputsZ.optional(),
+    permissions: nodePermissionsZ.optional(),
+  })
+  .strict();
+
+/**
+ * A `kind: map` node (spec v3, #575): one complete, read-only child run per
+ * item. No instruction and no skills of its own (`skills` may only be empty).
+ * Cross-field rules (exactly one of `over` / `items`, paths, keys,
+ * `min_success` with `collect`) are checked by `validateWorkflow`.
+ */
+export const mapNodeZ = z
+  .object({
+    kind: z.literal("map"),
+    name: z.string().min(1),
+    skills: z.array(z.string()).max(0, "a map node has no skills; its child workflow's nodes declare them").default([]),
+    on_fail: z.enum(NODE_ON_FAIL).optional(),
+    over: z.string().min(1).optional(),
+    items: z.array(z.unknown()).optional(),
+    key: z.string().min(1),
+    workflow: z.union([z.string().min(1), childWorkflowZ]),
+    result: z.string().min(1),
+    with: z.record(z.string().min(1), z.string().min(1)).optional(),
+    concurrency: z.number().int().min(1).max(MAP_CONCURRENCY_CEILING).optional(),
+    max_items: z.number().int().min(1).max(MAP_MAX_ITEMS_CEILING).optional(),
+    on_item_fail: z.enum(MAP_ON_ITEM_FAIL).optional(),
+    min_success: z.union([z.literal("all"), z.number().int().min(1)]).optional(),
+    on_empty: z.enum(MAP_ON_EMPTY).optional(),
+    item_budget: budgetZ.optional(),
+    isolation: z.enum(MAP_ISOLATION).optional(),
+  })
+  .strict();
+
+/** Any workflow node: an agent node (no `kind`, or `kind: agent`) or a map node (`kind: map`). */
+export const workflowNodeZ = z.discriminatedUnion("kind", [nodeZ, mapNodeZ]);
+
+/** A node as `workflowZ` parses it: an agent node or a map node (spec v3). */
+export type ParsedWorkflowNode = z.infer<typeof workflowNodeZ>;
+/** An agent node as `workflowZ` parses it. */
+export type ParsedAgentNode = z.infer<typeof nodeZ>;
+/** A map node as `workflowZ` parses it. */
+export type ParsedMapNode = z.infer<typeof mapNodeZ>;
+
+/**
+ * Narrow a node to an agent node (#575). Since spec v3 a raw `workflowZ`
+ * parse types each node as agent | map, so agent-only fields (`instruction`,
+ * `rules`, `model`, ...) need the narrowing first; `parseWorkflow` returns a
+ * `Workflow` instead. Works on parsed nodes and on `Node` alike.
+ */
+export function isAgentNode<N extends { kind?: string }>(node: N): node is Exclude<N, { kind: "map" }> {
+  return node.kind !== "map";
+}
+
+/**
  * Workflow type discriminator. Cloud uses this to route runs to a
  * type-specific renderer (Caught/Calibration/Missed for `pr_review`, flake
  * heatmap for `e2e_test`, source coverage delta for `monitor`, etc.).
@@ -465,7 +589,7 @@ export const workflowZ = z.object({
     .regex(/^[1-9]\d*$/, "spec_version must be a positive integer string")
     .optional(),
   workflow_type: workflowTypeZ.optional(),
-  nodes: z.record(z.string(), nodeZ),
+  nodes: z.record(z.string(), workflowNodeZ),
   edges: z.array(edgeZ),
   entry: z.string().min(1),
   skills: z.record(z.string(), skillDefinitionZ).default({}),
@@ -514,10 +638,13 @@ export function preflightLegacyVerify(raw: unknown): void {
   }
 }
 
-/** Parse + validate a raw object as a Workflow. Throws on invalid input. */
-export function parseWorkflow(raw: unknown) {
+/**
+ * Parse + validate a raw object as a Workflow. Throws on invalid input. A
+ * map node (spec v3) parses to a `Node` with its map fields and no instruction.
+ */
+export function parseWorkflow(raw: unknown): Workflow {
   preflightLegacyVerify(raw);
-  return workflowZ.parse(raw);
+  return workflowZ.parse(raw) as Workflow;
 }
 
 // ─── Structural Validation ───────────────────────────────────────
@@ -545,7 +672,8 @@ export interface WorkflowError {
     | "UNSUPPORTED_OUTPUT"
     | "INVALID_WHEN_EXPRESSION"
     | "MIXED_EDGE_CONDITIONS"
-    | "DUPLICATE_EDGE";
+    | "DUPLICATE_EDGE"
+    | "INVALID_MAP";
   message: string;
   nodeId?: string;
 }
@@ -582,10 +710,12 @@ export interface ValidateWorkflowOptions {
  * returns null when it reaches one, ending the workflow cleanly.
  */
 export function validateWorkflow(
-  workflow: Workflow | z.infer<typeof workflowZ>,
+  input: Workflow | z.infer<typeof workflowZ>,
   knownSkills?: Set<string>,
   options: ValidateWorkflowOptions = {},
 ): WorkflowError[] {
+  // A parsed workflow's nodes are agent or map nodes; both are a `Node` (map fields optional).
+  const workflow = input as Workflow;
   const errors: WorkflowError[] = [];
   const nodeIds = new Set(Object.keys(workflow.nodes));
   const entryExists = nodeIds.has(workflow.entry);
@@ -709,7 +839,8 @@ export function validateWorkflow(
     ancestorsCache.set(id, seen);
     return seen;
   };
-  const outputs = Object.fromEntries(Object.entries(workflow.nodes).map(([id, n]) => [id, n.output]));
+  // A map node's output is derived (#575), so expressions can route on its counts.
+  const outputs = Object.fromEntries(Object.entries(withMapOutputs(workflow).nodes).map(([id, n]) => [id, n.output]));
   const conditionKinds = new Map<string, { expr: number; nl: number }>();
   for (const edge of workflow.edges) {
     if (!nodeIds.has(edge.from) || !edge.when) continue;
@@ -995,6 +1126,20 @@ export function validateWorkflow(
     }
   }
 
+  // Map nodes (spec v3, #575): their own fields, then the child workflow as a
+  // workflow of its own, every problem prefixed with the map node.
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    if (!isMapNode(node)) continue;
+    for (const message of mapNodeProblems(workflow, nodeId, effectiveSpecVersion(workflow))) {
+      errors.push({ code: "INVALID_MAP", message, nodeId });
+    }
+    const child = childWorkflowOf(workflow, nodeId);
+    if (!child) continue;
+    for (const e of validateWorkflow(child, knownSkills, options)) {
+      errors.push({ code: e.code, message: `Map node "${nodeId}" child workflow: ${e.message}`, nodeId });
+    }
+  }
+
   // Skill references
   if (knownSkills) {
     // Merge workflow inline skills into known set
@@ -1065,6 +1210,84 @@ export const workflowJsonSchema = {
   additionalProperties: true,
   $defs: {
     Source: sourceJsonSchema,
+    AgentNodeRules: {
+      required: ["instruction"],
+      properties: { kind: { const: "agent" } },
+      not: {
+        anyOf: [
+          { required: ["over"] },
+          { required: ["items"] },
+          { required: ["key"] },
+          { required: ["workflow"] },
+          { required: ["result"] },
+          { required: ["with"] },
+          { required: ["concurrency"] },
+          { required: ["max_items"] },
+          { required: ["on_item_fail"] },
+          { required: ["min_success"] },
+          { required: ["on_empty"] },
+          { required: ["item_budget"] },
+          { required: ["isolation"] },
+        ],
+      },
+    },
+    MapNodeRules: {
+      required: ["kind", "name", "key", "workflow", "result"],
+      properties: { skills: { maxItems: 0 } },
+      not: {
+        anyOf: [
+          { required: ["instruction"] },
+          { required: ["output"] },
+          { required: ["max_turns"] },
+          { required: ["budget"] },
+          { required: ["disallowed_tools"] },
+          { required: ["agent_env"] },
+          { required: ["tools"] },
+          { required: ["fail_soft"] },
+          { required: ["route_by"] },
+          { required: ["permissions"] },
+          { required: ["outputs"] },
+          { required: ["rules"] },
+          { required: ["context"] },
+          { required: ["eval"] },
+          { required: ["eval_policy"] },
+          { required: ["judge_model"] },
+          { required: ["model"] },
+          { required: ["requires"] },
+          { required: ["retry"] },
+        ],
+      },
+    },
+    ChildWorkflow: {
+      type: "object",
+      description:
+        "A child workflow written inline in a map node: a workflow whose id and name default to the map node's.",
+      required: ["entry", "nodes", "edges"],
+      additionalProperties: false,
+      properties: {
+        id: { type: "string", minLength: 1 },
+        name: { type: "string", minLength: 1 },
+        description: { type: "string" },
+        spec_version: { type: "string", pattern: "^[1-9][0-9]*$" },
+        entry: { type: "string", minLength: 1 },
+        nodes: {
+          type: "object",
+          additionalProperties: {
+            allOf: [{ $ref: "#/properties/nodes/additionalProperties" }, { properties: { kind: { const: "agent" } } }],
+          },
+        },
+        edges: { $ref: "#/properties/edges" },
+        skills: { $ref: "#/properties/skills" },
+        rules: { type: "array", items: { $ref: "#/$defs/Source" } },
+        context: { type: "array", items: { $ref: "#/$defs/Source" } },
+        model: { type: "string", minLength: 1 },
+        judge_model: { type: "string", minLength: 1 },
+        budget: { $ref: "#/$defs/Budget" },
+        context_mode: { type: "string", enum: [...CONTEXT_MODES] },
+        inputs: { $ref: "#/properties/inputs" },
+        permissions: { $ref: "#/$defs/Permissions" },
+      },
+    },
     NodeSources: {
       oneOf: [
         { type: "array", items: { $ref: "#/$defs/Source" } },
@@ -1113,6 +1336,38 @@ export const workflowJsonSchema = {
             no_tool_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
             output_required: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
             output_matches: { type: "array", items: { $ref: "#/$defs/OutputMatch" }, minItems: 1 },
+            output_grounded: {
+              type: "object",
+              description:
+                "function only. Every id and URL in the output must appear in the node's successful read-tool outputs, its instruction, the workflow input or prior nodes' context.",
+              additionalProperties: false,
+              properties: {
+                paths: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+                ids: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+                patterns: { type: "array", items: { type: "string", minLength: 1 } },
+                allow: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+                tools: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+                inputs: { type: "boolean" },
+                context: { type: "boolean" },
+                stale: { type: "boolean" },
+                quotes: {
+                  type: "array",
+                  minItems: 1,
+                  description: "Values that must appear verbatim in a tool's output.",
+                  items: {
+                    type: "object",
+                    required: ["path"],
+                    additionalProperties: false,
+                    properties: {
+                      path: { type: "string", minLength: 1 },
+                      tools: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+                      whitespace: { type: "string", enum: ["exact", "trim", "collapse"] },
+                      min_length: { type: "integer", minimum: 1 },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
         rubric: {
@@ -1154,6 +1409,11 @@ export const workflowJsonSchema = {
             // `rule` is value / function only.
             not: { required: ["rule"] },
           },
+        },
+        {
+          // output_grounded reads the tool trace: function only.
+          if: { properties: { kind: { const: "value" } } },
+          then: { properties: { rule: { not: { required: ["output_grounded"] } } } },
         },
       ],
     },
@@ -1299,7 +1559,7 @@ export const workflowJsonSchema = {
       type: "string",
       pattern: "^[1-9][0-9]*$",
       description:
-        "Workflow spec version as a positive integer string. Absent means 1. Version 2 is safe by default: a node that declares no permissions and no outputs, in a workflow that declares no permissions, is read-only. Version 1 files are migrated in memory on load, keeping write on such nodes with one warning each; newer than the CLI supports is refused. Run `sweny workflow upgrade <file>` to rewrite a file at the current version.",
+        "Workflow spec version as a positive integer string. Absent means 1. Version 2 is safe by default: a node that declares no permissions and no outputs, in a workflow that declares no permissions, is read-only. Version 1 files are migrated in memory on load, keeping write on such nodes with one warning each; newer than the CLI supports is refused. Version 3 adds map nodes (kind: map); version 2 files run unchanged. Run `sweny workflow upgrade <file>` to rewrite a file at the current version.",
     },
     entry: { type: "string", minLength: 1, description: "ID of the entry node" },
     rules: {
@@ -1491,9 +1751,86 @@ export const workflowJsonSchema = {
       type: "object",
       additionalProperties: {
         type: "object",
-        required: ["name", "instruction"],
+        // An agent node needs an instruction; a map node (kind: map, spec v3) a child workflow.
+        required: ["name"],
         additionalProperties: false,
+        if: { required: ["kind"], properties: { kind: { const: "map" } } },
+        then: { $ref: "#/$defs/MapNodeRules" },
+        else: { $ref: "#/$defs/AgentNodeRules" },
         properties: {
+          kind: {
+            type: "string",
+            enum: [...NODE_KINDS],
+            description:
+              "'agent' (default): one agent run. 'map' (spec_version 3): one complete, read-only child SWEny run per item, results keyed by item.",
+          },
+          over: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Map nodes: path to the item array, input.<field> or <node>.<field>. Exactly one of over and items.",
+          },
+          items: { type: "array", description: "Map nodes: a literal item list. Exactly one of over and items." },
+          key: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Map nodes: the item field whose value keys each item (unique, [A-Za-z0-9_-]{1,64}), or $index for the position.",
+          },
+          workflow: {
+            description:
+              "Map nodes: the child workflow each item runs, a file path (relative to this file) or an inline workflow. Its nodes run read-only and declare no outputs; it may not contain a map.",
+            oneOf: [{ type: "string", minLength: 1 }, { $ref: "#/$defs/ChildWorkflow" }],
+          },
+          result: {
+            type: "string",
+            minLength: 1,
+            description: "Map nodes: the child node whose output is the item's result.",
+          },
+          with: {
+            type: "object",
+            additionalProperties: { type: "string", minLength: 1 },
+            description:
+              "Map nodes: the only parent values a child receives, child input name -> input.<field> or <node>.<field>. A child's input is exactly { item, item_key, ...with }.",
+          },
+          concurrency: {
+            type: "integer",
+            minimum: 1,
+            maximum: MAP_CONCURRENCY_CEILING,
+            description: "Map nodes: children running at once. Default 4.",
+          },
+          max_items: {
+            type: "integer",
+            minimum: 1,
+            maximum: MAP_MAX_ITEMS_CEILING,
+            description: "Map nodes: more items than this fail the map before any spend. Default 50.",
+          },
+          on_item_fail: {
+            type: "string",
+            enum: [...MAP_ON_ITEM_FAIL],
+            description:
+              "Map nodes: 'fail_fast' (default) cancels the rest at the first failed item; 'collect' runs every item.",
+          },
+          min_success: {
+            description: "Map nodes, collect only: successes the map needs. Default all.",
+            oneOf: [{ const: "all" }, { type: "integer", minimum: 1 }],
+          },
+          on_empty: {
+            type: "string",
+            enum: [...MAP_ON_EMPTY],
+            description: "Map nodes: an empty item list 'succeed's (default) with empty results, or 'fail's.",
+          },
+          item_budget: {
+            $ref: "#/$defs/Budget",
+            description:
+              "Map nodes: spend ceiling for each child run. The workflow's budget caps all of them together.",
+          },
+          isolation: {
+            type: "string",
+            enum: [...MAP_ISOLATION],
+            description:
+              "Map nodes: what a child sees. 'inputs' (default): its item, its key and the with values, nothing else of the parent. Its skills' read tools still reach whatever their credentials can read.",
+          },
           name: { type: "string", minLength: 1 },
           instruction: { $ref: "#/$defs/Source", description: "Natural language instruction for the AI model." },
           skills: {
