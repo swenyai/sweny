@@ -21,7 +21,8 @@ import { tmpdir } from "node:os";
 import { execute } from "../executor.js";
 import { createSkillMap } from "../skills/index.js";
 import { notification } from "../skills/notification.js";
-import { RunJournal, journalDir, markerToken } from "../journal.js";
+import { RunJournal, journalDir, markerToken, type JournalRecord } from "../journal.js";
+import { prepareResume } from "../cli/resume.js";
 import { publishRun, BUNDLES_DIR, type PublishFaults } from "../approval.js";
 import { parseWorkflow, validateWorkflow } from "../schema.js";
 import type { Claude, NodeResult, Skill, Workflow } from "../types.js";
@@ -292,6 +293,55 @@ describe("approval mode: the producer freezes writes into a bundle (#576)", () =
     expect(notify.outputs).toEqual([
       expect.objectContaining({ type: "slack_message", status: "refused", reason: "approval needs a run journal" }),
     ]);
+  });
+});
+
+describe("approval mode across a crash (#576)", () => {
+  it("a bundle written before its visit ended is an orphan; the resumed visit freezes the same bytes and names them", async () => {
+    process.env.SWENY_STATE_DIR = tmp("sweny-state-");
+    const cwd = tmp("sweny-ws-");
+    const wf = approvalWorkflow();
+    const t = fakeTransports();
+    const agent = fakeAgent({ notify: [SLACK, EMAIL] });
+    const opts = { skills: createSkillMap(t.skills), claude: agent.claude, config: {}, logger: silent, cwd, env: {} };
+    const journal = RunJournal.create({
+      runId: RUN_ID,
+      cwd,
+      workflowFile: "store.yml",
+      faults: {
+        beforeAppend(rec: JournalRecord) {
+          if (rec.type === "node:end" && rec.node === "notify") throw new Kill("node:end notify");
+        },
+      },
+    });
+    await expect(execute(wf, {}, { ...opts, journal })).rejects.toThrow(Kill);
+    // A killed process leaves its lock behind with a pid that no longer runs.
+    writeFileSync(
+      join(journalDir(cwd, RUN_ID), "lock"),
+      JSON.stringify({ pid: 2 ** 31 - 1, started: 0, nonce: "dead" }),
+    );
+    const [orphan] = bundlesOf(cwd);
+    const digest = orphan.replace(/\.json$/, "");
+
+    const early = publish(cwd, true);
+    const before = await early.run();
+    expect(before).toEqual({ bundles: [], orphans: [digest] });
+    expect(early.sent).toEqual([]);
+
+    const prepared = prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => wf });
+    if (!prepared.ok || "planOnly" in prepared) throw new Error("resume refused");
+    const { results } = await execute(wf, prepared.ctx.input, { ...opts, journal: prepared.ctx.journal });
+    prepared.ctx.journal.end("success");
+    expect(agent.calls.filter((c) => c === "notify")).toHaveLength(1);
+    expect(bundlesOf(cwd)).toEqual([orphan]);
+    expect(results.get("notify")!.outputs!.map((o) => o.digest)).toEqual([digest, digest]);
+    expect(t.sent).toEqual([]);
+
+    const p = publish(cwd, true);
+    const out = await p.run();
+    expect(out.orphans).toEqual([]);
+    expect(out.bundles[0]).toMatchObject({ digest, state: "published" });
+    expect(p.sent.map((s) => s.tool)).toEqual(["slack_send_message", "notify_email"]);
   });
 });
 
