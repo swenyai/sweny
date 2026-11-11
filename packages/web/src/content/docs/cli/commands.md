@@ -634,6 +634,17 @@ Walks you through:
 
 Requires the [GitHub CLI](https://cli.github.com/) (`gh`) to be installed and authenticated. If `gh` is not available, the command saves validated files locally to `./sweny-publish/` for manual submission.
 
+### sweny publish &lt;run-id&gt;
+
+Send the writes a run froze for approval (`safe_outputs.approval.required`, spec v3). Run it from the run's workspace.
+
+```bash
+sweny publish 20261111-090000-abc123            # verify and print the exact calls; sends nothing
+sweny publish 20261111-090000-abc123 --approve  # send them, once
+```
+
+For each bundle the run's journal names, it checks the bundle's bytes against its digest, refuses an expired bundle or a run whose agent ran without an enforced sandbox, and prints every call with its exact arguments. `--approve` records you as `local:<os user>` (checked against `approval.approvers` when the workflow declares them), consumes the one approval for that node visit, and sends each call as frozen. Each write gets a receipt: `sent`, `failed`, `refused`, `not sent`, or `unknown: not resent` when the process died after the send and before its receipt. A second `--approve` sends nothing and prints the first one's receipts. Bundle files the journal does not name are reported and never sent. Exit code 1 when anything was refused or did not send.
+
 ## sweny upgrade
 
 Upgrade the globally-installed `@sweny-ai/core` CLI to the latest published version. Aliased as `sweny update`.

@@ -1,9 +1,9 @@
 ---
 title: Notification
-description: Send notifications via webhook, Discord, or Teams.
+description: Send notifications via webhook, Discord, Teams, or email.
 ---
 
-The Notification skill handles non-Slack notification channels. It supports generic webhooks, Discord, and Microsoft Teams — configure whichever channels your team uses. For Slack, use the dedicated [Slack skill](/skills/slack/) instead.
+The Notification skill handles non-Slack notification channels. It supports generic webhooks, Discord, Microsoft Teams and email over SMTP — configure whichever channels your team uses. For Slack, use the dedicated [Slack skill](/skills/slack/) instead.
 
 ## Metadata
 
@@ -11,7 +11,7 @@ The Notification skill handles non-Slack notification channels. It supports gene
 |-------|-------|
 | **ID** | `notification` |
 | **Category** | `notification` |
-| **Required env vars** | At least one of: `NOTIFICATION_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL` (skill also declares `SMTP_URL` for future email support) |
+| **Required env vars** | At least one of: `NOTIFICATION_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL`, `SMTP_URL` |
 
 ### Configuration
 
@@ -23,10 +23,12 @@ All config fields are optional. Set the ones for the channels you want to use.
 | `NOTIFICATION_WEBHOOK_ALLOWED_HOSTS` | Comma-separated host allowlist (`host[:port]`) for the `notify_webhook` `url` override |
 | `DISCORD_WEBHOOK_URL` | Discord webhook URL |
 | `TEAMS_WEBHOOK_URL` | Microsoft Teams webhook URL |
+| `SMTP_URL` | SMTP connection URL for `notify_email` (`smtp://` or `smtps://user:pass@host:port`) |
+| `SMTP_FROM` | From address for `notify_email` |
 The skill activates when at least one of the above is set. If none are set, the skill will not appear in the available tool set.
 
 :::note[Email notifications]
-Email notifications are available via the GitHub Action's `notification-provider: email` setting with SendGrid (`sendgrid-api-key`, `email-from`, `email-to` inputs). Email is not exposed as a Claude tool — it's handled by the action's notification layer.
+`notify_email` sends one plain-text email over `SMTP_URL` (through nodemailer) from `SMTP_FROM`. In a workflow, prefer the `email` safe output: its recipient is pinned by the declaration (`target`), never chosen by the agent, and with `safe_outputs.approval` it waits for `sweny publish --approve`. SMTP has no lookup, so a send whose outcome is unknown is never repeated.
 :::
 
 ## Tools
@@ -36,6 +38,7 @@ Email notifications are available via the GitHub Action's `notification-provider
 | `notify_webhook` | Send a JSON payload to a webhook URL |
 | `notify_discord` | Send a message to Discord with optional rich embeds |
 | `notify_teams` | Send a MessageCard to Microsoft Teams |
+| `notify_email` | Send a plain-text email over SMTP |
 
 ### notify_webhook
 
