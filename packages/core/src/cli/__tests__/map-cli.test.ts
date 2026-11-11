@@ -82,6 +82,9 @@ class Exit extends Error {
 
 const dirs: string[] = [];
 let state = "";
+/** Everything the CLI printed, shown when an exit code is not the expected one. */
+let printed: string[] = [];
+const keep = (...args: unknown[]) => void printed.push(args.map(String).join(" "));
 beforeEach(() => {
   state = mkdtempSync(join(tmpdir(), "sweny-map-cli-state-"));
   dirs.push(state);
@@ -90,10 +93,12 @@ beforeEach(() => {
   vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
     throw new Exit(code ?? 0);
   }) as never);
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  vi.spyOn(console, "error").mockImplementation(() => {});
-  vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-  vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  printed = [];
+  vi.spyOn(console, "log").mockImplementation(keep);
+  vi.spyOn(console, "error").mockImplementation(keep);
+  vi.spyOn(console, "warn").mockImplementation(keep);
+  vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => (keep(chunk), true));
+  vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => (keep(chunk), true));
   fake.plan = {};
   fake.calls = [];
   fake.readOnly = [];
@@ -170,7 +175,7 @@ async function journaled() {
 describe("sweny workflow run with a map node", () => {
   it("runs every item as a read-only, journaled child with a fresh harness", async () => {
     const code = await cli("workflow", "run", workflowFile(), "--no-history");
-    expect(code).toBe(0);
+    expect(code, printed.join("\n")).toBe(0);
     expect(fake.calls).toEqual(["a", "b", "c", "d"]);
     expect(fake.readOnly).toEqual([true, true, true, true]);
     // The parent's harness plus one per child.
@@ -184,7 +189,7 @@ describe("sweny workflow run with a map node", () => {
     fake.plan = { b: ["hang", "ok"] };
     // The wall-clock budget stops the run while b is running.
     const first = await cli("workflow", "run", file, "--no-history", "--timeout", "500");
-    expect(first).toBe(1);
+    expect(first, printed.join("\n")).toBe(1);
     await vi.waitFor(() => expect(fake.aborted).toEqual(["b"]));
     await new Promise((r) => setTimeout(r, 50));
     expect(fake.calls).toEqual(["a", "b"]);
@@ -192,7 +197,7 @@ describe("sweny workflow run with a map node", () => {
 
     fake.calls = [];
     const second = await cli("workflow", "resume", runId, "--no-history");
-    expect(second).toBe(0);
+    expect(second, printed.join("\n")).toBe(0);
     expect(fake.calls).toEqual(["b", "c", "d"]);
     const { gens } = await journaled();
     expect(gens).toEqual(["g1", "g1", "g1", "g1"]);
