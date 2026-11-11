@@ -38,6 +38,8 @@ A Workflow is the top-level document. It defines a directed graph of [Nodes](/no
 
 Version 2 makes nodes read-only by default (see [Default access](/nodes#permissions)). The migration from version 1 declares `permissions: write` on every node that relied on the version 1 default, so a migrated file runs exactly as before.
 
+Version 3 adds [map nodes](/map). The migration from version 2 changes nothing else, and an implementation SHOULD NOT warn about it. A map node in a file that declares an older version (or none) MUST be refused, naming the version it needs.
+
 In the reference implementation, `sweny workflow upgrade <file>` applies the migrations and rewrites the file with `spec_version` set. `--dry-run` reports the change without writing. YAML comments, blank lines and key order are kept for everything a migration does not touch; comments attached to values a migration replaces or removes are not.
 
 ## Workflow type
