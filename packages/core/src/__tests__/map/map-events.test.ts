@@ -58,7 +58,7 @@ const agent = (fail: string[] = []): Claude => ({
 
 const MAP_TYPES = new Set(["node:enter", "node:exit", "map:start", "child:start", "child:end", "map:end"]);
 const strip = (e: ExecutionEvent) => {
-  const { result: _r, instruction: _i, ...rest } = e as Record<string, unknown>;
+  const { result: _r, instruction: _i, ...rest } = e as unknown as Record<string, unknown>;
   return rest;
 };
 

@@ -1094,65 +1094,66 @@ export interface MapCounts {
   cancelled: number;
 }
 
-export type ExecutionEvent = /** A map visit (#575) is about to launch its children. */
-(
-  | { type: "map:start"; node: string; iteration: number; keys: string[]; concurrency: number; events_version: 2 }
-  /** One child run opened: `run` is its generation's run id. */
-  | {
-      type: "child:start";
-      node: string;
-      key: string;
-      index: number;
-      run: string;
-      parent_run: string;
-      generation: number;
-      action: ChildStartAction;
-      events_version: 2;
-    }
-  /** One item ended. `run` and `generation` are absent for an item no generation was opened for. */
-  | {
-      type: "child:end";
-      node: string;
-      key: string;
-      status: MapItemStatus;
-      parent_run: string;
-      run?: string;
-      generation?: number;
-      error?: string;
-      events_version: 2;
-    }
-  /** A map visit ended (after its budget check): the map node's status and the item counts. */
-  | { type: "map:end"; node: string; status: NodeResult["status"]; counts: MapCounts; events_version: 2 }
-  | { type: "workflow:start"; workflow: string }
-  | { type: "sources:resolved"; sources: Record<string, _ResolvedSource> }
-  | { type: "node:enter"; node: string; instruction: string }
-  | { type: "tool:call"; node: string; tool: string; input: unknown }
-  | { type: "tool:result"; node: string; tool: string; output: unknown }
-  | { type: "node:exit"; node: string; result: NodeResult }
-  /**
-   * A finished node's result changed after its `node:exit` (a budget stop at
-   * the route that followed it). Not a second exit: consumers that keep each
-   * node's final result replace it; timers and step printers ignore it.
-   */
-  | { type: "node:amended"; node: string; result: NodeResult }
-  | { type: "node:progress"; node: string; message: string }
-  | { type: "node:retry"; node: string; attempt: number; reason: string; preamble: string }
-  /**
-   * Non-fatal contract violation surfaced during node execution. Currently
-   * emitted when a source node declares output properties that the agent
-   * did not emit. The route eval view fills the missing keys with `null`
-   * so the LLM evaluator can't ghost-match conditions like "is undefined"
-   * or "is 0", but the operator still wants a loud signal in the log
-   * stream.
-   *
-   * `fields` lists the declared property names that were missing from the
-   * emitted data. `reason` is a short human-readable summary.
-   */
-  | { type: "node:warning"; node: string; reason: string; fields: string[] }
-  | { type: "route"; from: string; to: string; reason: string }
-  | { type: "workflow:end"; results: Record<string, NodeResult> }
-) &
-  EventScope;
+export type ExecutionEvent =
+  /** A map visit (#575) is about to launch its children. */
+  (
+    | { type: "map:start"; node: string; iteration: number; keys: string[]; concurrency: number; events_version: 2 }
+    /** One child run opened: `run` is its generation's run id. */
+    | {
+        type: "child:start";
+        node: string;
+        key: string;
+        index: number;
+        run: string;
+        parent_run: string;
+        generation: number;
+        action: ChildStartAction;
+        events_version: 2;
+      }
+    /** One item ended. `run` and `generation` are absent for an item no generation was opened for. */
+    | {
+        type: "child:end";
+        node: string;
+        key: string;
+        status: MapItemStatus;
+        parent_run: string;
+        run?: string;
+        generation?: number;
+        error?: string;
+        events_version: 2;
+      }
+    /** A map visit ended (after its budget check): the map node's status and the item counts. */
+    | { type: "map:end"; node: string; status: NodeResult["status"]; counts: MapCounts; events_version: 2 }
+    | { type: "workflow:start"; workflow: string }
+    | { type: "sources:resolved"; sources: Record<string, _ResolvedSource> }
+    | { type: "node:enter"; node: string; instruction: string }
+    | { type: "tool:call"; node: string; tool: string; input: unknown }
+    | { type: "tool:result"; node: string; tool: string; output: unknown }
+    | { type: "node:exit"; node: string; result: NodeResult }
+    /**
+     * A finished node's result changed after its `node:exit` (a budget stop at
+     * the route that followed it). Not a second exit: consumers that keep each
+     * node's final result replace it; timers and step printers ignore it.
+     */
+    | { type: "node:amended"; node: string; result: NodeResult }
+    | { type: "node:progress"; node: string; message: string }
+    | { type: "node:retry"; node: string; attempt: number; reason: string; preamble: string }
+    /**
+     * Non-fatal contract violation surfaced during node execution. Currently
+     * emitted when a source node declares output properties that the agent
+     * did not emit. The route eval view fills the missing keys with `null`
+     * so the LLM evaluator can't ghost-match conditions like "is undefined"
+     * or "is 0", but the operator still wants a loud signal in the log
+     * stream.
+     *
+     * `fields` lists the declared property names that were missing from the
+     * emitted data. `reason` is a short human-readable summary.
+     */
+    | { type: "node:warning"; node: string; reason: string; fields: string[] }
+    | { type: "route"; from: string; to: string; reason: string }
+    | { type: "workflow:end"; results: Record<string, NodeResult> }
+  ) &
+    EventScope;
 
 export type Observer = (event: ExecutionEvent) => void;
 
