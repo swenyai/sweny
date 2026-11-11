@@ -12,6 +12,11 @@
 //   { kind: "vcs", args, needle }                    -> { ok, found } (run git with args, search its output)
 //   { kind: "env", names }                           -> { values: { name: value | null } }
 //   { kind: "procScan", needle }                     -> { found, scanned }
+//   { kind: "procParent", pid, needle }              -> { pid, pidNs, self, target, ancestors, scan } (#599)
+//     Tries to read the env of the process that started this agent: /proc/<pid>/environ
+//     for the pid it was handed (the parent's pid on the host), every ancestor reached
+//     by walking PPid up from this process, and every /proc entry. `self` says whether
+//     the needle is in this process's own env (it must not be: the parent withheld it).
 //   { kind: "dumpEnv", path }                        -> appends {env, cwd} as one JSON line to path
 //   { kind: "mcp", command, args, envFrom, call }    -> { ok, tools?, result?, error?, stderr? }
 //     Starts a stdio MCP server (the tool bridge shim) the way an agent's MCP
@@ -20,7 +25,7 @@
 // Paths starting with "$HOME" resolve against the HOME this process sees.
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, readdirSync, readlinkSync, writeFileSync } from "node:fs";
 import http from "node:http";
 
 const TIMEOUT_MS = 5000;
@@ -103,6 +108,46 @@ function procScan(needle) {
   return { found, scanned };
 }
 
+/** One process's environ: readable at all, and whether it holds the needle. */
+function environOf(pid, needle) {
+  try {
+    const environ = readFileSync(`/proc/${pid}/environ`, "utf8");
+    return { pid, readable: true, found: environ.includes(needle) };
+  } catch (err) {
+    return { pid, readable: false, found: false, error: String(err?.code ?? err?.message ?? err) };
+  }
+}
+
+function parentPidOf(pid) {
+  try {
+    const m = /^PPid:\s+(\d+)/m.exec(readFileSync(`/proc/${pid}/status`, "utf8"));
+    return m ? Number(m[1]) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function procParent(p) {
+  let pidNs = null;
+  try {
+    pidNs = readlinkSync("/proc/self/ns/pid");
+  } catch {
+    // no /proc or no namespace link
+  }
+  const ancestors = [];
+  for (let pid = process.ppid, hops = 0; pid > 0 && hops < 32; pid = parentPidOf(pid), hops++) {
+    ancestors.push(environOf(pid, p.needle));
+  }
+  return {
+    pid: process.pid,
+    pidNs,
+    self: Object.values(process.env).some((v) => typeof v === "string" && v.includes(p.needle)),
+    target: environOf(Number(p.pid), p.needle),
+    ancestors,
+    scan: procScan(p.needle),
+  };
+}
+
 async function mcpProbe(p) {
   let client;
   let stderr = "";
@@ -150,6 +195,7 @@ for (const p of plan) {
   else if (p.kind === "env")
     results.push({ values: Object.fromEntries(p.names.map((n) => [n, process.env[n] ?? null])) });
   else if (p.kind === "procScan") results.push(procScan(p.needle));
+  else if (p.kind === "procParent") results.push(procParent(p));
   else if (p.kind === "mcp") results.push(await mcpProbe(p));
   else results.push({ error: `unknown probe ${p.kind}` });
 }

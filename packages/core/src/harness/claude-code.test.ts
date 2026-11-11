@@ -683,6 +683,29 @@ describe("ClaudeCodeHarness", () => {
       expect(r.contained).toBe(false);
     });
 
+    it("with the sandbox on, Read/Grep/Glob are denied /proc; with it off they are not (#599)", async () => {
+      expect(mod.CLAUDE_PROC_DENY_RULES).toEqual(["Read(//proc)", "Read(//proc/**)"]);
+      vi.stubEnv("SWENY_SANDBOX", "strict");
+      mockQuery.mockReturnValueOnce(resultStream("done"));
+      await new mod.ClaudeCodeHarness({ logger: noopLogger(), sandboxProbe: () => undefined }).run({
+        instruction: "x",
+        context: {},
+        tools: [],
+      });
+      expect(mockQuery.mock.calls.at(-1)![0].options.disallowedTools).toEqual(
+        expect.arrayContaining([...mod.CLAUDE_PROC_DENY_RULES]),
+      );
+      vi.stubEnv("SWENY_SANDBOX", "auto");
+      mockQuery.mockReturnValueOnce(resultStream("done"));
+      await new mod.ClaudeCodeHarness({ logger: noopLogger(), sandboxProbe: () => "no bubblewrap" }).run({
+        instruction: "x",
+        context: {},
+        tools: [],
+      });
+      const off = mockQuery.mock.calls.at(-1)![0].options.disallowedTools as string[];
+      for (const r of mod.CLAUDE_PROC_DENY_RULES) expect(off).not.toContain(r);
+    });
+
     it("every run loads only the MCP servers sweny passes, and no filesystem settings or plugins", async () => {
       for (const p of [policy({}), policy({ readOnly: true }), undefined]) {
         mockQuery.mockReturnValueOnce(resultStream("done"));

@@ -209,24 +209,28 @@ runs:
         npm install -g "@openai/codex@${CODEX_VERSION}"
         codex --version
 
-    # Agent sandbox deps (#360). SWENY_SANDBOX=auto (default) sandboxes agent
-    # shell commands when bubblewrap + socat work and otherwise warns and runs
-    # unsandboxed, so this step is best-effort and never fails the job.
+    # Agent sandbox deps (#360). The Action runs every agent sandboxed by default
+    # (#599): SWENY_SANDBOX_DEFAULT=strict. Only the workflow's env (SWENY_SANDBOX
+    # on the step) can lower it; in CI the CLI refuses a lower value from the repo
+    # (.sweny.yml, .env), so this step sees the floor the run will use. Windows,
+    # where sweny cannot sandbox, keeps the CLI's CI default (auto). Under strict a
+    # host that cannot sandbox fails here, before the workflow runs, with the fix.
     # GitHub-hosted runners are ephemeral VMs, so the AppArmor relaxation below is
-    # applied there by default; self-hosted runners only get it with strict.
+    # applied there by default; self-hosted runners only get it with SWENY_SANDBOX=strict.
     - name: Install agent sandbox dependencies
       if: runner.os == 'Linux'
       shell: bash
       env:
         RUNNER_ENVIRONMENT: ${{ runner.environment }}
         SANDBOX_USERNS: ${{ github.action_path }}/scripts/sandbox-userns.sh
+        SWENY_SANDBOX_DEFAULT: ${{ runner.os != 'Windows' && 'strict' || '' }}
       run: |
         SUDO=""
         if [ "$(id -u)" != "0" ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo -n"; fi
         if ! command -v bwrap >/dev/null 2>&1 || ! command -v socat >/dev/null 2>&1; then
           if command -v apt-get >/dev/null 2>&1; then
             if ! { $SUDO apt-get update -qq && $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq bubblewrap socat; } >/dev/null 2>&1; then
-              echo "::warning title=SWEny agent sandbox::Could not install bubblewrap/socat with apt; agent commands will run unsandboxed (SWENY_SANDBOX=auto)."
+              echo "::notice title=SWEny agent sandbox::Could not install bubblewrap/socat with apt."
             fi
           else
             echo "::notice title=SWEny agent sandbox::apt-get not found; install bubblewrap and socat to sandbox agent commands."
@@ -243,8 +247,20 @@ runs:
             if bash "$SANDBOX_USERNS" probe; then
               echo "::notice title=SWEny agent sandbox::Relaxed kernel.apparmor_restrict_unprivileged_userns and unloaded the bwrap-userns-restrict AppArmor profile; agent commands will be sandboxed."
             else
-              echo "::warning title=SWEny agent sandbox::bubblewrap still cannot create a sandbox after relaxing kernel.apparmor_restrict_unprivileged_userns and the bwrap-userns-restrict AppArmor profile; agent commands will run unsandboxed unless SWENY_SANDBOX=strict."
+              echo "::warning title=SWEny agent sandbox::bubblewrap still cannot create a sandbox after relaxing kernel.apparmor_restrict_unprivileged_userns and the bwrap-userns-restrict AppArmor profile."
             fi
+          fi
+        fi
+        if [ "$SANDBOX_MODE" != "off" ] && { ! command -v socat >/dev/null 2>&1 || ! bash "$SANDBOX_USERNS" probe; }; then
+          FIX=$(bash "$SANDBOX_USERNS" hint)
+          if [ "$(bash "$SANDBOX_USERNS" explicit)" = "strict" ]; then
+            echo "::error title=SWEny agent sandbox::SWENY_SANDBOX is strict and this runner cannot sandbox agent commands. $FIX"
+            exit 1
+          elif [ "$SANDBOX_MODE" = "strict" ]; then
+            echo "::error title=SWEny agent sandbox::This runner cannot sandbox agent commands, and the Action runs every agent sandboxed (strict) by default since #599. $FIX"
+            exit 1
+          else
+            echo "::warning title=SWEny agent sandbox::This runner cannot sandbox agent commands; under SWENY_SANDBOX=auto they run unsandboxed. $FIX"
           fi
         fi
         exit 0
@@ -264,6 +280,7 @@ runs:
         AGENT: ${{ inputs.agent }}
         RUNNER_ENVIRONMENT: ${{ runner.environment }}
         SANDBOX_USERNS: ${{ github.action_path }}/scripts/sandbox-userns.sh
+        SWENY_SANDBOX_DEFAULT: ${{ runner.os != 'Windows' && 'strict' || '' }}
       run: |
         if [ "$(bash "$SANDBOX_USERNS" mode)" = "off" ]; then
           echo "::notice title=SWEny sandbox wrapper::SWENY_SANDBOX is off; skipping srt install"
@@ -281,7 +298,7 @@ runs:
           command -v rg >/dev/null 2>&1 || brew install ripgrep >/dev/null 2>&1 || true
         fi
         if ! npm install -g --ignore-scripts "@anthropic-ai/sandbox-runtime@${SRT_VERSION}" >/dev/null 2>&1; then
-          echo "::error title=SWEny sandbox wrapper::could not install @anthropic-ai/sandbox-runtime@${SRT_VERSION}. agent: ${AGENT} needs it to sandbox agent commands; set SWENY_SANDBOX=off to run unsandboxed."
+          echo "::error title=SWEny sandbox wrapper::could not install @anthropic-ai/sandbox-runtime@${SRT_VERSION}. agent: ${AGENT} needs it to sandbox agent commands; opt out with SWENY_SANDBOX: off in the step env (in CI, .sweny.yml and .env cannot lower the sandbox) and harness-policy: warn to run unsandboxed."
           exit 1
         fi
         SETTINGS="${RUNNER_TEMP:-/tmp}/srt-probe.json"
@@ -298,7 +315,7 @@ runs:
           fi
         fi
         if ! probe; then
-          echo "::error title=SWEny sandbox wrapper::srt ${SRT_VERSION} is installed but cannot wrap a command on this runner (needs bubblewrap, socat, ripgrep and unprivileged user namespaces). On a self-hosted Ubuntu 23.10+ runner, set SWENY_SANDBOX=strict to let sweny relax kernel.apparmor_restrict_unprivileged_userns and unload the bwrap-userns-restrict AppArmor profile, fix the runner yourself, or set SWENY_SANDBOX=off and harness-policy: warn to run agent commands unsandboxed."
+          echo "::error title=SWEny sandbox wrapper::srt ${SRT_VERSION} is installed but cannot wrap a command on this runner (needs bubblewrap, socat, ripgrep and unprivileged user namespaces). On a self-hosted Ubuntu 23.10+ runner, set SWENY_SANDBOX: strict in the step env to let sweny relax kernel.apparmor_restrict_unprivileged_userns and unload the bwrap-userns-restrict AppArmor profile, fix the runner yourself, or opt out with SWENY_SANDBOX: off in the step env (in CI, .sweny.yml and .env cannot lower the sandbox) and harness-policy: warn to run agent commands unsandboxed. See https://docs.sweny.ai/advanced/agent-sandbox/"
           srt --settings "$SETTINGS" -- true 2>&1 | head -5 || true
           exit 1
         fi
@@ -317,6 +334,9 @@ runs:
         OPENAI_API_KEY: ${{ inputs.openai-api-key }}
         AGENT: ${{ inputs.agent }}
         INPUT_HARNESS_POLICY: ${{ inputs.harness-policy }}
+        # Strict by default for every agent (#599). An env default, which SWENY_SANDBOX
+        # and .sweny.yml `sandbox:` override and a CLI older than it ignores (auto).
+        SWENY_SANDBOX_DEFAULT: ${{ runner.os != 'Windows' && 'strict' || '' }}
         WORKFLOW_PATH: ${{ inputs.workflow }}
         DRY_RUN: ${{ inputs.dry-run }}
         VERBOSE: ${{ inputs.verbose }}

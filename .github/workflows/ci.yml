@@ -170,8 +170,8 @@ jobs:
       - name: Assert no diff between checked-in schema and generated output
         run: npm run check:schema-drift --workspace=packages/core
 
-  # Evidence for #360: does SWENY_SANDBOX=auto actually sandbox on a
-  # GitHub-hosted runner once the Action's sandbox step has run? Non-required.
+  # Evidence for #360 and #599: does the Action's default (strict) actually sandbox
+  # on a GitHub-hosted runner once its sandbox step has run? Non-required.
   sandbox-probe:
     name: Sandbox probe (bubblewrap on hosted runner)
     runs-on: ubuntu-latest
@@ -192,7 +192,7 @@ jobs:
           persist-credentials: false
 
       # Runs the Action's own "Install agent sandbox dependencies" script as a
-      # hosted runner would (default auto mode), then asserts bwrap works.
+      # hosted runner would (the strict default), then asserts bwrap works.
       - name: Run the Action's sandbox step, then probe bwrap
         run: |
           # Dependency-free extraction: the step's `run: |` block (10-space body) up to the next step.
@@ -202,10 +202,19 @@ jobs:
           # A self-hosted runner is never relaxed without strict, and off never is.
           rc=0; RUNNER_ENVIRONMENT=self-hosted SWENY_SANDBOX=auto bash scripts/sandbox-userns.sh relax || rc=$?; test "$rc" = 3
           rc=0; RUNNER_ENVIRONMENT=github-hosted SWENY_SANDBOX=off bash scripts/sandbox-userns.sh relax || rc=$?; test "$rc" = 3
-          RUNNER_ENVIRONMENT=github-hosted SWENY_SANDBOX=auto SANDBOX_USERNS="$GITHUB_WORKSPACE/scripts/sandbox-userns.sh" bash "$RUNNER_TEMP/sandbox-step.sh"
+          # The Action's strict default (#599) never relaxes a self-hosted host on its own.
+          rc=0; RUNNER_ENVIRONMENT=self-hosted SWENY_SANDBOX_DEFAULT=strict bash scripts/sandbox-userns.sh relax || rc=$?; test "$rc" = 3
+          # As the Action runs it by default: SWENY_SANDBOX unset, SWENY_SANDBOX_DEFAULT=strict.
+          # Strict on a hosted runner must sandbox with no warning and no error.
+          out=$(RUNNER_ENVIRONMENT=github-hosted SWENY_SANDBOX_DEFAULT=strict SANDBOX_USERNS="$GITHUB_WORKSPACE/scripts/sandbox-userns.sh" bash "$RUNNER_TEMP/sandbox-step.sh")
+          echo "$out"
+          if grep -qE '::(warning|error)' <<< "$out"; then
+            echo "PROBE RESULT: the Action's sandbox step warned under the strict default on a hosted runner"; exit 1
+          fi
+          test "$(SWENY_SANDBOX_DEFAULT=strict CI=true bash scripts/sandbox-userns.sh mode)" = strict
           echo "PROBE apparmor_restrict_unprivileged_userns=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo n/a)"
           if out=$(bwrap --ro-bind / / --dev /dev --proc /proc true 2>&1); then
-            echo "PROBE RESULT: bwrap works after the Action step (auto sandboxes on hosted runners)"
+            echo "PROBE RESULT: bwrap works after the Action step (strict sandboxes on hosted runners)"
           else
             echo "PROBE RESULT: bwrap still fails after the Action step: $out"
             exit 1

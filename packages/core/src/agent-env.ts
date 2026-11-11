@@ -22,7 +22,8 @@
  * cli/config-file.ts):
  *   SWENY_ENV_SCOPE                / env-scope                on | off (default: on in CI, off locally)
  *   SWENY_ENV_PASSTHROUGH          / env-passthrough          extra var names ("*" = inherit all)
- *   SWENY_SANDBOX                  / sandbox                  auto | strict | off (default: auto in CI, off locally)
+ *   SWENY_SANDBOX                  / sandbox                  auto | strict | off (default: SWENY_SANDBOX_DEFAULT, else auto in CI, off locally)
+ *   SWENY_SANDBOX_DEFAULT                                     the default when neither is set; the GitHub Action sets strict
  *   SWENY_SANDBOX_ALLOWED_DOMAINS  / sandbox-allowed-domains  extra hosts for sandboxed commands
  */
 
@@ -1219,11 +1220,23 @@ export function resolveAgentAccess(
  */
 export type SandboxMode = "off" | "auto" | "strict";
 
+/** One sandbox mode value, or undefined when it is empty or not a mode. */
+function parseSandboxMode(v: string | undefined): SandboxMode | undefined {
+  const raw = (v ?? "").trim().toLowerCase();
+  if (raw === "off" || raw === "false" || raw === "0" || raw === "no") return "off";
+  if (raw === "strict" || raw === "on" || raw === "true" || raw === "1") return "strict";
+  if (raw === "auto") return "auto";
+  return undefined;
+}
+
 /**
  * Parse the sandbox mode from the explicit `mode` or `SWENY_SANDBOX`.
  * Accepts `off|false|0|no`, `auto`, `strict|on|true|1` (`on` is an alias for
- * `strict`). Unset or unknown (with a warning) uses the default: `auto` when
- * `CI` is truthy, `off` otherwise. An explicit value always wins.
+ * `strict`). Unset or unknown (with a warning) uses the default:
+ * `SWENY_SANDBOX_DEFAULT` when it is a mode (the GitHub Action sets `strict`,
+ * #599), else `auto` when `CI` is truthy, `off` otherwise. An explicit value
+ * always wins, so `.sweny.yml` `sandbox:` (copied into `SWENY_SANDBOX`) and
+ * `SWENY_SANDBOX` override the Action's default.
  */
 export function resolveSandboxMode(
   env: Record<string, string | undefined>,
@@ -1231,13 +1244,75 @@ export function resolveSandboxMode(
   logger?: Pick<Logger, "warn">,
 ): SandboxMode {
   const raw = (mode ?? env.SWENY_SANDBOX ?? "").trim().toLowerCase();
-  if (raw === "off" || raw === "false" || raw === "0" || raw === "no") return "off";
-  if (raw === "strict" || raw === "on" || raw === "true" || raw === "1") return "strict";
-  if (raw === "auto") return "auto";
-  const fallback: SandboxMode = truthy(env.CI) ? "auto" : "off";
+  const explicit = parseSandboxMode(raw);
+  if (explicit) return explicit;
+  const fallback = defaultSandboxMode(env);
   if (raw !== "") logger?.warn(`SWENY_SANDBOX="${raw}" is not one of off|auto|strict; using ${fallback}`);
   return fallback;
 }
+
+/** The mode when nothing explicit is set: `SWENY_SANDBOX_DEFAULT` when it is a mode, else `auto` in CI, `off` locally. */
+export function defaultSandboxMode(env: Record<string, string | undefined>): SandboxMode {
+  return parseSandboxMode(env.SWENY_SANDBOX_DEFAULT) ?? (truthy(env.CI) ? "auto" : "off");
+}
+
+const SANDBOX_RANK: Readonly<Record<SandboxMode, number>> = { off: 0, auto: 1, strict: 2 };
+
+/** A repository file that can set agent-floor variables. */
+export type RepoFileSource = ".env" | ".sweny.yml";
+
+/**
+ * #599: in CI, a repository file is content a pull request controls, so it may
+ * tighten the agent floor and never loosen it. Returns why `key=value` from
+ * `source` is refused, or undefined when it is accepted. Outside CI (`CI` is
+ * not truthy; a `.env` cannot set `CI`) every value is accepted.
+ *
+ * - `SWENY_SANDBOX` (`.sweny.yml` `sandbox:`): refused below the default
+ *   ({@link defaultSandboxMode}: the Action's `strict`, else `auto`). A value
+ *   that is not a mode is accepted here and falls back to the default.
+ * - `SWENY_ENV_SCOPE` (`env-scope:`): refused when it turns scoping off.
+ * - `SWENY_ENV_PASSTHROUGH`, `SWENY_SANDBOX_ALLOWED_DOMAINS` from `.env`:
+ *   always refused (each only widens what the agent gets). From `.sweny.yml`
+ *   they stay accepted, as documented.
+ *
+ * The message never echoes the raw value (a repo file must not be able to
+ * write workflow commands into the job log), only the parsed mode.
+ */
+export function repoFileLoosening(
+  key: string,
+  value: string,
+  env: Record<string, string | undefined>,
+  source: RepoFileSource,
+): string | undefined {
+  if (!truthy(env.CI)) return undefined;
+  let what: string | undefined;
+  if (key === "SWENY_SANDBOX") {
+    const mode = parseSandboxMode(value);
+    const floor = defaultSandboxMode(env);
+    if (mode && SANDBOX_RANK[mode] < SANDBOX_RANK[floor]) what = `lower the agent sandbox from ${floor} to ${mode}`;
+  } else if (key === "SWENY_ENV_SCOPE") {
+    if (["off", "false", "0"].includes(value.trim().toLowerCase())) what = "turn agent env scoping off";
+  } else if (source === ".env" && key === "SWENY_ENV_PASSTHROUGH") {
+    if (value.trim() !== "") what = "pass more variables to the agent";
+  } else if (source === ".env" && key === "SWENY_SANDBOX_ALLOWED_DOMAINS") {
+    if (value.trim() !== "") what = "widen the agent's network allowlist";
+  }
+  if (!what) return undefined;
+  return (
+    `${source} sets ${key}, which would ${what} in CI; ignored. In CI a repository file can only tighten ` +
+    `the agent sandbox. To change it, set ${key} in the workflow's env (for the swenyai/sweny Action, the step's env:).`
+  );
+}
+
+/**
+ * How to get past a strict sandbox the host cannot start (#599): fix the host,
+ * or opt out explicitly. Ends every strict refusal.
+ */
+export const SANDBOX_FIX_HINT =
+  "Fix the host (Linux: sudo apt-get install -y bubblewrap socat, and allow unprivileged user namespaces; " +
+  "see https://docs.sweny.ai/advanced/agent-sandbox/), or opt out explicitly: SWENY_SANDBOX=off in the " +
+  "workflow's env (in CI, .sweny.yml and .env cannot lower the sandbox) with harness-policy warn runs agents unsandboxed, " +
+  "and SWENY_SANDBOX=auto falls back with a warning.";
 
 /**
  * The fix-it hint for a sandbox start that failed on a user namespace. Ubuntu
@@ -1492,6 +1567,20 @@ export interface AgentSandboxResolution {
 }
 
 /**
+ * Where a strict mode came from, for a refusal: the GitHub Action's default
+ * when no explicit mode was passed, `SWENY_SANDBOX` is not a mode and
+ * `SWENY_SANDBOX_DEFAULT` is strict, else an
+ * explicit `SWENY_SANDBOX=strict` (env, `.sweny.yml`, or a client option).
+ */
+export function sandboxStrictSource(env: Record<string, string | undefined>, explicitMode?: string): string {
+  return explicitMode === undefined &&
+    !parseSandboxMode(env.SWENY_SANDBOX) &&
+    parseSandboxMode(env.SWENY_SANDBOX_DEFAULT) === "strict"
+    ? "SWENY_SANDBOX_DEFAULT=strict, the GitHub Action's default"
+    : "SWENY_SANDBOX=strict";
+}
+
+/**
  * Resolve the `sandbox` query option for one agent call.
  *
  * - `off`: no settings.
@@ -1510,8 +1599,8 @@ export function resolveAgentSandbox(opts: ResolveAgentSandboxOpts): AgentSandbox
       return {
         mode,
         error:
-          `Agent sandbox is required (SWENY_SANDBOX=strict) but unavailable: ${reason}. ` +
-          `Refusing to run the agent unsandboxed. Fix the host, or set SWENY_SANDBOX=auto to fall back with a warning.`,
+          `Agent sandbox is required (${sandboxStrictSource(opts.env, opts.mode)}) but unavailable: ${reason}. ` +
+          `Refusing to run the agent unsandboxed. ${SANDBOX_FIX_HINT}`,
       };
     }
     return {

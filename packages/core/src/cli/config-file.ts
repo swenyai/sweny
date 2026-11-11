@@ -4,6 +4,7 @@ import { parseEnv } from "node:util";
 import { parse as parseYaml } from "yaml";
 // Imported for its side effect too: the startup env snapshot is taken before loadDotenv runs.
 import { markWorkspaceEnv } from "../startup-env.js";
+import { repoFileLoosening } from "../agent-env.js";
 
 /**
  * Keys a workspace `.env` may never set. The workspace is agent-writable, and
@@ -14,21 +15,30 @@ import { markWorkspaceEnv } from "../startup-env.js";
  * trusts (proxies, SSL/CA vars), and the home and temp dirs. A `.env` value
  * for one of them is skipped with a warning. GITHUB_TOKEN is a credential the
  * `.env` template documents, not platform state, so it stays allowed.
+ * SWENY_SANDBOX_DEFAULT is the Action's default sandbox mode (#599): operator
+ * state, never the workspace's.
  */
 export const DOTENV_DENIED_KEYS =
-  /^(GITHUB_(?!TOKEN$)[A-Za-z0-9_]*|RUNNER_[A-Za-z0-9_]*|ACTIONS_[A-Za-z0-9_]*|CI|PATH|Path|NODE_[A-Za-z0-9_]*|GIT_[A-Za-z0-9_]*|(HTTPS?|ALL|NO|FTP)_PROXY|(https?|all|no|ftp)_proxy|SSL_CERT_FILE|SSL_CERT_DIR|CURL_CA_BUNDLE|REQUESTS_CA_BUNDLE|TMPDIR|TEMP|TMP|HOME|USERPROFILE)$/;
+  /^(GITHUB_(?!TOKEN$)[A-Za-z0-9_]*|RUNNER_[A-Za-z0-9_]*|ACTIONS_[A-Za-z0-9_]*|CI|SWENY_SANDBOX_DEFAULT|PATH|Path|NODE_[A-Za-z0-9_]*|GIT_[A-Za-z0-9_]*|(HTTPS?|ALL|NO|FTP)_PROXY|(https?|all|no|ftp)_proxy|SSL_CERT_FILE|SSL_CERT_DIR|CURL_CA_BUNDLE|REQUESTS_CA_BUNDLE|TMPDIR|TEMP|TMP|HOME|USERPROFILE)$/;
 
 /** True when a workspace `.env` may not set `key` (see {@link DOTENV_DENIED_KEYS}). */
 export function isDotenvDenied(key: string): boolean {
   return DOTENV_DENIED_KEYS.test(key);
 }
 
+/** One warning about a refused workspace value: a `::warning::` annotation under GitHub Actions. */
+function warnRefused(env: NodeJS.ProcessEnv, msg: string): void {
+  const prefix = env.GITHUB_ACTIONS === "true" ? "::warning title=SWEny agent sandbox::" : "  warning: ";
+  process.stderr.write(`${prefix}${msg}\n`);
+}
+
 /**
  * Auto-load a `.env` file from the given directory.
- * Sets `process.env[KEY]` only if not already defined (real env vars win),
- * and never a runtime or platform key ({@link DOTENV_DENIED_KEYS}).
+ * Sets `env[KEY]` (default `process.env`) only if not already defined (real
+ * env vars win), never a runtime or platform key ({@link DOTENV_DENIED_KEYS}),
+ * and in CI never a value that loosens the agent floor ({@link repoFileLoosening}, #599).
  */
-export function loadDotenv(cwd: string = process.cwd()): void {
+export function loadDotenv(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = process.env): void {
   const envPath = path.join(cwd, ".env");
   let content: string;
   try {
@@ -40,13 +50,18 @@ export function loadDotenv(cwd: string = process.cwd()): void {
   // Node's own dotenv parser (util.parseEnv): inline `# comments`, quoted
   // values, `export KEY=`, escaped and multiline double-quoted values, CRLF.
   for (const [key, value] of Object.entries(parseEnv(content))) {
-    if (process.env[key] !== undefined) continue;
+    if (env[key] !== undefined) continue;
     if (isDotenvDenied(key)) {
       process.stderr.write(`  warning: .env sets ${key}, a runtime/platform variable; ignored\n`);
       continue;
     }
-    process.env[key] = value;
-    markWorkspaceEnv(key);
+    const refused = repoFileLoosening(key, value ?? "", env, ".env");
+    if (refused) {
+      warnRefused(env, refused);
+      continue;
+    }
+    env[key] = value;
+    if (env === process.env) markWorkspaceEnv(key);
   }
 }
 
@@ -75,14 +90,15 @@ export function applyAgentFileConfig(fileConfig: FileConfig, env: NodeJS.Process
     if (env[envVar] !== undefined) continue;
     for (const key of keys) {
       const v = fileConfig[key];
-      if (Array.isArray(v) && v.length > 0) {
-        env[envVar] = v.join(",");
-        break;
-      }
-      if (typeof v === "string" && v) {
-        env[envVar] = v;
-        break;
-      }
+      let value: string | undefined;
+      if (Array.isArray(v) && v.length > 0) value = v.join(",");
+      else if (typeof v === "string" && v) value = v;
+      if (value === undefined) continue;
+      // #599: in CI .sweny.yml may tighten the agent floor, never loosen it.
+      const refused = repoFileLoosening(envVar, value, env, ".sweny.yml");
+      if (refused) warnRefused(env, refused);
+      else env[envVar] = value;
+      break;
     }
   }
 }

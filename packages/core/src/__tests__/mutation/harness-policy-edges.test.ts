@@ -12,6 +12,7 @@ import {
   resolveHarnessPolicy,
 } from "../../harness/policy.js";
 import type { HarnessCapabilities, NodePolicy } from "../../harness/types.js";
+import { SANDBOX_FIX_HINT } from "../../agent-env.js";
 
 const base: NodePolicy = { readOnly: false, deny: [], egress: [], strict: false };
 
@@ -238,11 +239,23 @@ describe("policyGate: staged write and sandbox", () => {
       degraded: [gap],
       refuse:
         `strict sandbox (SWENY_SANDBOX=strict): ${gap}. Install srt ` +
-        "(npm i -g @anthropic-ai/sandbox-runtime, plus bubblewrap, socat and ripgrep on Linux), " +
-        "or set SWENY_SANDBOX=auto to run with a warning.",
+        "(npm i -g @anthropic-ai/sandbox-runtime, plus bubblewrap, socat and ripgrep on Linux). " +
+        SANDBOX_FIX_HINT,
     });
     expect(policyGate(contained, { ...base, sandbox: "strict" })).toStrictEqual({ degraded: [] });
     expect(policyGate(weak, { ...base, sandbox: "strict" }, { sandbox: true })).toStrictEqual({ degraded: [] });
+  });
+
+  it("a strict sandbox from the Action's default says so (#599)", () => {
+    vi.stubEnv("SWENY_SANDBOX", "");
+    vi.stubEnv("SWENY_SANDBOX_DEFAULT", "strict");
+    try {
+      expect(policyGate(weak, { ...base, sandbox: "strict" }).refuse).toMatch(
+        /^strict sandbox \(SWENY_SANDBOX_DEFAULT=strict, the GitHub Action's default\): /,
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
