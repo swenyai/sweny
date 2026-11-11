@@ -149,6 +149,8 @@ function workflowFile(): string {
 /** Run the CLI entry (it parses process.argv on import); resolves with the exit code. */
 async function cli(...args: string[]): Promise<number> {
   vi.resetModules();
+  exitCode = undefined;
+  printed = [];
   const argv = process.argv;
   process.argv = ["node", "sweny", ...args];
   try {
