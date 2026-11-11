@@ -462,6 +462,8 @@ describe("prepareAgentSpawn", () => {
     expect(p.degraded).toEqual([
       "egress allowlist: harness has no network sandbox and no egress wrapper is active",
       "sandbox: harness has no native fs and network sandbox and no process sandbox wrapper is available",
+      // WEAK declares no built-in allow-list, so a write node reports that too (#608).
+      "builtin allow-list: harness cannot limit the agent to the node's built-in tools; it keeps all of its own",
     ]);
   });
 
