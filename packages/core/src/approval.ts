@@ -199,6 +199,24 @@ function namedBundles(records: JournalRecord[]): Map<string, { node: string; ite
   return named;
 }
 
+/**
+ * Whether any map child generation of the run recorded an agent without an
+ * enforced sandbox (#576: children's write requests reach the parent's bundle).
+ * A raw scan: a child's records chain to its own run id, which only its `run:start` names.
+ */
+function childRanUnsandboxed(childrenDir: string): boolean {
+  if (!fs.existsSync(childrenDir)) return false;
+  for (const slot of fs.readdirSync(childrenDir)) {
+    const slotDir = path.join(childrenDir, slot);
+    if (!fs.statSync(slotDir).isDirectory()) continue;
+    for (const gen of fs.readdirSync(slotDir)) {
+      const file = path.join(slotDir, gen, JOURNAL_FILE);
+      if (fs.existsSync(file) && fs.readFileSync(file, "utf-8").includes('"type":"agent:unsandboxed"')) return true;
+    }
+  }
+  return false;
+}
+
 const label = (w: BundleWrite) => `[${w.n}] ${w.type} via ${w.via}${w.target ? ` -> ${w.target}` : ""}`;
 
 /** Verify, print and (with `approve`) send every bundle a run's journal names. */
@@ -214,7 +232,8 @@ export async function publishRun(o: PublishRunOptions): Promise<PublishResult> {
   if (read.corruptAtLine !== undefined || read.forgedAtLine !== undefined) {
     throw new Error(`the journal of run ${o.runId} fails authentication; nothing is published`);
   }
-  const unsandboxed = read.records.some((r) => r.type === "agent:unsandboxed");
+  const unsandboxed =
+    read.records.some((r) => r.type === "agent:unsandboxed") || childRanUnsandboxed(path.join(dir, "children"));
   const named = namedBundles(read.records);
 
   const bundleDir = path.join(dir, BUNDLES_DIR);

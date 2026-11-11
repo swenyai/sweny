@@ -2711,6 +2711,7 @@ export const NODE_RESULT_JOURNAL = {
   degraded: { journal: "verbatim" },
   policy: { journal: "verbatim" }, // booleans and a mode; the run receipt reads it for replayed nodes
   outputs: { journal: "verbatim" },
+  intents: { journal: "verbatim" }, // a map child's write requests (#576): its map re-plans them on replay too
   budget: { journal: "verbatim" }, // a replayed node that crossed a budget must still be the node that stopped the run
   contained: {
     journal: "excluded",

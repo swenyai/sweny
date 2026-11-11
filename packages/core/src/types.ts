@@ -897,6 +897,8 @@ export interface SafeOutputReceipt {
   url?: string;
   /** `pending` only: sha256 of the approval bundle that holds the write (#576). */
   digest?: string;
+  /** A map child's write (#576): the item it came from. */
+  item?: string;
 }
 
 /**
@@ -1088,6 +1090,12 @@ export interface NodeUsage {
 
 export interface NodeResult {
   status: "success" | "skipped" | "failed";
+  /**
+   * A map child's write requests (RFC 0002 M2, #576): a child does not apply
+   * its outputs; its map re-plans them per item, in item order, under
+   * per-item caps. Absent everywhere else.
+   */
+  intents?: import("./safe-outputs.js").SafeOutputIntent[];
   /** Arbitrary data produced by this node */
   data: Record<string, unknown>;
   /** Tool calls made during this node's execution */

@@ -40,6 +40,7 @@ import type {
   ToolCall,
   RouteRung,
   MapCounts,
+  SafeOutputReceipt,
 } from "./types.js";
 import { SAFE_OUTPUT_APPROVAL_EXPIRES_DEFAULT, consoleLogger } from "./types.js";
 import { resolveSources } from "./source-resolver.js";
@@ -104,6 +105,16 @@ import {
   listContractProblems,
   outputContractProblems,
 } from "./output-contract.js";
+
+/** One map item's write requests from one child node (#576), planned by the map. */
+interface ItemWrites {
+  key: string;
+  index: number;
+  node: string;
+  intents: SafeOutputIntent[];
+  /** The child's run input (`{ item, item_key, ...with }`): what its `{ input: name }` pins resolve against. */
+  input: Record<string, unknown>;
+}
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -206,6 +217,12 @@ export interface ExecuteOptions {
    * Set by the executor for each child; never by a caller.
    */
   spendTally?: SpendTally;
+  /**
+   * @internal A map child's run (#576): nodes with `outputs` record their
+   * write requests on the node result (`intents`) instead of applying them;
+   * the map re-plans them per item. Set by the executor; never by a caller.
+   */
+  deferOutputs?: boolean;
   /**
    * Operator config for the decision model (#357): where it lives and its
    * key. Only nodes with `route_by: decider` consult it. `false` turns it off
@@ -338,7 +355,14 @@ async function executeRun(
   const stageOutputs = dryRun || options.stageOutputs === true || workflow.safe_outputs?.staged === true;
   const approval = workflow.safe_outputs?.approval;
   const runEnv = options.env ?? process.env;
-  const usesOutputs = Object.values(workflow.nodes).some((n) => (n.outputs?.length ?? 0) > 0);
+  const usesOutputs =
+    Object.values(workflow.nodes).some((n) => (n.outputs?.length ?? 0) > 0) ||
+    // A map child's write requests (#576) are planned here, under this run's actor.
+    Object.entries(workflow.nodes).some(
+      ([id, n]) =>
+        isMapNode(n) &&
+        Object.values(childWorkflowOf(workflow, id)?.nodes ?? {}).some((c) => (c.outputs?.length ?? 0) > 0),
+    );
   const actor: ActorInfo = usesOutputs ? resolveActor(runEnv, options.actor) : {};
   // The run input, for `number: { input }` issue pins on outputs.
   const runInput = input && typeof input === "object" ? (input as Record<string, unknown>) : undefined;
@@ -565,6 +589,109 @@ async function executeRun(
   const githubApiUrl = trustedEnvValue(runEnv, "GITHUB_API_URL") || undefined;
   // The run's identity and job-summary writer, the same for every tool, from the operator's env.
   const runToolContext = toolRunContext(workflow.id, runEnv);
+
+  // Approval mode (#576): where a visit's writes are frozen instead of sent.
+  const approvalFor = (
+    visit: string,
+    iteration: number,
+  ): { approval?: NonNullable<Parameters<typeof applySafeOutputs>[0]["approval"]> } => {
+    if (approval?.required !== true) return {};
+    if (!journal?.propose) return { approval: "unavailable" };
+    return {
+      approval: {
+        propose: (writes: ProposedWrite[]) =>
+          journal.propose!(visit, iteration, writes, {
+            workflow: workflow.id,
+            expiresMs: parseDuration(approval.expires ?? SAFE_OUTPUT_APPROVAL_EXPIRES_DEFAULT)!,
+            ...(approval.approvers ? { approvers: approval.approvers } : {}),
+          }),
+      },
+    };
+  };
+
+  /**
+   * A map visit's child write requests (#576), planned in item order. Each
+   * item is its own write node (`<map>[<key>]`), so its caps are its own; the
+   * run cap, dedupe and trust are the run's. In approval mode every item's
+   * writes go into one bundle for the map visit: one proposal per visit.
+   * There is no model screen for child writes: with `safe_outputs.screen` on
+   * they are vetoed (fail closed).
+   */
+  const stageChildWrites = async (
+    mapId: string,
+    iteration: number,
+    items: ItemWrites[],
+  ): Promise<{ receipts: SafeOutputReceipt[]; error?: string }> => {
+    const receipts: SafeOutputReceipt[] = [];
+    const frozen: ProposedWrite[] = [];
+    const pendingAt: number[] = [];
+    const visitApproval = approvalFor(mapId, iteration).approval;
+    const collect =
+      visitApproval && visitApproval !== "unavailable"
+        ? {
+            propose: (writes: ProposedWrite[]) => {
+              frozen.push(...writes);
+              return "";
+            },
+          }
+        : visitApproval;
+    const wrapped = journal ? journal.wrapWrites(mapId, iteration, skills) : skills;
+    for (const w of items) {
+      const childNode = childWorkflowOf(workflow, mapId)?.nodes[w.node];
+      const stage = await applySafeOutputs({
+        nodeId: `${mapId}[${w.key}]`,
+        declarations: childNode?.outputs ?? [],
+        intents: w.intents,
+        policy: workflow.safe_outputs,
+        nodeSkills: childNode?.skills ?? [],
+        skills: wrapped,
+        config,
+        env: runEnv,
+        actor,
+        staged: stageOutputs,
+        ...(collect ? { approval: collect } : {}),
+        cwd: resolveCwd,
+        pushBranch,
+        ...(githubApiUrl ? { githubApiUrl } : {}),
+        ...runToolContext,
+        state: writeState,
+        logger,
+        input: w.input,
+        ...(journal?.reconcile
+          ? {
+              reconcile: (sk: Skill, tool: string, args: unknown, ctx: ToolContext) =>
+                journal.reconcile!(mapId, iteration, sk, tool, args, ctx),
+            }
+          : {}),
+      });
+      for (const r of stage.receipts) {
+        if (r.status === "pending") pendingAt.push(receipts.length);
+        receipts.push({ ...r, item: w.key });
+      }
+      if (stage.error) {
+        // Nothing of this visit is frozen once one item's writes failed.
+        for (const i of pendingAt)
+          receipts[i] = { ...receipts[i], status: "skipped", reason: "an earlier write failed" };
+        return { receipts, error: `item "${w.key}": ${stage.error}` };
+      }
+    }
+    if (frozen.length > 0 && collect && collect !== "unavailable") {
+      let digest: string;
+      try {
+        digest = (visitApproval as { propose(writes: ProposedWrite[]): string }).propose(frozen);
+      } catch (err) {
+        for (const i of pendingAt) {
+          receipts[i] = { ...receipts[i], status: "failed", reason: "could not write the approval bundle" };
+        }
+        return {
+          receipts,
+          error: `could not write the approval bundle: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+      for (const i of pendingAt) receipts[i] = { ...receipts[i], digest };
+    }
+    return { receipts };
+  };
   const resolvedSources = await resolveSources(sourceMap, {
     cwd: resolveCwd,
     env: options.env ?? process.env,
@@ -724,6 +851,7 @@ async function executeRun(
       // A map visit (#575): every item as a complete, read-only child run, over
       // one spend tally seeded with the run's spend and every earlier generation's.
       const host = options.children!;
+      const itemWrites: ItemWrites[] = [];
       const tally = budgetGuard.shareWithChildren();
       if (mapPrep.ok && host.spent) {
         const reg = mapPrep.registration;
@@ -763,7 +891,10 @@ async function executeRun(
                 budget: node.item_budget,
                 children: undefined,
                 spendTally: tally,
+                deferOutputs: true,
               }),
+            onItemIntents: (key, index, childNode, childIntents, itemInput) =>
+              itemWrites.push({ key, index, node: childNode, intents: childIntents, input: itemInput }),
             concurrency: serial ? 1 : declaredConcurrency,
             tally,
             ...(signal ? { signal } : {}),
@@ -802,6 +933,33 @@ async function executeRun(
         };
       }
       if (concurrentWarning) result = { ...result, degraded: [concurrentWarning] };
+      // Child write requests (#576): planned here, item by item in input order, each item's caps its own.
+      if (itemWrites.length > 0) {
+        if (result.status === "success") {
+          const stage = await stageChildWrites(
+            currentId,
+            iteration,
+            itemWrites.sort((a, b) => a.index - b.index),
+          );
+          result = { ...result, outputs: stage.receipts };
+          if (stage.error) {
+            logger.warn(`  ${stage.error}`, { node: currentId });
+            result = { ...result, status: "failed", data: { ...result.data, error: stage.error } };
+          }
+        } else {
+          result = {
+            ...result,
+            outputs: itemWrites.flatMap((w) =>
+              w.intents.map((i) => ({
+                type: i.type,
+                status: "skipped" as const,
+                reason: "map did not succeed",
+                item: w.key,
+              })),
+            ),
+          };
+        }
+      }
       if (mapPrep.ok) {
         const counts = (result.data as { counts: MapCounts }).counts;
         safeObserve(
@@ -1520,7 +1678,11 @@ async function executeRun(
     // Safe outputs write stage (#365). Runs only after the agent finished and
     // every eval passed; deterministic checks first, an optional model screen
     // may veto, and only then does sweny call the skill's own write handler.
-    if (outputDecls.length > 0) {
+    if (outputDecls.length > 0 && options.deferOutputs === true) {
+      // A map child (#576): the requests go up to the map, which plans them per item.
+      if (result.status === "success" && !agentRunFailed && intents.length > 0)
+        result = { ...result, intents: [...intents] };
+    } else if (outputDecls.length > 0) {
       if (result.status === "success" && !agentRunFailed) {
         journal?.checkpoint(currentId, iteration, { result, intents, agentRunFailed, attempt });
         const stage = await applySafeOutputs({
@@ -1535,20 +1697,7 @@ async function executeRun(
           actor,
           staged: stageOutputs,
           // Approval mode (#576): the writes are frozen into a bundle in the run's private dir; nothing is sent.
-          ...(approval?.required === true
-            ? {
-                approval: journal?.propose
-                  ? {
-                      propose: (writes: ProposedWrite[]) =>
-                        journal.propose!(visitId, iteration, writes, {
-                          workflow: workflow.id,
-                          expiresMs: parseDuration(approval.expires ?? SAFE_OUTPUT_APPROVAL_EXPIRES_DEFAULT)!,
-                          ...(approval.approvers ? { approvers: approval.approvers } : {}),
-                        }),
-                    }
-                  : ("unavailable" as const),
-              }
-            : {}),
+          ...approvalFor(visitId, iteration),
           cwd: resolveCwd,
           pushBranch,
           ...(githubApiUrl ? { githubApiUrl } : {}),

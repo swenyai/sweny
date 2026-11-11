@@ -278,7 +278,11 @@ describe("map load-time checks", () => {
     expect(errorsOf(mapWorkflow({ workflow: nested })).join("\n")).toContain("nodes.draft_all.workflow");
     const outputs = { ...CHILD, nodes: { draft: { ...CHILD.nodes.draft, outputs: [{ type: "comment" }] } } };
     expect(errorsOf(mapWorkflow({ workflow: outputs }))).toContain(
-      msg('runs a child workflow whose node "draft" declares outputs; children are read-only in M1'),
+      msg('runs a child workflow whose node "draft" declares outputs, which needs on_item_fail: collect'),
+    );
+    // #576: with collect, a child may request writes; its map plans them per item.
+    expect(errorsOf(mapWorkflow({ workflow: outputs, on_item_fail: "collect" })).join("\n")).not.toContain(
+      "declares outputs",
     );
     const write = { ...CHILD, nodes: { draft: { ...CHILD.nodes.draft, permissions: "write" } } };
     expect(errorsOf(mapWorkflow({ workflow: write }))).toContain(

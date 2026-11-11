@@ -23,6 +23,7 @@ import { createSkillMap } from "../skills/index.js";
 import { notification } from "../skills/notification.js";
 import { RunJournal, journalDir, markerToken, type JournalRecord } from "../journal.js";
 import { prepareResume } from "../cli/resume.js";
+import { createJournalChildHost, createMemoryChildHost } from "../child-host.js";
 import { publishRun, BUNDLES_DIR, type PublishFaults } from "../approval.js";
 import { parseWorkflow, validateWorkflow } from "../schema.js";
 import type { Claude, NodeResult, Skill, Workflow } from "../types.js";
@@ -375,6 +376,123 @@ describe("approval mode across a crash (#576)", () => {
     expect(out.orphans).toEqual([]);
     expect(out.bundles[0]).toMatchObject({ digest, state: "published" });
     expect(p.sent.map((s) => s.tool)).toEqual(["slack_send_message", "notify_email"]);
+  });
+});
+
+/** One map over three issues; each child asks for comments on its own issue (`number: { input: item_key }`). */
+function mapWorkflow(over: Partial<Workflow> = {}): Workflow {
+  return {
+    id: "batch",
+    name: "Batch",
+    description: "",
+    spec_version: "3",
+    entry: "draft_all",
+    nodes: {
+      draft_all: {
+        kind: "map",
+        name: "Draft all",
+        instruction: "",
+        skills: [],
+        items: [{ id: "7" }, { id: "8" }, { id: "9" }],
+        key: "id",
+        on_item_fail: "collect",
+        result: "draft",
+        workflow: {
+          id: "one",
+          name: "One",
+          description: "",
+          entry: "draft",
+          nodes: {
+            draft: {
+              name: "Draft",
+              instruction: "NODE:draft",
+              skills: ["github"],
+              outputs: [{ type: "comment", target: "acme/api", number: { input: "item_key" }, max: 1 }],
+            },
+          },
+          edges: [],
+        },
+      },
+    },
+    edges: [],
+    ...over,
+  } as Workflow;
+}
+
+describe("map children request writes; the map plans them per item (#576)", () => {
+  const TWO = [
+    { type: "comment", body: "Draft ready" },
+    { type: "comment", body: "A second comment" },
+  ];
+
+  it("applies one comment per item, in item order, each item under its own cap (keyed <map>[<key>])", async () => {
+    const t = fakeTransports();
+    const agent = fakeAgent({ draft: TWO });
+    const { results } = await execute(
+      mapWorkflow(),
+      {},
+      {
+        skills: createSkillMap(t.skills),
+        claude: agent.claude,
+        config: {},
+        logger: silent,
+        env: {},
+        children: createMemoryChildHost(),
+      },
+    );
+    const map = results.get("draft_all")!;
+    expect(map.status).toBe("success");
+    expect(t.sent.map((s) => [s.tool, s.args.issue_number, s.args.body])).toEqual([
+      ["github_add_comment", 7, "Draft ready"],
+      ["github_add_comment", 8, "Draft ready"],
+      ["github_add_comment", 9, "Draft ready"],
+    ]);
+    // emit_output already stops a child at its declared max (1); the map's cap is per item, so every item gets its one.
+    expect(map.outputs!.map((o) => [o.item, o.status])).toEqual([
+      ["7", "applied"],
+      ["8", "applied"],
+      ["9", "applied"],
+    ]);
+  });
+
+  it("in approval mode the map visit freezes every item's writes into one bundle; three items each publish one comment", async () => {
+    process.env.SWENY_STATE_DIR = tmp("sweny-state-");
+    const cwd = tmp("sweny-ws-");
+    const t = fakeTransports();
+    const agent = fakeAgent({ draft: TWO });
+    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "batch.yml" });
+    const { results } = await execute(
+      mapWorkflow({ safe_outputs: { approval: { required: true } } }),
+      {},
+      {
+        skills: createSkillMap(t.skills),
+        claude: agent.claude,
+        config: {},
+        logger: silent,
+        cwd,
+        env: {},
+        journal,
+        children: createJournalChildHost({ parentRunId: RUN_ID, parentDir: journal.dir, cwd }),
+      },
+    );
+    journal.end("success");
+    expect(t.sent).toEqual([]);
+    const map = results.get("draft_all")!;
+    expect(map.status).toBe("success");
+    const [file] = bundlesOf(cwd);
+    const digest = file.replace(/\.json$/, "");
+    expect(map.outputs!.filter((o) => o.status === "pending")).toEqual([
+      expect.objectContaining({ item: "7", digest }),
+      expect.objectContaining({ item: "8", digest }),
+      expect.objectContaining({ item: "9", digest }),
+    ]);
+    const bundle = JSON.parse(readFileSync(join(journalDir(cwd, RUN_ID), BUNDLES_DIR, file), "utf-8"));
+    expect(bundle.proposal).toMatchObject({ node: "draft_all" });
+
+    const p = publish(cwd, true);
+    const out = await p.run();
+    expect(out.bundles[0].state).toBe("published");
+    expect(p.sent.map((s) => s.args.issue_number)).toEqual([7, 8, 9]);
   });
 });
 

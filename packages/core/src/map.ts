@@ -35,6 +35,7 @@ import { MAP_INDEX_KEY } from "./types.js";
 import { itemKeyOf, mapLimits, mapPathSegments } from "./map-spec.js";
 import { checkOutputContract, contractFailureMessage } from "./output-contract.js";
 import type { SpendTally } from "./budget.js";
+import type { SafeOutputIntent } from "./safe-outputs.js";
 
 /** One child of one map visit. */
 export interface ChildRunRef {
@@ -317,6 +318,17 @@ export interface MapVisit {
   tally?: SpendTally;
   /** The parent run's observer: map:start, child:start and child:end (versioned events). */
   observer?: Observer;
+  /**
+   * A succeeded item's write requests (#576), per child node that made any,
+   * with the child's input. The map plans them after every item ran.
+   */
+  onItemIntents?: (
+    key: string,
+    index: number,
+    node: string,
+    intents: SafeOutputIntent[],
+    input: Record<string, unknown>,
+  ) => void;
   logger: Logger;
 }
 
@@ -453,6 +465,11 @@ export async function runMap(v: MapVisit): Promise<NodeResult> {
       }
       run.end(out.status === "failed" ? "failed" : "success");
       outcomes[i] = { ...out, generation: run.generation };
+      if (out.status === "success" && v.onItemIntents) {
+        for (const [id, r] of res.results) {
+          if (r.intents?.length) v.onItemIntents(key, i, id, r.intents, input);
+        }
+      }
       if (out.status === "failed") stop(key, out.error ?? "failed");
     } catch (err) {
       if (err instanceof JournalMismatchError) {
