@@ -195,10 +195,11 @@ describe("sweny workflow run with a map node", () => {
     expect(fake.calls).toEqual(["a", "b"]);
     const { runId } = await journaled();
 
-    fake.calls = [];
+    // Keep the call log: b's second call is the one that finishes.
+    const before = fake.calls.length;
     const second = await cli("workflow", "resume", runId, "--no-history");
     expect(second, printed.join("\n")).toBe(0);
-    expect(fake.calls).toEqual(["b", "c", "d"]);
+    expect(fake.calls.slice(before)).toEqual(["b", "c", "d"]);
     const { gens } = await journaled();
     expect(gens).toEqual(["g1", "g1", "g1", "g1"]);
   });
