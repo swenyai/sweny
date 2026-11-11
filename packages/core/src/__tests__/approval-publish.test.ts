@@ -273,6 +273,39 @@ describe("approval mode: the producer freezes writes into a bundle (#576)", () =
     expect(body.startsWith(`Drafts ready\n\n<!-- sweny-output ${markerToken("")}`)).toBe(true);
   });
 
+  it("never freezes a pr: it is refused, nothing is bundled, and the node fails", async () => {
+    process.env.SWENY_STATE_DIR = tmp("sweny-state-");
+    const cwd = tmp("sweny-ws-");
+    const wf = approvalWorkflow({
+      nodes: {
+        draft: { name: "Draft", instruction: "NODE:draft", skills: [], permissions: "read" },
+        notify: {
+          name: "Notify",
+          instruction: "NODE:notify",
+          skills: ["github"],
+          outputs: [
+            { type: "pr", target: "acme/api" },
+            { type: "comment", target: "acme/api", number: 7 },
+          ],
+        },
+      },
+    });
+    const { results, sent } = await produce(cwd, wf, {
+      notify: [
+        { type: "pr", title: "Fix", body: "b", head: "sweny/fix" },
+        { type: "comment", body: "c" },
+      ],
+    });
+    expect(sent).toEqual([]);
+    expect(bundlesOf(cwd)).toEqual([]);
+    const notify = results.get("notify")!;
+    expect(notify.status).toBe("failed");
+    expect(notify.outputs!.map((o) => [o.type, o.status, o.reason])).toEqual([
+      ["pr", "refused", "pr writes cannot wait for approval"],
+      ["comment", "refused", "pr writes cannot wait for approval"],
+    ]);
+  });
+
   it("refuses every write when approval is required and the run has no journal", async () => {
     const t = fakeTransports();
     const agent = fakeAgent({ notify: [SLACK] });

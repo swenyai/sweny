@@ -870,6 +870,14 @@ async function propose(
     }
     return { receipts, error: "safe outputs need approval, and this run has no journal to hold the bundle" };
   }
+  // A PR is bound to the commit the run's checkout holds when it opens (#566); a publisher
+  // running later has no such binding yet, so a PR never waits for approval.
+  if (accepted.some(({ write }) => write.type === "pr")) {
+    for (const { index } of accepted) {
+      receipts[index] = { ...receipts[index], status: "refused", reason: "pr writes cannot wait for approval" };
+    }
+    return { receipts, error: "a pr output cannot wait for approval; this run froze nothing" };
+  }
   let toFreeze = accepted;
   if (o.policy?.screen) {
     let verdict: string | null = null;

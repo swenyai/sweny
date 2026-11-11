@@ -19,6 +19,7 @@ import { parseWorkflow, validateWorkflow } from "../schema.js";
 import { builtinSkills, createSkillMap } from "../skills/index.js";
 import { configuredSkills, discoverSkillsWithDiagnostics } from "../skills/custom-loader.js";
 import { publishRun } from "../approval.js";
+import { trustedEnvValue } from "../startup-env.js";
 import { isValidSkillId } from "../types.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -559,6 +560,9 @@ export async function publishRunAction(runId: string, approve: boolean): Promise
       config,
       logger,
       print: (line) => console.log(line),
+      ...(trustedEnvValue(process.env, "GITHUB_API_URL")
+        ? { githubApiUrl: trustedEnvValue(process.env, "GITHUB_API_URL") }
+        : {}),
     });
     const bad =
       out.bundles.some((b) => b.state === "refused" || b.state === "incomplete") ||

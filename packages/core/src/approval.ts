@@ -99,6 +99,8 @@ export interface PublishRunOptions {
   print?: (line: string) => void;
   now?: () => number;
   faults?: PublishFaults;
+  /** The operator's GITHUB_API_URL, for GitHub writes on GHES. */
+  githubApiUrl?: string;
 }
 
 /** The approvals dir for a state root: `<state>/approvals`, beside `<state>/runs`. */
@@ -323,7 +325,11 @@ export async function publishRun(o: PublishRunOptions): Promise<PublishResult> {
     try {
       log.append({ t: "approved", digest, by: approver, at: new Date(now).toISOString() });
       print(`  approved by ${approver}`);
-      const ctx: ToolContext = { config: o.config, logger: o.logger };
+      const ctx: ToolContext = {
+        config: o.config,
+        logger: o.logger,
+        ...(o.githubApiUrl ? { githubApiUrl: o.githubApiUrl } : {}),
+      };
       for (const [i, w] of writes.entries()) {
         // The intent is on disk before the send: a crash after it reads as unknown, never as unsent.
         log.append({ t: "intent", n: w.n });
