@@ -182,7 +182,7 @@ const go = (
   claude: Claude,
   extra: Record<string, unknown> = {},
   host: ChildRunHost = createMemoryChildHost(),
-) => execute(w, {}, { skills: new Map(), claude, logger: silent, children: host, harnessPolicy: "default", ...extra });
+) => execute(w, {}, { skills: new Map(), claude, logger: silent, children: host, harnessPolicy: "warn", ...extra });
 
 describe("a budgeted map", () => {
   it("2 x 60 live against a 100 cap: no third child starts, and the map stops on the run budget", async () => {
