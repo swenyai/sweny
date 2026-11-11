@@ -112,12 +112,13 @@ A node's access is the first of these that applies:
 
 | `spec_version`  | Default for a node that declares nothing | What happens on load                                                                                     |
 | --------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `"2"`           | `read`                                   | Nothing extra.                                                                                           |
+| `"3"`           | `read`                                   | Nothing extra.                                                                                           |
+| `"2"`           | `read`                                   | Nothing extra: it runs exactly as written (version 3 only adds [map nodes](https://spec.sweny.ai/map/)). |
 | `"1"` or absent | `write`                                  | Still `write`, plus one warning per such node: it can write because nothing limits it. |
 
 A workflow `permissions: read` is a ceiling: no node under it can write. A `read` node gets read tools only, no external skill MCP servers, and no shell, file-write, edit, fetch or subagent built-ins.
 
-To move a `"1"` file to `"2"`, run `sweny workflow upgrade <file>`. It sets `spec_version: "2"` and writes `permissions: write` on each node that was relying on the old default, with a comment saying why, so the file runs exactly as before. It never grants more than the node had. The one exception is a node with no skills and `native: none`: it has no tools, so it gets `read`. Then narrow each node: `read` if it only reads, `outputs` if it only posts.
+To move a `"1"` file to the current version, run `sweny workflow upgrade <file>`. It sets `spec_version: "3"` and writes `permissions: write` on each node that was relying on the old default, with a comment saying why, so the file runs exactly as before. It never grants more than the node had. The one exception is a node with no skills and `native: none`: it has no tools, so it gets `read`. Then narrow each node: `read` if it only reads, `outputs` if it only posts.
 
 Every workflow `sweny new` writes is `spec_version: "2"`. Each node is `read` unless its job needs a write, and GitHub writes are safe outputs.
 

@@ -110,7 +110,7 @@ export function extractWorkflow(data: Record<string, unknown>, keep?: Pick<Workf
   const rest = specVersion === undefined ? body : { spec_version: specVersion, ...body };
 
   // workflowZ.parse throws a ZodError on invalid input
-  const parsed = workflowZ.parse(rest);
+  const parsed = workflowZ.parse(rest) as Workflow;
 
   const errors = validateWorkflow(parsed);
   if (errors.length > 0) {

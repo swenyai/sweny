@@ -322,6 +322,99 @@ export type RequiresOnFail = (typeof REQUIRES_ON_FAIL)[number];
 export const NODE_ON_FAIL = ["halt", "continue"] as const;
 export type NodeOnFail = (typeof NODE_ON_FAIL)[number];
 
+// ─── Map nodes (spec v3, RFC 0002 M1) ────────────────────────────
+
+/** `agent` (default): one agent run. `map`: one child SWEny run per item (spec_version 3). */
+export const NODE_KINDS = ["agent", "map"] as const;
+export type NodeKind = (typeof NODE_KINDS)[number];
+
+/** `fail_fast` (default): the first failed item cancels the rest. `collect`: every item runs. */
+export const MAP_ON_ITEM_FAIL = ["fail_fast", "collect"] as const;
+export type MapOnItemFail = (typeof MAP_ON_ITEM_FAIL)[number];
+
+/** What an empty item list does: `succeed` (default) with empty results, or `fail`. */
+export const MAP_ON_EMPTY = ["succeed", "fail"] as const;
+export type MapOnEmpty = (typeof MAP_ON_EMPTY)[number];
+
+/** What a child sees (M1: `inputs` only: its item, its key and the `with` values). */
+export const MAP_ISOLATION = ["inputs"] as const;
+export type MapIsolation = (typeof MAP_ISOLATION)[number];
+
+/** Children running at once, by default and at most. */
+export const MAP_CONCURRENCY_DEFAULT = 4;
+export const MAP_CONCURRENCY_CEILING = 16;
+/** Items one map may run, by default and at most. */
+export const MAP_MAX_ITEMS_DEFAULT = 50;
+export const MAP_MAX_ITEMS_CEILING = 1000;
+/** `key: $index` keys items by their position (0, 1, ...). */
+export const MAP_INDEX_KEY = "$index";
+/** An item key: what names the child's slot and its entry in `data.items`. */
+export const MAP_ITEM_KEY_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** How one item of a map ended. */
+export type MapItemStatus = "success" | "failed" | "skipped" | "cancelled";
+
+/**
+ * The child workflow a map node runs per item, written inline: a workflow
+ * without its own id and name (it takes the map node's). A `workflow:` file
+ * path is read by the loader and replaced by the loaded workflow.
+ */
+export interface ChildWorkflow {
+  id?: string;
+  name?: string;
+  description?: string;
+  spec_version?: string;
+  entry: string;
+  nodes: Record<string, Node>;
+  edges: Edge[];
+  skills?: Record<string, SkillDefinition>;
+  rules?: _Source[];
+  context?: _Source[];
+  model?: string;
+  judge_model?: string;
+  budget?: Budget;
+  context_mode?: ContextMode;
+  inputs?: import("./inputs.js").WorkflowInputs;
+  permissions?: NodePermissions;
+}
+
+/**
+ * The fields of a `kind: map` node (#575). A map node runs `workflow` once per
+ * item as a complete, read-only child run, at most `concurrency` at a time,
+ * and succeeds with the results keyed by item. It has no instruction and no
+ * skills of its own.
+ */
+export interface MapNodeFields {
+  /** `map` runs one child run per item. Absent or `agent`: an ordinary agent node. */
+  kind?: NodeKind;
+  /** Path to the item array: `input.<field>` or `<node>.<field>[.<field>...]`. One of `over` / `items`. */
+  over?: string;
+  /** Literal items. One of `over` / `items`. */
+  items?: unknown[];
+  /** Item field whose value keys the item (must match `[A-Za-z0-9_-]{1,64}`, unique), or `$index`. */
+  key?: string;
+  /** The child workflow: a file path (resolved by the loader) or an inline workflow. */
+  workflow?: string | ChildWorkflow;
+  /** Child node whose output is the item's result. */
+  result?: string;
+  /** The only parent values a child receives: input name -> `input.<field>` or `<node>.<field>` path. */
+  with?: Record<string, string>;
+  /** Children running at once. Default 4, at most 16. */
+  concurrency?: number;
+  /** Items allowed. Default 50, at most 1000. */
+  max_items?: number;
+  /** Default `fail_fast`. */
+  on_item_fail?: MapOnItemFail;
+  /** `collect` only: successes the map needs. Default `all`. */
+  min_success?: "all" | number;
+  /** Default `succeed`. */
+  on_empty?: MapOnEmpty;
+  /** Spend ceiling for each child run (its run budget). The workflow's `budget` caps all of them together. */
+  item_budget?: Budget;
+  /** Default `inputs`. */
+  isolation?: MapIsolation;
+}
+
 /** MCP server transport type. Inferred from command/url when omitted. */
 export const MCP_TRANSPORTS = ["stdio", "http"] as const;
 export type McpTransport = (typeof MCP_TRANSPORTS)[number];
@@ -514,8 +607,12 @@ export interface OutputMatch {
   matches?: string;
 }
 
-/** A node in the workflow DAG */
-export interface Node {
+/**
+ * A node in the workflow DAG. A `kind: map` node (spec v3) carries the
+ * {@link MapNodeFields} and no instruction or skills: the loader gives it
+ * `skills: []`, and its `instruction` is absent at runtime.
+ */
+export interface Node extends MapNodeFields {
   /** Human-readable name */
   name: string;
   /** What Claude should accomplish at this step */
@@ -1038,35 +1135,94 @@ export interface ToolCall {
   server?: string;
 }
 
+/** The event schema version this sweny emits (#575): 2 adds map events and the run scope fields. */
+export const EVENTS_VERSION = 2;
+
+/**
+ * Which run an event belongs to (#575). A map child's own events carry its
+ * `run` (`<parent run>/<map node>#<iteration>/<key>@g<N>`), `parent_run` and
+ * `generation`; consumers key progress on run plus node. Absent on the
+ * parent run's own events, which keep their pre-map shape.
+ */
+export interface EventScope {
+  run?: string;
+  parent_run?: string;
+  generation?: number;
+  events_version?: 2;
+}
+
+/** How a map visit opened one child (see `ChildAction` in map.ts). */
+export type ChildStartAction = "launch" | "recreate" | "resume" | "replay" | "retry";
+
+/** Outcome counts of a map visit. */
+export interface MapCounts {
+  total: number;
+  success: number;
+  failed: number;
+  skipped: number;
+  cancelled: number;
+}
+
 export type ExecutionEvent =
-  | { type: "workflow:start"; workflow: string }
-  | { type: "sources:resolved"; sources: Record<string, _ResolvedSource> }
-  | { type: "node:enter"; node: string; instruction: string }
-  | { type: "tool:call"; node: string; tool: string; input: unknown }
-  | { type: "tool:result"; node: string; tool: string; output: unknown }
-  | { type: "node:exit"; node: string; result: NodeResult }
-  /**
-   * A finished node's result changed after its `node:exit` (a budget stop at
-   * the route that followed it). Not a second exit: consumers that keep each
-   * node's final result replace it; timers and step printers ignore it.
-   */
-  | { type: "node:amended"; node: string; result: NodeResult }
-  | { type: "node:progress"; node: string; message: string }
-  | { type: "node:retry"; node: string; attempt: number; reason: string; preamble: string }
-  /**
-   * Non-fatal contract violation surfaced during node execution. Currently
-   * emitted when a source node declares output properties that the agent
-   * did not emit. The route eval view fills the missing keys with `null`
-   * so the LLM evaluator can't ghost-match conditions like "is undefined"
-   * or "is 0", but the operator still wants a loud signal in the log
-   * stream.
-   *
-   * `fields` lists the declared property names that were missing from the
-   * emitted data. `reason` is a short human-readable summary.
-   */
-  | { type: "node:warning"; node: string; reason: string; fields: string[] }
-  | { type: "route"; from: string; to: string; reason: string }
-  | { type: "workflow:end"; results: Record<string, NodeResult> };
+  /** A map visit (#575) is about to launch its children. */
+  (
+    | { type: "map:start"; node: string; iteration: number; keys: string[]; concurrency: number; events_version: 2 }
+    /** One child run opened: `run` is its generation's run id. */
+    | {
+        type: "child:start";
+        node: string;
+        key: string;
+        index: number;
+        run: string;
+        parent_run: string;
+        generation: number;
+        action: ChildStartAction;
+        events_version: 2;
+      }
+    /** One item ended. `run` and `generation` are absent for an item no generation was opened for. */
+    | {
+        type: "child:end";
+        node: string;
+        key: string;
+        status: MapItemStatus;
+        parent_run: string;
+        run?: string;
+        generation?: number;
+        error?: string;
+        events_version: 2;
+      }
+    /** A map visit ended (after its budget check): the map node's status and the item counts. */
+    | { type: "map:end"; node: string; status: NodeResult["status"]; counts: MapCounts; events_version: 2 }
+    | { type: "workflow:start"; workflow: string }
+    | { type: "sources:resolved"; sources: Record<string, _ResolvedSource> }
+    | { type: "node:enter"; node: string; instruction: string }
+    | { type: "tool:call"; node: string; tool: string; input: unknown }
+    | { type: "tool:result"; node: string; tool: string; output: unknown }
+    | { type: "node:exit"; node: string; result: NodeResult }
+    /**
+     * A finished node's result changed after its `node:exit` (a budget stop at
+     * the route that followed it). Not a second exit: consumers that keep each
+     * node's final result replace it; timers and step printers ignore it.
+     */
+    | { type: "node:amended"; node: string; result: NodeResult }
+    | { type: "node:progress"; node: string; message: string }
+    | { type: "node:retry"; node: string; attempt: number; reason: string; preamble: string }
+    /**
+     * Non-fatal contract violation surfaced during node execution. Currently
+     * emitted when a source node declares output properties that the agent
+     * did not emit. The route eval view fills the missing keys with `null`
+     * so the LLM evaluator can't ghost-match conditions like "is undefined"
+     * or "is 0", but the operator still wants a loud signal in the log
+     * stream.
+     *
+     * `fields` lists the declared property names that were missing from the
+     * emitted data. `reason` is a short human-readable summary.
+     */
+    | { type: "node:warning"; node: string; reason: string; fields: string[] }
+    | { type: "route"; from: string; to: string; reason: string }
+    | { type: "workflow:end"; results: Record<string, NodeResult> }
+  ) &
+    EventScope;
 
 export type Observer = (event: ExecutionEvent) => void;
 

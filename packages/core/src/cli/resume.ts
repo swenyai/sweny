@@ -28,6 +28,7 @@ import {
   mayRepeatWrites,
   readJournal,
   runStateRoot,
+  preV3Refusal,
   workflowHashOf,
   type JournalRead,
   type LockHooks,
@@ -263,6 +264,10 @@ function prepareLocked(
   } catch (err) {
     return fail(`cannot load workflow ${workflowFile}: ${err instanceof Error ? err.message : String(err)}`);
   }
+  // A journal from before spec v3 (#575): its sweny must finish it, whatever --force says.
+  // Checked first: such a run's workflow hash differs only because the spec version moved.
+  const tooOld = preV3Refusal(plan.start, workflow, deps.swenyVersion);
+  if (tooOld) return fail(tooOld);
   if (workflowHashOf(workflow) !== plan.start.workflow_hash) {
     if (!opts.force) {
       return fail(

@@ -83,6 +83,16 @@ export type {
   SafeOutputReceipt,
   SafeOutputPin,
   AuthorAssociation,
+  ChildWorkflow,
+  MapNodeFields,
+  NodeKind,
+  MapOnItemFail,
+  MapOnEmpty,
+  MapIsolation,
+  MapItemStatus,
+  MapCounts,
+  EventScope,
+  ChildStartAction,
 } from "./types.js";
 
 export { WORKFLOW_INPUT_TYPES } from "./types.js";
@@ -104,6 +114,15 @@ export {
   SAFE_OUTPUT_TYPES,
   SAFE_OUTPUT_APPLIERS,
   AUTHOR_ASSOCIATIONS,
+  NODE_KINDS,
+  MAP_ON_ITEM_FAIL,
+  MAP_ON_EMPTY,
+  MAP_ISOLATION,
+  MAP_CONCURRENCY_DEFAULT,
+  MAP_CONCURRENCY_CEILING,
+  MAP_MAX_ITEMS_DEFAULT,
+  MAP_MAX_ITEMS_CEILING,
+  EVENTS_VERSION,
 } from "./types.js";
 
 export { consoleLogger } from "./types.js";
@@ -112,12 +131,17 @@ export { consoleLogger } from "./types.js";
 export { execute, RouteEvaluationError } from "./executor.js";
 export type { ExecuteOptions } from "./executor.js";
 
+// Map nodes (#575): child-run hosts and their contract
+export { createJournalChildHost, createMemoryChildHost } from "./child-host.js";
+export type { JournalChildHostOptions, MemoryChildHostOptions } from "./child-host.js";
+export type { ChildRunHost, ChildRun, ChildRunRef, ChildAction } from "./map.js";
+
 // Decision models (#357): config types and the provider adapter only
 export { systemOneProvider } from "./decider.js";
 export type { DeciderConfig, DeciderOperatorConfig } from "./decider.js";
 
 // Least-privilege nodes and safe outputs (#365)
-export { BudgetGuard, SPEND_KINDS, describeOverrun, minLimits, toLimits } from "./budget.js";
+export { BudgetGuard, SpendTally, SPEND_KINDS, describeOverrun, minLimits, toLimits } from "./budget.js";
 export type {
   Budget,
   BudgetOverrun,
@@ -194,6 +218,10 @@ export { loadCustomSkills, discoverSkills, configuredSkills } from "./skills/cus
 export {
   workflowZ,
   nodeZ,
+  mapNodeZ,
+  childWorkflowZ,
+  workflowNodeZ,
+  isAgentNode,
   edgeZ,
   skillZ,
   mcpServerConfigZ,
@@ -205,7 +233,7 @@ export {
   workflowJsonSchema,
   skillJsonSchema,
 } from "./schema.js";
-export type { WorkflowError } from "./schema.js";
+export type { WorkflowError, ParsedWorkflowNode, ParsedAgentNode, ParsedMapNode } from "./schema.js";
 
 // Deterministic `when` expressions (#461). Pure, browser-safe.
 export {

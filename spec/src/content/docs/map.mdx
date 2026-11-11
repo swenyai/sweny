@@ -1,0 +1,107 @@
+---
+title: Map Nodes
+description: Fan a workflow out over a list, one complete read-only child run per item (spec_version 3).
+---
+
+A map node runs one complete child workflow run per item of a list and collects the results, keyed by item. It is a spec version 3 feature: a map node in a file that declares an older `spec_version` (or none) MUST be refused at load, naming the version it needs.
+
+```yaml
+spec_version: "3"
+nodes:
+  list:
+    name: List todos
+    instruction: List today's open todos.
+    output:
+      type: object
+      required: [items]
+      properties: { items: { type: array } }
+  draft_all:
+    kind: map
+    name: Draft a prompt per todo
+    over: list.items
+    key: id
+    workflow: ./draft-one.yml
+    result: draft
+    with: { team: input.team }
+  store:
+    name: Store prompts
+    instruction: Store each prompt in draft_all.items.
+edges:
+  - { from: list, to: draft_all }
+  - { from: draft_all, to: store, when: { expr: "draft_all.counts.success > 0" } }
+```
+
+## Fields
+
+A map node has no `instruction` and no skills of its own (`skills` MAY be given only as `[]`). Agent-node fields other than `name` and `on_fail` MUST be refused on it, and map fields MUST be refused on an agent node.
+
+| Field          | Type                           | Required | Default     | Description                                                                                              |
+| -------------- | ------------------------------ | -------- | ----------- | -------------------------------------------------------------------------------------------------------- |
+| `kind`         | `map`                          | REQUIRED | `agent`     | Makes the node a map node. An agent node MAY say `kind: agent`.                                          |
+| `name`         | string                         | REQUIRED | —           | Display name; also the child workflow's name when it has none.                                           |
+| `over`         | path                           | one of   | —           | `input.<field>...` or `<node>.<field>...`: where the item list is. Exactly one of `over` and `items`.    |
+| `items`        | array                          | one of   | —           | A literal item list.                                                                                     |
+| `key`          | string                         | REQUIRED | —           | The item field whose value keys each item, or `$index` for its position.                                 |
+| `workflow`     | path or inline workflow        | REQUIRED | —           | The child workflow: a file path, relative to this file, or `{ entry, nodes, edges, ... }` inline.        |
+| `result`       | string                         | REQUIRED | —           | The child node whose output is the item's result.                                                        |
+| `with`         | map of name to path            | OPTIONAL | `{}`        | The only parent values a child receives, by child input name. `item` and `item_key` are reserved.        |
+| `concurrency`  | integer 1 to 16                | OPTIONAL | `4`         | Children running at once.                                                                                |
+| `max_items`    | integer 1 to 1000              | OPTIONAL | `50`        | More items than this fail the map before any child runs.                                                 |
+| `on_item_fail` | `fail_fast` \| `collect`       | OPTIONAL | `fail_fast` | See [Failure](#failure).                                                                                 |
+| `min_success`  | `all` \| integer &ge; 1        | OPTIONAL | `all`       | `collect` only: the successes the map needs.                                                             |
+| `on_empty`     | `succeed` \| `fail`            | OPTIONAL | `succeed`   | What an empty list does. `succeed` gives empty results.                                                  |
+| `item_budget`  | [Budget](/nodes#spend-budgets) | OPTIONAL | none        | Each child's own run budget. The workflow `budget` caps all children together, with the rest of the run. |
+| `isolation`    | `inputs`                       | OPTIONAL | `inputs`    | What a child sees. See [Isolation](#isolation).                                                          |
+| `on_fail`      | `halt` \| `continue`           | OPTIONAL | `halt`      | As on any node. A map stopped by the run budget always halts.                                            |
+
+## Items and keys
+
+Before any child runs, the implementation MUST derive the items and fail the map (with nothing spent) when `over` finds nothing or something that is not a list, when there are more than `max_items`, when an item has no string or integer `key` field, when a key does not match `[A-Za-z0-9_-]{1,64}`, when two items share a key, or when a `with` path finds nothing. Literal `items` are checked at load.
+
+## Isolation
+
+With `isolation: inputs`, a child's run input is exactly `{ item, item_key, ...with }`. It sees no parent results, rules or context. This isolates memory, not reads: a child's skill read tools reach whatever their credentials can read, and its file sources read where the run allows.
+
+## Child workflow
+
+The child workflow MUST NOT contain a map node, and its nodes MUST NOT declare `outputs` or write permissions: every child runs read-only. Writes belong to ordinary parent nodes that read the map's results. An inline child takes the parent's spec version and inline skills; its id is `<workflow id>.<map node id>` unless it declares one.
+
+## Results
+
+A map node's output is derived and MAY be routed on like any declared output:
+
+| Field     | Type     | Description                                                                                     |
+| --------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `items`   | object   | By key: `{ status, data?, error? }`; `status` is `success`, `failed`, `skipped` or `cancelled`. |
+| `order`   | string[] | The keys in input order.                                                                        |
+| `results` | array    | Each item's `result` output in input order; `null` for an item that did not succeed.            |
+| `counts`  | object   | `total`, `success`, `failed`, `skipped`, `cancelled`.                                           |
+
+Completion order MUST NOT change any of these. An item fails when any child node fails, when the result node never ran, or when the result output breaks its declared schema at any point. An item whose result node was skipped is `skipped`.
+
+## Failure
+
+- **`fail_fast`:** after the first failed item no further child starts; running children are cancelled; the map fails.
+- **`collect`:** every item runs; the map succeeds when the successes reach `min_success`.
+
+A cancelled child is released without ending its run, so a resume continues it in place.
+
+## Spend
+
+All children share one spend tally with the rest of the run. No child starts once the run's settled spend reached its budget, and a crossing seen on any child's live report cancels every running child and fails the map on the budget. Live reports are lower bounds, and some harnesses report a unit only at the end, so concurrent children can spend past the cap. Under a strict harness policy a budgeted map runs one child at a time; otherwise the implementation SHOULD warn `budget_concurrent`.
+
+## Resume
+
+Each child is a run of its own in a slot keyed by `<parent run>/<map node>#<iteration>/<key>`, with numbered generations. The map's `node:start` record registers the items' hash, keys and the child workflow's hash before any child starts. On resume the implementation re-derives the items and MUST refuse a changed list unless forced, in which case every child starts a new generation. Otherwise, per child:
+
+| Latest generation           | Action                         |
+| --------------------------- | ------------------------------ |
+| none                        | start generation 1             |
+| created, nothing recorded   | recreate it                    |
+| not ended (crash or cancel) | resume it in place             |
+| ended `success`             | replay it, with no model calls |
+| ended `failed`              | start the next generation      |
+
+## Events
+
+A map visit emits `map:start`, `child:start`, `child:end` and `map:end` (each with `events_version: 2`). A child's own events carry `run`, `parent_run` and `generation`.

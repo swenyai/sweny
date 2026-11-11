@@ -42,7 +42,8 @@
  * Records, in run order:
  *   run:start        workflow / instruction / input / tool hashes, harness id, input (redacted)
  *   run:resume       one per `sweny workflow resume`
- *   node:start       a node visit began (node + iteration)
+ *   node:start       a node visit began (node + iteration); a map node's (#575) also registers its
+ *                    children before any launches: `children: {items_hash, keys, workflow_hash}`
  *   node:checkpoint  the agent finished a node with outputs, its result and
  *                    write intents, written before the write stage runs
  *   output:intent    a write is about to be applied (idempotency key + tool)
@@ -58,6 +59,12 @@
  *                    sit inside the visit; route sits after its node:end, before its route record
  *   agent:unsandboxed the visit's agent ran without an enforced sandbox
  *   run:end          success | failed | crashed
+ *
+ * Map children (#575): each item of a map visit is a complete run of its own,
+ * in a slot under the parent's directory, one directory per generation:
+ * `<run>/children/<sha256(logical id)[:16]>/g<N>/`. A generation's run id is
+ * `<logical id>@g<N>`, its `run:start` carries `parent`, and a cancelled child
+ * is detached ({@link RunJournal.detach}): no `run:end`, so it resumes in place.
  *
  * Failure: an append that cannot be written (head or journal) is fatal. The
  * executor stops the run before the next model call or side effect and fails
@@ -804,6 +811,46 @@ export interface RunStartRecord extends JournalRecord {
   input: unknown;
   input_redacted: boolean;
   decider?: { mode: "on" | "off"; reason?: string };
+  /**
+   * The workflow's effective spec version (#575). Absent: written before spec
+   * v3, which a v3 sweny refuses to resume ({@link preV3Refusal}).
+   */
+  spec_version?: string;
+  /** A map child (#575): the parent run, map visit, item and generation it is. */
+  parent?: ChildParent;
+}
+
+/** What a map child's `run:start` names (#575). */
+export interface ChildParent {
+  run: string;
+  node: string;
+  iteration: number;
+  key: string;
+  generation: number;
+  items_hash: string;
+}
+
+/**
+ * A map visit's children, registered on its `node:start` before any launches
+ * (#575): the hash of the items, their keys in input order, and the hash of
+ * the child workflow. A field, not a record type: older readers skip it.
+ */
+export interface ChildRegistration {
+  items_hash: string;
+  keys: string[];
+  workflow_hash: string;
+}
+
+const HEX64 = /^[0-9a-f]{64}$/;
+
+/** A valid {@link ChildRegistration}, or undefined. */
+export function asChildRegistration(v: unknown): ChildRegistration | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const r = v as Record<string, unknown>;
+  if (typeof r.items_hash !== "string" || !HEX64.test(r.items_hash)) return undefined;
+  if (typeof r.workflow_hash !== "string" || !HEX64.test(r.workflow_hash)) return undefined;
+  if (!Array.isArray(r.keys) || !r.keys.every((k) => typeof k === "string" && k.length > 0)) return undefined;
+  return { items_hash: r.items_hash, keys: [...(r.keys as string[])], workflow_hash: r.workflow_hash };
 }
 
 export interface WriteStateSnapshot {
@@ -862,13 +909,50 @@ export class JournalIntegrityError extends Error {
 
 /** Thrown at resume when what the run depends on changed since it was journaled (and `force` is off). */
 export class JournalMismatchError extends Error {
-  constructor(public readonly what: string[]) {
+  /** `subject`: what cannot be resumed, when it is not the run itself (a map child, #575). */
+  constructor(
+    public readonly what: string[],
+    subject?: string,
+  ) {
     super(
-      `cannot resume: ${what.join(", ")} changed since this run was journaled. ` +
-        `Resuming would mix results from two different runs. Start a new run, or pass --force to resume anyway.`,
+      subject === undefined
+        ? `cannot resume: ${what.join(", ")} changed since this run was journaled. ` +
+            `Resuming would mix results from two different runs. Start a new run, or pass --force to resume anyway.`
+        : `cannot resume ${subject}: ${what.join(", ")} changed since it was journaled. ` +
+            `Resuming would mix results from two different runs. Start a new run, or resume with --force.`,
     );
     this.name = "JournalMismatchError";
   }
+}
+
+/**
+ * Thrown at resume when the run was journaled before spec v3 (#575) and the
+ * workflow now runs as v3: the older sweny that started it must finish it.
+ * Not overridable by `--force`.
+ */
+export class JournalSpecVersionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "JournalSpecVersionError";
+  }
+}
+
+/**
+ * Why a run cannot be resumed by this sweny (#575): its `run:start` has no
+ * `spec_version`, so an older sweny wrote it, before spec v3, and the workflow
+ * now runs as v3 or later. Names both versions and the command that resumes
+ * it. Undefined when the run can be resumed here.
+ */
+export function preV3Refusal(start: RunStartRecord, workflow: Workflow, swenyVersion?: string): string | undefined {
+  if (start.spec_version !== undefined) return undefined;
+  const now = effectiveSpecVersion(workflow);
+  if (now < 3) return undefined;
+  const was = typeof start.sweny_version === "string" ? start.sweny_version : undefined;
+  return (
+    `run ${start.run_id} was journaled by sweny ${was ?? "of an unknown version"}, before spec_version "3"; ` +
+    `this sweny${swenyVersion ? ` (${swenyVersion})` : ""} runs the workflow as spec_version "${now}" and cannot ` +
+    `resume it. Resume it with the sweny that started it: npx @sweny-ai/core@${was ?? "<version>"} workflow resume ${start.run_id}`
+  );
 }
 
 /** Thrown when the journal cannot be written. Fatal: the executor stops the run before anything else happens. */
@@ -1116,6 +1200,8 @@ export interface ResumePlan {
   unsandboxed: string[];
   /** The decider's mode at run start and its counters after the last journaled route (#357). */
   decider?: JournalDeciderState;
+  /** Per map visit (`node#iteration`), the children its latest `node:start` registered (#575). */
+  registrations: Map<string, ChildRegistration>;
 }
 
 const visitKey = (node: string, iteration: number) => `${node}#${iteration}`;
@@ -1205,6 +1291,8 @@ export function checkRecordSequence(records: JournalRecord[]): void {
         break;
       case "node:start": {
         if (!isName(r.node) || !isPosInt(r.iteration)) bad(r, "has no valid node or iteration");
+        if (r.children !== undefined && !asChildRegistration(r.children))
+          bad(r, "has an invalid children registration");
         const node = r.node as string;
         const restart =
           resumedSinceStart &&
@@ -1330,7 +1418,7 @@ export function checkJournalAgainstWorkflow(records: JournalRecord[], workflow: 
  * Spend the journal shows: per agent attempt (of each run segment), the
  * largest cumulative usage it reported, live or final, summed.
  */
-function journaledSpend(records: JournalRecord[]): SeedSpend {
+export function journaledSpend(records: JournalRecord[]): SeedSpend {
   const perAttempt = new Map<string, Spend>();
   const metered = new Map<SpendKind, Spend>();
   let segment = 1;
@@ -1416,6 +1504,7 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
   let attempts = 1;
   let lastStatus: string | undefined;
   let deciderCounters: DeciderCounters | undefined;
+  const registrations = new Map<string, ChildRegistration>();
 
   for (const r of records) {
     switch (r.type) {
@@ -1425,6 +1514,8 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
         break;
       case "node:start": {
         const k = visitKey(r.node as string, r.iteration as number);
+        const reg = asChildRegistration(r.children);
+        if (reg) registrations.set(k, reg);
         let v = byKey.get(k);
         if (!v) {
           v = { node: r.node as string, iteration: r.iteration as number };
@@ -1547,6 +1638,7 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
     refusals,
     priorSpend: journaledSpend(records),
     visitSpend: visitSpendOf(records),
+    registrations,
     unsandboxed: [...new Set(records.filter((r) => r.type === "agent:unsandboxed").map((r) => String(r.node)))],
     ...(start.decider
       ? { decider: { ...start.decider, ...(deciderCounters ? { counters: { ...deciderCounters } } : {}) } }
@@ -1566,7 +1658,8 @@ export function mayRepeatWrites(plan: ResumePlan, workflow: Workflow, input: unk
     .filter((v) => v.action === "rerun")
     .filter((v) => {
       const node = workflow.nodes[v.node];
-      return !!node && resolveNodePermissions(node, workflow).access !== "read";
+      // A map node runs no agent; its children are read-only (#575).
+      return !!node && node.kind !== "map" && resolveNodePermissions(node, workflow).access !== "read";
     })
     .map((v) => v.node);
 }
@@ -1805,7 +1898,12 @@ export interface ExecutionJournal {
   begin(info: JournalBeginInfo): void;
   /** A visit an earlier attempt finished (or checkpointed); undefined = run it. */
   replay(node: string, iteration: number): JournalReplay | undefined;
-  nodeStart(node: string, iteration: number): void;
+  /** A visit begins. A map visit (#575) registers its children here, before any launches. */
+  nodeStart(node: string, iteration: number, children?: ChildRegistration): void;
+  /** Resume (#575): the children an earlier attempt registered for this map visit. */
+  registration?(node: string, iteration: number): ChildRegistration | undefined;
+  /** Resume (#575): this resume was forced (`--force`), so a changed map starts new generations. */
+  forced?(): boolean;
   checkpoint(node: string, iteration: number, cp: JournalCheckpoint): void;
   /** The skill map the write stage applies through: write tools journaled and made idempotent. */
   wrapWrites(node: string, iteration: number, skills: Map<string, Skill>): Map<string, Skill>;
@@ -1874,6 +1972,15 @@ export interface RunJournalOptions {
   keep?: number;
   /** Where run journals live (default {@link runStateRoot}). Never inside the workspace. */
   stateRoot?: string;
+  /**
+   * The run's directory, when it is not `<state>/runs/<workspace>/<run id>/`:
+   * a map child's generation (#575). Must be inside the state root.
+   */
+  dir?: string;
+  /** Delete this workspace's oldest journals when the run starts. Default true; a map child never does. */
+  prune?: boolean;
+  /** A map child (#575): written on its `run:start`. */
+  parent?: ChildParent;
 }
 
 export interface ResumeJournalOptions extends RunJournalOptions {
@@ -2011,7 +2118,7 @@ export class RunJournal implements ExecutionJournal {
     this.runId = opts.runId;
     this.cwd = opts.cwd ?? process.cwd();
     this.root = opts.stateRoot ?? runStateRoot();
-    this.dir = journalDir(this.cwd, opts.runId, this.root);
+    this.dir = opts.dir ?? journalDir(this.cwd, opts.runId, this.root);
     this.file = path.join(this.dir, JOURNAL_FILE);
     this.logger = opts.logger ?? quietLogger;
     if (resume) {
@@ -2141,6 +2248,14 @@ export class RunJournal implements ExecutionJournal {
 
     if (this.resume) {
       const start = this.resume.plan.start;
+      const tooOld = preV3Refusal(start, info.workflow, this.opts.swenyVersion);
+      if (tooOld) {
+        // Not overridable by --force: the run's journal predates the version the workflow now runs as.
+        this.killed = true;
+        this.closeFd();
+        this.releaseLock();
+        throw new JournalSpecVersionError(tooOld);
+      }
       const changed: string[] = [];
       if (start.workflow_hash !== workflowHash) changed.push("the workflow");
       if (start.instruction_hash !== instrHash) changed.push("instructions, rules or context files");
@@ -2196,7 +2311,7 @@ export class RunJournal implements ExecutionJournal {
         err,
       );
     }
-    pruneJournals(this.cwd, this.opts.keep ?? JOURNAL_KEEP, this.runId, this.root);
+    if (this.opts.prune !== false) pruneJournals(this.cwd, this.opts.keep ?? JOURNAL_KEEP, this.runId, this.root);
     const input = redact(info.input, this.secrets);
     this.append("run:start", {
       run_id: this.runId,
@@ -2212,6 +2327,8 @@ export class RunJournal implements ExecutionJournal {
       input: input.value,
       input_redacted: input.redacted,
       ...(info.decider ? { decider: info.decider } : {}),
+      spec_version: String(effectiveSpecVersion(info.workflow)),
+      ...(this.opts.parent ? { parent: this.opts.parent } : {}),
     });
   }
 
@@ -2250,8 +2367,28 @@ export class RunJournal implements ExecutionJournal {
     return undefined;
   }
 
-  nodeStart(node: string, iteration: number): void {
-    this.append("node:start", { node, iteration });
+  nodeStart(node: string, iteration: number, children?: ChildRegistration): void {
+    this.append("node:start", { node, iteration, ...(children ? { children } : {}) });
+  }
+
+  registration(node: string, iteration: number): ChildRegistration | undefined {
+    const r = this.resume?.plan.registrations.get(visitKey(node, iteration));
+    return r ? { ...r, keys: [...r.keys] } : undefined;
+  }
+
+  forced(): boolean {
+    return this.resume?.force === true;
+  }
+
+  /**
+   * Close the run without `run:end`, and release its lock (#575). A map child
+   * the map cancelled ends here, so its next attempt resumes it in place
+   * instead of starting a new generation. Never throws.
+   */
+  detach(): void {
+    this.closed = true;
+    this.closeFd();
+    this.releaseLock();
   }
 
   checkpoint(node: string, iteration: number, cp: JournalCheckpoint): void {

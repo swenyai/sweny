@@ -87,10 +87,10 @@ describe("spec_version default", () => {
     }
   });
   it("accepts spec_version as string or YAML number and normalizes to a string", () => {
-    for (const v of ["1", 1, "2", 2]) {
+    for (const v of ["1", 1, "2", 2, "3", 3]) {
       const r = validateParsed({ ...base, spec_version: v });
       expect(r.ok).toBe(true);
-      if (r.ok) expect(r.workflow.spec_version).toBe("2");
+      if (r.ok) expect(r.workflow.spec_version).toBe("3");
     }
   });
   it("rejects a malformed spec_version", () => {
@@ -177,8 +177,8 @@ describe("too-new refusal", () => {
       expect(r.errors[0].message).toContain("Upgrade sweny");
     }
   });
-  it("refuses v3 on the built-in registry (current is v2)", () => {
-    const r = validateParsed({ id: "d", spec_version: "3" });
+  it("refuses v4 on the built-in registry (current is v3)", () => {
+    const r = validateParsed({ id: "d", spec_version: "4" });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errors[0].message).toContain("Upgrade sweny");
   });
@@ -219,11 +219,25 @@ describe("sweny workflow upgrade", () => {
     }
   });
   it("is a no-op on a file already at the current version", () => {
-    const f = tmpFile("wf.yml", `spec_version: "2"\nid: demo\nname: Demo\n${BODY}`);
+    const f = tmpFile("wf.yml", `spec_version: "3"\nid: demo\nname: Demo\n${BODY}`);
     try {
       const before = readFileSync(f.path, "utf-8");
-      expect(upgradeWorkflowFile(f.path)).toEqual({ status: "current", version: 2 });
+      expect(upgradeWorkflowFile(f.path)).toEqual({ status: "current", version: 3 });
       expect(readFileSync(f.path, "utf-8")).toBe(before);
+    } finally {
+      f.cleanup();
+    }
+  });
+  it("moves a v2 file to v3 by its version line alone (the v2 -> v3 step is identity)", () => {
+    const f = tmpFile("wf.yml", `spec_version: "2"\nid: demo\nname: Demo\n${BODY}`);
+    try {
+      const r = upgradeWorkflowFile(f.path);
+      expect(r.status).toBe("upgraded");
+      if (r.status === "upgraded") {
+        expect([r.from, r.to]).toEqual([2, 3]);
+        expect(r.notes).toEqual([]);
+      }
+      expect(readFileSync(f.path, "utf-8")).toBe(`spec_version: "3"\nid: demo\nname: Demo\n${BODY}`);
     } finally {
       f.cleanup();
     }
