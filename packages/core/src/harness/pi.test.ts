@@ -223,7 +223,7 @@ describe("PiHarness tool policy", () => {
   it("a write node is an allowlist: reading, shell and file tools plus sweny's own, minus denied classes", async () => {
     const { h } = harness();
     fakes.script(DONE);
-    await h.run({
+    const first = await h.run({
       instruction: "x",
       context: {},
       tools: [lookup],
@@ -231,6 +231,7 @@ describe("PiHarness tool policy", () => {
     });
     let cap = fakes.raw().at(-1)!;
     expect(cap.toolsAllow).toEqual(["read", "grep", "find", "ls", "bash", "edit", "write", "mcp__sweny_core__lookup"]);
+    expect(first.degraded.filter((d) => d.startsWith("builtin allow-list"))).toEqual([]);
     expect(cap.activeTools).toEqual(cap.toolsAllow);
 
     fakes.script(DONE);
@@ -248,15 +249,20 @@ describe("PiHarness tool policy", () => {
   // `--tools` names every tool it keeps, so it would drop an external server's tools,
   // whose names are not known before pi starts. pi's built-ins are a closed set (-ne).
   it("a write node with an external MCP server excludes every other built-in by name and keeps MCP tools", async () => {
-    const { h } = harness();
+    const { h } = harness({ policy: "strict" });
     fakes.script(DONE);
-    await h.run({
+    const r = await h.run({
       instruction: "x",
       context: {},
       tools: [],
       mcpServers: { injected: { type: "stdio", command: "injected-server" } },
       policy: { readOnly: false, deny: ["edit"], egress: [], strict: false },
     });
+    // A frozen list of pi 0.99.2's built-ins is a deny list, not an allow-list: say so, never refuse.
+    expect(r.status).toBe("success");
+    expect(r.degraded.filter((d) => d.startsWith("builtin allow-list: "))).toEqual([
+      expect.stringMatching(/--exclude-tools/),
+    ]);
     const cap = fakes.raw().at(-1)!;
     expect(cap.toolsAllow).toBeUndefined();
     expect(cap.toolsExclude.sort()).toEqual(["edit", "powershell"]);

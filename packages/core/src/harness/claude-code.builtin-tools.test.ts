@@ -153,6 +153,23 @@ describe("Claude Code built-in tool allow-list", () => {
     for (const t of NEVER) expect(opts.tools).not.toContain(t);
   });
 
+  it("allow: [subagent] reports that a subagent is not shown to keep the node's tool list", async () => {
+    const h = new mod.ClaudeCodeHarness({ logger: logger(), envScope: false });
+    const opted = await h.run({ instruction: "x", context: {}, tools: [], policy: policy({ allow: ["subagent"] }) });
+    expect(opted.degraded).toEqual([
+      "subagent: nothing shows a Claude Code subagent keeps the node's built-in tool list; it may have more tools than the node",
+    ]);
+    const plain = await h.run({ instruction: "x", context: {}, tools: [], policy: policy() });
+    expect(plain.degraded).toEqual([]);
+    const denied = await h.run({
+      instruction: "x",
+      context: {},
+      tools: [],
+      policy: policy({ allow: ["subagent"], deny: ["subagent"] }),
+    });
+    expect(denied.degraded).toEqual([]);
+  });
+
   it("deny wins over allow, and a read-only node ignores allow", async () => {
     const denied = await optionsFor({ policy: policy({ allow: ["subagent"], deny: ["subagent"] }) });
     expect(denied.tools).not.toContain("Task");

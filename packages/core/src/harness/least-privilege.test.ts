@@ -18,6 +18,8 @@ import { policyGate } from "./policy.js";
 import { ACP_CAPABILITIES, CLAUDE_CODE_CAPABILITIES, CODEX_CAPABILITIES, PI_CAPABILITIES } from "./capabilities.js";
 import type { NodePolicy } from "./types.js";
 import type { Workflow } from "../types.js";
+import { MockHarness } from "../testing.js";
+import { createReplayHarness } from "../cli/try.js";
 
 const write: NodePolicy = { readOnly: false, deny: [], egress: [], strict: false };
 const allowGaps = (d: string[]) => d.filter((x) => x.startsWith("builtin allow-list"));
@@ -63,6 +65,14 @@ describe("permissions.allow: the schema field", () => {
     const errors = validateWorkflow(wf({ allow: ["subagent"] }));
     expect(errors.map((e) => e.code)).toContain("PERMISSION_ALLOW_READ");
     expect(errors.find((e) => e.code === "PERMISSION_ALLOW_READ")?.nodeId).toBe("a");
+  });
+
+  it("a read workflow that allows a built-in fails validation too, with no node named", () => {
+    const errors = validateWorkflow(wf({ access: "read" }, { access: "read", allow: ["subagent"] }));
+    const e = errors.find((x) => x.code === "PERMISSION_ALLOW_READ");
+    expect(e).toBeDefined();
+    expect(e?.nodeId).toBeUndefined();
+    expect(validateWorkflow(wf({ access: "write" }, { access: "write", allow: ["subagent"] }))).toEqual([]);
   });
 
   it("a write node may allow one", () => {
@@ -113,6 +123,15 @@ describe("policyGate: the built-in allow-list", () => {
     expect(PI_CAPABILITIES.builtinAllow).toBe("native");
     expect(CODEX_CAPABILITIES.builtinAllow).toBe("deny-list");
     expect(ACP_CAPABILITIES.builtinAllow).toBeUndefined();
+  });
+
+  it("the mock and replay harnesses declare a native allow-list, so strict never refuses them for it", () => {
+    const mock = new MockHarness({ responses: {} } as never);
+    const replay = createReplayHarness({ nodes: {} } as never, { paceMs: 0 });
+    for (const caps of [mock.capabilities, replay.capabilities]) {
+      expect(caps.builtinAllow).toBe("native");
+      expect(policyGate(caps, { ...write, strict: true }).refuse ?? "").not.toMatch(/builtin allow-list/);
+    }
   });
 
   it("a native allow-list harness reports nothing for a write node", () => {
