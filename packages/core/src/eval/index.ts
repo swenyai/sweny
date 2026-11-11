@@ -4,10 +4,11 @@
 // list of EvalResults. `aggregateEval(...)` collapses that list into a
 // single pass/fail under the node's eval_policy. v1 implements `all_pass`.
 
-import type { Claude, EvalPolicy, EvalResult, Evaluator, NodeResult, Workflow, Node } from "../types.js";
+import type { Claude, EvalPolicy, EvalResult, Evaluator, NodeResult, ToolAccess, Workflow, Node } from "../types.js";
 import { evaluateValueRule } from "./value.js";
 import { evaluateFunctionRule, type ToolAliases } from "./function.js";
 import { evaluateJudge } from "./judge.js";
+import { evaluateGroundedRule } from "./grounded.js";
 
 export type { ToolAliases } from "./function.js";
 
@@ -54,6 +55,17 @@ export interface EvaluateAllOptions {
   signal?: AbortSignal;
   /** Per-call timeout forwarded to judge calls. */
   timeoutMs?: number;
+  /**
+   * The context the node's prompt received (`{ input, ...priorNodes }`).
+   * Evidence for `output_grounded`; held in memory, never journaled.
+   */
+  context?: Record<string, unknown>;
+  /** The evaluated node's id, so its own earlier visit in `context` is not evidence. */
+  nodeId?: string;
+  /** The author's text the prompt carried (instruction, rules, context sources). Evidence for `output_grounded`. */
+  authored?: string[];
+  /** Access class of the node's skill tools by name, so `output_grounded` counts only read tools. */
+  toolAccess?: ReadonlyMap<string, ToolAccess>;
 }
 
 /**
@@ -112,8 +124,24 @@ async function evaluateOne(e: Evaluator, result: NodeResult, opts: EvaluateAllOp
     return { name: e.name, kind: "value", pass: verdict.pass, reasoning: capReasoning(verdict.reasoning) };
   }
   if (e.kind === "function") {
-    const verdict = evaluateFunctionRule(e.rule ?? {}, result.toolCalls, opts.aliases);
-    return { name: e.name, kind: "function", pass: verdict.pass, reasoning: capReasoning(verdict.reasoning) };
+    const rule = e.rule ?? {};
+    const verdicts = [evaluateFunctionRule(rule, result.toolCalls, opts.aliases)];
+    if (rule.output_grounded) {
+      verdicts.push(
+        evaluateGroundedRule(rule.output_grounded, result.data, {
+          toolCalls: result.toolCalls,
+          ...(opts.context ? { context: opts.context } : {}),
+          ...(opts.nodeId !== undefined ? { nodeId: opts.nodeId } : {}),
+          ...(opts.authored ? { authored: opts.authored } : {}),
+          ...(opts.toolAccess ? { toolAccess: opts.toolAccess } : {}),
+        }),
+      );
+    }
+    const failed = verdicts.filter((v) => !v.pass);
+    // A passing verdict can still carry a warning (output_grounded: a path that matched nothing).
+    const notes = (failed.length > 0 ? failed : verdicts).flatMap((v) => (v.reasoning ? [v.reasoning] : []));
+    const reasoning = notes.length > 0 ? notes.join("; ") : undefined;
+    return { name: e.name, kind: "function", pass: failed.length === 0, reasoning: capReasoning(reasoning) };
   }
   if (e.kind === "judge" && opts.claude) {
     const model = resolveJudgeModel(e, opts.node, opts.workflow, opts.claude.defaultJudgeModel);

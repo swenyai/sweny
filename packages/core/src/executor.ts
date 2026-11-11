@@ -1364,6 +1364,12 @@ async function executeRun(
             claude: judgeClaude,
             node,
             workflow,
+            // What the prompt was given: evidence for output_grounded (#580).
+            context,
+            nodeId: currentId,
+            // The author's own text (never a retry preamble), and which skill tools only read.
+            authored: [resolvedInstruction, effectiveRules, effectiveContext],
+            toolAccess: new Map(filteredTools.map((t) => [t.name, t.access ?? "write"] as const)),
             sequential: budgetOn,
             ...(signal ? { signal } : {}),
             ...(timeoutMs !== undefined ? { timeoutMs } : {}),

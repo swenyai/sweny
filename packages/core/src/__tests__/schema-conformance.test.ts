@@ -1160,6 +1160,65 @@ const fixtures: Fixture[] = [
     input: { id: "d", name: "D", entry: "a", nodes: { a: { ...baseNode(), route_by } }, edges: [] },
     expected,
   })),
+  // ── output_grounded (#580): function-only, strict config ─────────
+  ...(
+    [
+      ["function evaluator with an empty output_grounded", "function", {}, true],
+      [
+        "function evaluator with a full output_grounded",
+        "function",
+        {
+          paths: ["a"],
+          ids: ["b"],
+          patterns: ["url"],
+          allow: ["X-1"],
+          tools: ["t"],
+          inputs: false,
+          context: true,
+          stale: true,
+        },
+        true,
+      ],
+      ["output_grounded on a value evaluator", "value", {}, false],
+      ["output_grounded with an unknown key", "function", { nope: 1 }, false],
+      ["output_grounded with an empty paths list", "function", { paths: [] }, false],
+      ["output_grounded with a non-boolean stale", "function", { stale: "yes" }, false],
+      ["output_grounded with patterns: [] and a quote", "function", { patterns: [], quotes: [{ path: "q" }] }, true],
+      [
+        "output_grounded with a full quote",
+        "function",
+        { quotes: [{ path: "q", tools: ["t"], whitespace: "collapse" }] },
+        true,
+      ],
+      ["output_grounded with an empty quotes list", "function", { quotes: [] }, false],
+      ["output_grounded quote without a path", "function", { quotes: [{ tools: ["t"] }] }, false],
+      [
+        "output_grounded quote with an unknown whitespace",
+        "function",
+        { quotes: [{ path: "q", whitespace: "loose" }] },
+        false,
+      ],
+      ["output_grounded quote with an unknown key", "function", { quotes: [{ path: "q", x: 1 }] }, false],
+      ["output_grounded quote with a min_length", "function", { quotes: [{ path: "q", min_length: 3 }] }, true],
+      ["output_grounded quote with a zero min_length", "function", { quotes: [{ path: "q", min_length: 0 }] }, false],
+      [
+        "output_grounded quote with a fractional min_length",
+        "function",
+        { quotes: [{ path: "q", min_length: 2.5 }] },
+        false,
+      ],
+    ] as [string, string, Record<string, unknown>, boolean][]
+  ).map(([name, kind, output_grounded, expected]): Fixture => ({
+    name: `#580 ${name}`,
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: { ...baseNode(), eval: [{ name: "g", kind, rule: { output_grounded } }] } },
+      edges: [],
+    },
+    expected,
+  })),
 ];
 
 describe("Zod ↔ JSON Schema conformance", () => {

@@ -22,6 +22,8 @@ export default defineConfig({
       "src/__tests__/workflow-yaml.test.ts",
       "src/harness/policy.test.ts",
       "src/__tests__/output-contract.test.ts",
+      "src/eval/__tests__/grounded.test.ts",
+      "src/__tests__/output-grounded.test.ts",
     ],
   },
 });
