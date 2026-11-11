@@ -64,6 +64,8 @@ function harness(over: Partial<CodexHarnessOptions> = {}) {
 
 const DONE = [{ kind: "final" as const, text: "done" }];
 
+const writePolicy: NodePolicy = { readOnly: false, deny: [], egress: [], strict: false };
+
 /** `-c` values the fake parsed, flattened to "a.b.c" keys. */
 function overrides(): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -244,10 +246,46 @@ describe("CodexHarness policy", () => {
     expect(r.degraded).toEqual([
       "deny [write]: harness can only deny [shell, net, subagent]",
       expect.stringMatching(/^max_turns: /),
+      expect.stringMatching(/^builtin allow-list: /),
     ]);
     const o = overrides();
     expect(o["features.shell_tool"]).toBe(false);
     expect(o.web_search).toBe("disabled");
+    expect(o["features.multi_agent"]).toBe(false);
+    expect(o["agents.enabled"]).toBe(false);
+  });
+
+  // #608: Codex has no built-in allow-list (enabled_tools is per MCP server only), so
+  // sweny turns off what it knows and says so; subagents are off unless the node allows them.
+  it("a write node gets no subagents by default, and the missing allow-list is reported, not refused", async () => {
+    const { h } = harness({ policy: "strict" });
+    fakes.script(DONE);
+    const r = await h.run({ instruction: "x", context: {}, tools: [], policy: { ...writePolicy } });
+    expect(r.status).toBe("success");
+    const o = overrides();
+    expect(o["features.multi_agent"]).toBe(false);
+    expect(o["agents.enabled"]).toBe(false);
+    expect(o["features.shell_tool"]).toBeUndefined();
+    expect(o.web_search).toBeUndefined();
+    expect(r.degraded.filter((d) => d.startsWith("builtin allow-list"))).toHaveLength(1);
+  });
+
+  it("permissions.allow: [subagent] keeps codex subagents on; deny still wins", async () => {
+    const { h } = harness();
+    fakes.script(DONE);
+    await h.run({ instruction: "x", context: {}, tools: [], policy: { ...writePolicy, allow: ["subagent"] } });
+    let o = overrides();
+    expect(o["features.multi_agent"]).toBeUndefined();
+    expect(o["agents.enabled"]).toBeUndefined();
+
+    fakes.script(DONE);
+    await h.run({
+      instruction: "x",
+      context: {},
+      tools: [],
+      policy: { ...writePolicy, allow: ["subagent"], deny: ["subagent"] },
+    });
+    o = overrides();
     expect(o["features.multi_agent"]).toBe(false);
     expect(o["agents.enabled"]).toBe(false);
   });
@@ -283,9 +321,10 @@ describe("CodexHarness policy", () => {
       });
       byNode[id] = r.degraded;
       expect(r.status, `${id}: ${String(r.data.error ?? "")}`).toBe("success");
-      // The turn budget is the one opinion Codex keeps by watchdog; it is reported, never refused.
+      // Codex keeps the turn budget by watchdog and its built-ins by a deny list (#608);
+      // both are reported, never refused.
       expect(
-        r.degraded.filter((d) => !d.startsWith("max_turns: ")),
+        r.degraded.filter((d) => !d.startsWith("max_turns: ") && !d.startsWith("builtin allow-list: ")),
         id,
       ).toEqual([]);
     }

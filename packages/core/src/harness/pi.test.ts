@@ -219,8 +219,21 @@ describe("PiHarness tool policy", () => {
     expect(cap.mcpServersLoaded).toEqual([PI_BRIDGE_SERVER]);
   });
 
-  it("a normal run denies built-ins by name and keeps every MCP tool", async () => {
+  // #608: a write node gets an allow-list too, the same list as Claude Code's write nodes.
+  it("a write node is an allowlist: reading, shell and file tools plus sweny's own, minus denied classes", async () => {
     const { h } = harness();
+    fakes.script(DONE);
+    const first = await h.run({
+      instruction: "x",
+      context: {},
+      tools: [lookup],
+      policy: { readOnly: false, deny: [], egress: [], strict: false },
+    });
+    let cap = fakes.raw().at(-1)!;
+    expect(cap.toolsAllow).toEqual(["read", "grep", "find", "ls", "bash", "edit", "write", "mcp__sweny_core__lookup"]);
+    expect(first.degraded.filter((d) => d.startsWith("builtin allow-list"))).toEqual([]);
+    expect(cap.activeTools).toEqual(cap.toolsAllow);
+
     fakes.script(DONE);
     await h.run({
       instruction: "x",
@@ -228,10 +241,33 @@ describe("PiHarness tool policy", () => {
       tools: [],
       policy: { readOnly: false, deny: ["shell", "edit"], egress: [], strict: false },
     });
+    cap = fakes.raw().at(-1)!;
+    expect(cap.toolsAllow).toEqual(["read", "grep", "find", "ls", "write"]);
+    expect(cap.activeTools).toEqual(cap.toolsAllow);
+  });
+
+  // `--tools` names every tool it keeps, so it would drop an external server's tools,
+  // whose names are not known before pi starts. pi's built-ins are a closed set (-ne).
+  it("a write node with an external MCP server excludes every other built-in by name and keeps MCP tools", async () => {
+    const { h } = harness({ policy: "strict" });
+    fakes.script(DONE);
+    const r = await h.run({
+      instruction: "x",
+      context: {},
+      tools: [],
+      mcpServers: { injected: { type: "stdio", command: "injected-server" } },
+      policy: { readOnly: false, deny: ["edit"], egress: [], strict: false },
+    });
+    // A frozen list of pi 0.99.2's built-ins is a deny list, not an allow-list: say so, never refuse.
+    expect(r.status).toBe("success");
+    expect(r.degraded.filter((d) => d.startsWith("builtin allow-list: "))).toEqual([
+      expect.stringMatching(/--exclude-tools/),
+    ]);
     const cap = fakes.raw().at(-1)!;
     expect(cap.toolsAllow).toBeUndefined();
-    expect(cap.toolsExclude.sort()).toEqual(["bash", "edit", "powershell"]);
-    expect(cap.activeTools.sort()).toEqual(["read", "write"]);
+    expect(cap.toolsExclude.sort()).toEqual(["edit", "powershell"]);
+    expect(cap.activeTools.sort()).toEqual(["bash", "read", "write"]);
+    expect(cap.mcpServersLoaded).toContain("injected");
   });
 
   it("translates disallowed_tools: Claude and pi names become classes and tools, unknown names are degraded", async () => {
@@ -251,7 +287,7 @@ describe("PiHarness tool policy", () => {
       disallowedTools: ["Bash", "Read", "Frobnicate"],
     });
     const cap = fakes.raw().at(-1)!;
-    expect(cap.toolsExclude.sort()).toEqual(["bash", "powershell", "read"]);
+    expect(cap.toolsAllow).toEqual(["grep", "find", "ls", "edit", "write"]);
     expect(r.degraded.some((d) => d.startsWith("disallowed_tools [Frobnicate]"))).toBe(true);
     // net has no tool in pi: a denied WebFetch is reported, not assumed.
     fakes.script(DONE);

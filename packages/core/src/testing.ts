@@ -35,6 +35,8 @@ const MOCK_CAPABILITIES: HarnessCapabilities = {
   usage: { tokens: false, costUsd: false, live: false },
   cancel: "signal",
   resume: false,
+  // No agent, no built-ins: nothing outside a node's policy can reach it (#608).
+  builtinAllow: "native",
 };
 
 export interface MockNodeResponse {

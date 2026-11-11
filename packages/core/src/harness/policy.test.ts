@@ -16,7 +16,17 @@ const weak: HarnessCapabilities = {
   usage: { tokens: false, costUsd: false, live: false },
   cancel: "kill",
   resume: false,
+  // The built-in allow-list gap (#608) has its own tests in least-privilege.test.ts;
+  // here it would add a line to every write-node case.
+  builtinAllow: "native",
 };
+
+/** Codex reports its missing built-in allow-list on every write node (#608); drop that line. */
+const ALLOW_LIST = /^builtin allow-list: /;
+const withoutAllowList = (r: { degraded: string[]; refuse?: string }) => ({
+  ...r,
+  degraded: r.degraded.filter((d) => !ALLOW_LIST.test(d)),
+});
 
 describe("policyGate", () => {
   describe("Claude Code is always a no-op", () => {
@@ -111,7 +121,11 @@ describe("policyGate", () => {
     it("denies shell, net and subagent natively; write and edit are X", () => {
       expect(nativeDenyClasses(CODEX_CAPABILITIES)).toEqual(["shell", "net", "subagent"]);
       expect(nativeDenyClasses(CLAUDE_CODE_CAPABILITIES)).toEqual(["shell", "write", "edit", "net", "subagent"]);
-      expect(policyGate(CODEX_CAPABILITIES, { ...base, deny: ["shell", "net", "subagent"] })).toEqual({ degraded: [] });
+      expect(withoutAllowList(policyGate(CODEX_CAPABILITIES, { ...base, deny: ["shell", "net", "subagent"] }))).toEqual(
+        {
+          degraded: [],
+        },
+      );
       for (const c of ["write", "edit"] as const) {
         const strict = policyGate(CODEX_CAPABILITIES, { ...base, deny: [c], strict: true });
         expect(strict.refuse).toMatch(new RegExp(`deny \\[${c}\\]`));
@@ -121,7 +135,9 @@ describe("policyGate", () => {
     it("a watchdog turn limit is reported but never refused", () => {
       const r = policyGate(CODEX_CAPABILITIES, { ...base, maxTurns: 20, strict: true });
       expect(r.refuse).toBeUndefined();
-      expect(r.degraded).toEqual(["max_turns: no native turn limit; sweny stops the run after 20 tool calls"]);
+      expect(withoutAllowList(r).degraded).toEqual([
+        "max_turns: no native turn limit; sweny stops the run after 20 tool calls",
+      ]);
       // No limit at all is refused under strict.
       const none = policyGate({ ...weak, turnLimit: "none" }, { ...base, maxTurns: 5, strict: true });
       expect(none.refuse).toMatch(/max_turns/);
@@ -137,7 +153,9 @@ describe("policyGate", () => {
     it("per-host egress is X for codex (network is one switch)", () => {
       const r = policyGate(CODEX_CAPABILITIES, { ...base, egress: ["api.github.com"], strict: true });
       expect(r.refuse).toMatch(/egress allowlist/);
-      expect(policyGate(CODEX_CAPABILITIES, { ...base, egress: ["x"] }, { egress: true })).toEqual({ degraded: [] });
+      expect(withoutAllowList(policyGate(CODEX_CAPABILITIES, { ...base, egress: ["x"] }, { egress: true }))).toEqual({
+        degraded: [],
+      });
     });
   });
 

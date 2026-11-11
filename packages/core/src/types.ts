@@ -754,6 +754,12 @@ export interface NodePermissionsSpec {
   access?: NodeAccess;
   /** Built-in tool classes the agent must not have. */
   deny?: (typeof TOOL_CLASSES)[number][];
+  /**
+   * Built-in tool classes a write node opts into beyond its default list
+   * (#608): today only `subagent` is left out by default. `deny` wins; a read
+   * node allows nothing.
+   */
+  allow?: (typeof TOOL_CLASSES)[number][];
   /** Exclusive MCP, and refuse the node on a harness that cannot enforce the policy. */
   strict?: boolean;
   /** `none`: no built-in tools and no settings sources. A workflow `none` is a ceiling a node cannot lift. */

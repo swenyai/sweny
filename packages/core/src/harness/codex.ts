@@ -1067,6 +1067,11 @@ export class CodexHarness implements AgentHarness {
     // network. Network and subagents are still denied at the tool level, and an
     // explicit `tools.deny: [shell]` (already in policy.deny) still removes it.
     if (readOnly) for (const c of ["net", "subagent"] as ToolClass[]) deny.add(c);
+    // #608: subagents are off for a write node too unless it allows them
+    // (`permissions.allow: [subagent]`), the same default as Claude Code's
+    // allow-list. Codex has no built-in allow-list, so the switches it does
+    // have are all sweny can use; policyGate reports the rest.
+    if (!policy.allow?.includes("subagent")) deny.add("subagent");
 
     let sandbox: "read-only" | "workspace-write" | "danger-full-access" = "read-only";
     if (!readOnly) {

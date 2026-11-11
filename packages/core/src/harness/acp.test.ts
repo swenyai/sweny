@@ -790,11 +790,21 @@ describe("strict policy", () => {
     expect(fakes.raw()).toHaveLength(0);
   });
 
-  it("a node with no sandbox ask runs in strict mode when sandboxing is off", async () => {
+  // #608: an ACP agent keeps all its own built-ins, so nothing limits a write
+  // node to its policy's list. Strict refuses it, sandboxing or not; warn runs it.
+  it("a write node is refused in strict mode for the missing built-in allow-list, and runs in warn", async () => {
     const { h } = harness({ policy: "strict", sandbox: "off" });
     fakes.script(DONE);
     const r = await h.run(req());
-    expect(r.status).toBe("success");
+    expect(r.status).toBe("failed");
+    expect(String(r.data.error)).toMatch(/strict policy: builtin allow-list/);
+    expect(fakes.raw()).toHaveLength(0);
+
+    const warn = harness({ sandbox: "off" }).h;
+    fakes.script(DONE);
+    const ok = await warn.run(req());
+    expect(ok.status).toBe("success");
+    expect(ok.degraded.some((d) => d.startsWith("builtin allow-list: "))).toBe(true);
   });
 });
 

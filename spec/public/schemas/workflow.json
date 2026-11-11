@@ -561,6 +561,15 @@
               "minItems": 1,
               "description": "Built-in tool classes the agent must not have, compiled per harness."
             },
+            "allow": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["shell", "write", "edit", "net", "subagent"]
+              },
+              "minItems": 1,
+              "description": "Built-in tool classes a write node opts into beyond its default list (today only 'subagent' is left out by default). 'deny' wins; a read node may not allow any. A harness with no built-in of a class reports it."
+            },
             "strict": {
               "type": "boolean",
               "description": "Exclusive MCP (only the servers sweny injects), and refuse the node on a harness that cannot enforce the policy."

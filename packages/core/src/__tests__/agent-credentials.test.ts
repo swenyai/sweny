@@ -176,7 +176,8 @@ describe("policyGate: credentials and staged writes", () => {
   it("a staged write node needs fs and network containment, else strict refuses", () => {
     const staged: NodePolicy = { readOnly: false, deny: [], egress: [], strict: true, stagedWrite: true };
     expect(policyGate(ACP_CAPABILITIES, { ...staged, sandbox: "off" }).refuse).toMatch(/no push/);
-    expect(policyGate(ACP_CAPABILITIES, { ...staged, sandbox: "auto" }, mount).refuse).toBeUndefined();
+    // Contained, the staged write is held; ACP is still refused for its built-ins (#608), not for this.
+    expect(policyGate(ACP_CAPABILITIES, { ...staged, sandbox: "auto" }, mount).refuse ?? "").not.toMatch(/no push/);
     expect(policyGate(CODEX_CAPABILITIES, { ...staged, sandbox: "auto" }).refuse).toMatch(/no push/);
     expect(policyGate(CLAUDE_CODE_CAPABILITIES, { ...staged, sandbox: "auto" }).refuse).toBeUndefined();
     const warn = policyGate(ACP_CAPABILITIES, { ...staged, strict: false, sandbox: "off" });
