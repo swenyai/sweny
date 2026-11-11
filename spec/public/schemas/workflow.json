@@ -620,7 +620,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["comment", "issue", "pr", "label", "issue_state"]
+          "enum": ["comment", "issue", "pr", "label", "issue_state", "slack_message", "email"]
         },
         "via": {
           "type": "string",
@@ -634,7 +634,7 @@
           "description": "Max writes of this type from this node per run. Default 1."
         },
         "target": {
-          "description": "Pinned target (GitHub owner/repo, Linear team id), or { input: <name> } to take it from a run input. GitHub default: GITHUB_REPOSITORY. An output that pins number never takes its GitHub repository from the agent.",
+          "description": "Pinned target (GitHub owner/repo, Linear team id, Slack channel id, email address), or { input: <name> } to take it from a run input. GitHub default: GITHUB_REPOSITORY. An output that pins number never takes its GitHub repository from the agent. slack_message and email must pin it.",
           "oneOf": [
             {
               "type": "string",
@@ -769,7 +769,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["comment", "issue", "pr", "label", "issue_state"]
+            "enum": ["comment", "issue", "pr", "label", "issue_state", "slack_message", "email"]
           },
           "minItems": 1,
           "description": "Output types any node may declare. Absent: all types."
@@ -805,6 +805,32 @@
         "screen": {
           "type": "boolean",
           "description": "One model call that may veto the writes after every deterministic check. It can never authorize one."
+        },
+        "approval": {
+          "type": "object",
+          "required": ["required"],
+          "additionalProperties": false,
+          "description": "spec_version 3: freeze every write into a bundle under the run's state dir; nothing is sent until `sweny publish <run> --approve`.",
+          "properties": {
+            "required": {
+              "type": "boolean",
+              "description": "Every write of the run waits for approval."
+            },
+            "expires": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(s|m|h|d)$",
+              "description": "How long a bundle stays publishable (e.g. 2h, 7d). Default 7d."
+            },
+            "approvers": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1,
+              "description": "Who may approve (local:<os user> on the CLI). Absent: any local user."
+            }
+          }
         }
       }
     },

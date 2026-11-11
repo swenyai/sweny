@@ -30,7 +30,8 @@ import type {
   Tool,
   ToolContext,
 } from "./types.js";
-import { SAFE_OUTPUT_APPLIERS, isRefusal, refusalReason, skippedReason } from "./types.js";
+import { SAFE_OUTPUT_APPLIERS, SAFE_OUTPUT_PINNED_TARGET, isRefusal, refusalReason, skippedReason } from "./types.js";
+import type { ProposedWrite } from "./approval-bundle.js";
 import { trustedEnvValue } from "./startup-env.js";
 
 /** Name of the intent-recording tool a node with `outputs` receives. */
@@ -91,15 +92,18 @@ export function createEmitOutputTool(
     name: EMIT_OUTPUT_TOOL,
     access: "read",
     description:
-      "Request a write (comment, issue, pr, label or issue_state). This does NOT write anything now: sweny checks the request " +
+      "Request a write (comment, issue, pr, label, issue_state, slack_message or email). This does NOT write anything now: sweny checks the request " +
       "against this step's declared outputs and limits, and applies it after the step finishes. Call once per write. " +
       `Allowed types here: ${types.join(", ")}.`,
     input_schema: {
       type: "object",
       properties: {
         type: { type: "string", enum: types, description: "Kind of write" },
-        title: { type: "string", description: "Issue or PR title" },
-        body: { type: "string", description: "Markdown body (comment, issue or PR)" },
+        title: { type: "string", description: "Issue or PR title, or the email subject" },
+        body: {
+          type: "string",
+          description: "Markdown body (comment, issue or PR), Slack message text, or email body",
+        },
         target: {
           type: "string",
           description: "GitHub owner/repo or Linear team id. Omit to use the declared target.",
@@ -334,6 +338,20 @@ const APPLIERS: Record<string, Partial<Record<SafeOutputType, Applier>>> = {
       build: (i) => ({ repo: i.target, issue_number: Number(i.number), state: i.state }),
     },
   },
+  slack: {
+    slack_message: {
+      tool: "slack_send_message",
+      needsTarget: true,
+      build: (i) => ({ channel: i.target, text: i.body }),
+    },
+  },
+  notification: {
+    email: {
+      tool: "notify_email",
+      needsTarget: true,
+      build: (i) => ({ to: i.target, subject: i.title, text: i.body }),
+    },
+  },
   linear: {
     comment: {
       tool: "linear_add_comment",
@@ -407,7 +425,7 @@ function producedRecord(output: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
-function refOf(output: unknown): string | number | undefined {
+export function refOf(output: unknown): string | number | undefined {
   const o = producedRecord(output);
   if (!o) return undefined;
   for (const k of ["number", "identifier", "id"]) {
@@ -418,7 +436,7 @@ function refOf(output: unknown): string | number | undefined {
 }
 
 /** The web URL of what a write produced (`html_url` on GitHub, `url` on Linear). */
-function urlOf(output: unknown): string | undefined {
+export function urlOf(output: unknown): string | undefined {
   const o = producedRecord(output);
   if (!o) return undefined;
   for (const k of ["html_url", "url"]) {
@@ -457,6 +475,13 @@ export interface ApplySafeOutputsOptions {
   actor: ActorInfo;
   /** Preview only: print what would be written, write nothing. */
   staged: boolean;
+  /**
+   * Approval mode (#576): freeze the writes that pass every check into a
+   * bundle and send nothing; receipts are `pending` with its digest.
+   * `unavailable`: approval is required but the run cannot hold a bundle (no
+   * journal), so every write is refused and the node fails.
+   */
+  approval?: { propose(writes: ProposedWrite[]): string } | "unavailable";
   /** The run's checkout, for the PR head push (#473). */
   cwd?: string;
   /** The PR head push, bound to `cwd` (#473). */
@@ -551,6 +576,11 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       refuse("pinned output needs a trusted repository", { via });
       continue;
     }
+    // Slack and email (#576): the destination is the declaration's, never the agent's.
+    if (SAFE_OUTPUT_PINNED_TARGET.includes(type) && !pinned) {
+      refuse("destination is not pinned", { via });
+      continue;
+    }
     const target = intent.target ?? pinned;
     if (applier.needsTarget && !target) {
       refuse("no target", { via });
@@ -564,6 +594,10 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
     if (type === "comment" && !body.trim()) {
       receipts.push({ type, status: "skipped", reason: "no findings", ...at });
       o.summary?.(`**SWEny** node \`${safeId(o.nodeId)}\`: comment skipped, no findings.`);
+      continue;
+    }
+    if ((type === "slack_message" || type === "email") && !body.trim()) {
+      refuse("missing body", at);
       continue;
     }
     if (type !== "label" && body.length > SAFE_OUTPUT_BODY_MAX) {
@@ -618,7 +652,7 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       refuse("number must be an issue or PR number", at);
       continue;
     }
-    if ((type === "issue" || type === "pr") && !intent.title?.trim()) {
+    if ((type === "issue" || type === "pr" || type === "email") && !intent.title?.trim()) {
       refuse("missing title", at);
       continue;
     }
@@ -684,7 +718,9 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       ...(target ? { target } : {}),
       ...(number !== undefined ? { number } : {}),
       ...(title ? { title } : {}),
-      ...(type === "comment" || type === "issue" || type === "pr" ? { body } : {}),
+      ...(type === "comment" || type === "issue" || type === "pr" || type === "slack_message" || type === "email"
+        ? { body }
+        : {}),
       ...(state ? { state } : {}),
       ...(labels ? { labels } : {}),
       ...(type === "pr" ? { head: intent.head, ...(intent.base ? { base: intent.base } : {}) } : {}),
@@ -710,7 +746,7 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
     o.state.total++;
 
     accepted.push({ index: receipts.length, write });
-    receipts.push({ type, status: o.staged ? "staged" : "applied", ...at });
+    receipts.push({ type, status: o.staged ? "staged" : o.approval ? "pending" : "applied", ...at });
   }
 
   if (accepted.length === 0) return { receipts };
@@ -719,6 +755,8 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
     for (const { write } of accepted) printPreview(write, o.logger);
     return { receipts };
   }
+
+  if (o.approval) return propose(o, o.approval, accepted, receipts);
 
   const toolCtx: ToolContext = {
     config: o.config,
@@ -812,6 +850,71 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       return { receipts, error: `safe output ${write.type} via ${write.via} failed: ${msg}` };
     }
   }
+  return { receipts };
+}
+
+/**
+ * Approval mode (#576): the screen may still veto, then what is left is
+ * frozen into one bundle and nothing is sent. The receipts say `pending` and
+ * carry the digest; `sweny publish` sends the bundle once a human approves it.
+ */
+async function propose(
+  o: ApplySafeOutputsOptions,
+  approval: NonNullable<ApplySafeOutputsOptions["approval"]>,
+  accepted: { index: number; write: ResolvedWrite }[],
+  receipts: SafeOutputReceipt[],
+): Promise<ApplySafeOutputsResult> {
+  if (approval === "unavailable") {
+    for (const { index } of accepted) {
+      receipts[index] = { ...receipts[index], status: "refused", reason: "approval needs a run journal" };
+    }
+    return { receipts, error: "safe outputs need approval, and this run has no journal to hold the bundle" };
+  }
+  let toFreeze = accepted;
+  if (o.policy?.screen) {
+    let verdict: string | null = null;
+    try {
+      verdict = o.screen ? await o.screen(accepted.map(({ write }) => ({ ...write }))) : null;
+    } catch {
+      verdict = null;
+    }
+    if ((verdict ?? "").trim().replace(/\.$/, "").toUpperCase() !== "ALLOW") {
+      o.logger.warn(`  safe outputs: screen vetoed ${accepted.length} write(s)`, { node: o.nodeId });
+      for (const { index } of accepted) {
+        receipts[index] = { ...receipts[index], status: "vetoed", reason: "screen vetoed" };
+      }
+      toFreeze = [];
+    }
+  }
+  if (toFreeze.length === 0) return { receipts };
+  const writes: ProposedWrite[] = toFreeze.map(({ write }) => {
+    const applier = APPLIERS[write.via]![write.type]!;
+    return {
+      type: write.type,
+      via: write.via,
+      tool: applier.tool,
+      ...(write.target ? { target: write.target } : {}),
+      args: applier.build(write),
+    };
+  });
+  let digest: string;
+  try {
+    digest = approval.propose(writes);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    for (const { index } of toFreeze) {
+      receipts[index] = { ...receipts[index], status: "failed", reason: "could not write the approval bundle" };
+    }
+    return { receipts, error: `could not write the approval bundle: ${msg}` };
+  }
+  for (const { index } of toFreeze) receipts[index] = { ...receipts[index], status: "pending", digest };
+  o.logger.info(`  safe outputs: ${toFreeze.length} write(s) frozen for approval (bundle ${digest.slice(0, 12)})`, {
+    node: o.nodeId,
+  });
+  o.summary?.(
+    `**SWEny** node \`${safeId(o.nodeId)}\`: ${toFreeze.length} write(s) wait for approval, bundle \`${digest}\`. ` +
+      "Send them with `sweny publish <run> --approve`.",
+  );
   return { receipts };
 }
 

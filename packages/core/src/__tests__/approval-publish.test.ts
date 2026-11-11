@@ -236,6 +236,7 @@ describe("approval mode: the producer freezes writes into a bundle (#576)", () =
         type: "slack_message",
         via: "slack",
         tool: "slack_send_message",
+        target: "C0OPS",
         args: { channel: "C0OPS", text: SLACK.body },
       },
       {
@@ -243,6 +244,7 @@ describe("approval mode: the producer freezes writes into a bundle (#576)", () =
         type: "email",
         via: "notification",
         tool: "notify_email",
+        target: "ops@acme.test",
         args: { to: "ops@acme.test", subject: EMAIL.title, text: EMAIL.body },
       },
     ]);
@@ -324,7 +326,7 @@ describe("sweny publish: the CLI publisher (#576)", () => {
     expect(out.bundles[0]).toMatchObject({ digest, state: "published", approver: "local:nate" });
     expect(out.bundles[0].receipts).toEqual([
       expect.objectContaining({ n: 0, type: "slack_message", status: "sent" }),
-      expect.objectContaining({ n: 1, type: "email", status: "sent", ref: "<msg-1@test>" }),
+      expect.objectContaining({ n: 1, type: "email", status: "sent", ref: "<msg-2@test>" }),
     ]);
   });
 

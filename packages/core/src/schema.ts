@@ -35,6 +35,7 @@ import {
   SAFE_OUTPUT_APPLIERS,
   SAFE_OUTPUT_EXPIRES_PATTERN,
   SAFE_OUTPUT_MAX_CEILING,
+  SAFE_OUTPUT_PINNED_TARGET,
   SAFE_OUTPUT_STATES,
   SAFE_OUTPUT_TYPES,
   SKILL_CATEGORIES,
@@ -433,6 +434,14 @@ export const safeOutputsPolicyZ = z
     trusted_actors: z.array(z.string().min(1)).min(1).optional(),
     trusted_associations: z.array(z.enum(AUTHOR_ASSOCIATIONS)).min(1).optional(),
     screen: z.boolean().optional(),
+    approval: z
+      .object({
+        required: z.boolean(),
+        expires: z.string().regex(SAFE_OUTPUT_EXPIRES_PATTERN).optional(),
+        approvers: z.array(z.string().min(1)).min(1).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -1029,6 +1038,14 @@ export function validateWorkflow(
   // `safe_outputs.allow` are a ceiling every node inherits.
   const wfAccess = typeof workflow.permissions === "string" ? workflow.permissions : workflow.permissions?.access;
   const allowedOutputs = workflow.safe_outputs?.allow;
+  const specVersion = effectiveSpecVersion(workflow);
+  // Approval bundles (#576) are spec v3: an older sweny would ignore the key and send.
+  if (workflow.safe_outputs?.approval !== undefined && specVersion < 3) {
+    errors.push({
+      code: "UNSUPPORTED_OUTPUT",
+      message: `safe_outputs.approval needs spec_version "3"; this workflow runs as spec_version "${specVersion}"`,
+    });
+  }
   for (const [nodeId, node] of Object.entries(workflow.nodes)) {
     const nodeAccess = typeof node.permissions === "string" ? node.permissions : node.permissions?.access;
     if (wfAccess === "read" && nodeAccess === "write") {
@@ -1115,6 +1132,23 @@ export function validateWorkflow(
           message: `Node "${nodeId}" output "issue_state" can close issues, so it must pin number (a literal or { input: name }); only state: reopen may omit the pin`,
           nodeId,
         });
+      }
+      // Slack and email (#576): spec v3, and the destination is the declaration's, never the agent's.
+      if (SAFE_OUTPUT_PINNED_TARGET.includes(out.type)) {
+        if (specVersion < 3) {
+          errors.push({
+            code: "UNSUPPORTED_OUTPUT",
+            message: `Node "${nodeId}" output "${out.type}" needs spec_version "3"; this workflow runs as spec_version "${specVersion}"`,
+            nodeId,
+          });
+        }
+        if (out.target === undefined) {
+          errors.push({
+            code: "UNSUPPORTED_OUTPUT",
+            message: `Node "${nodeId}" output "${out.type}" must pin target (a literal or { input: name }): the agent never picks where a message goes`,
+            nodeId,
+          });
+        }
       }
       if (out.state !== undefined && out.type !== "issue_state") {
         errors.push({
@@ -1501,7 +1535,7 @@ export const workflowJsonSchema = {
         },
         target: {
           description:
-            "Pinned target (GitHub owner/repo, Linear team id), or { input: <name> } to take it from a run input. GitHub default: GITHUB_REPOSITORY. An output that pins number never takes its GitHub repository from the agent.",
+            "Pinned target (GitHub owner/repo, Linear team id, Slack channel id, email address), or { input: <name> } to take it from a run input. GitHub default: GITHUB_REPOSITORY. An output that pins number never takes its GitHub repository from the agent. slack_message and email must pin it.",
           oneOf: [
             { type: "string", minLength: 1 },
             {
@@ -1631,6 +1665,27 @@ export const workflowJsonSchema = {
           type: "boolean",
           description:
             "One model call that may veto the writes after every deterministic check. It can never authorize one.",
+        },
+        approval: {
+          type: "object",
+          required: ["required"],
+          additionalProperties: false,
+          description:
+            "spec_version 3: freeze every write into a bundle under the run's state dir; nothing is sent until `sweny publish <run> --approve`.",
+          properties: {
+            required: { type: "boolean", description: "Every write of the run waits for approval." },
+            expires: {
+              type: "string",
+              pattern: SAFE_OUTPUT_EXPIRES_PATTERN.source,
+              description: "How long a bundle stays publishable (e.g. 2h, 7d). Default 7d.",
+            },
+            approvers: {
+              type: "array",
+              items: { type: "string", minLength: 1 },
+              minItems: 1,
+              description: "Who may approve (local:<os user> on the CLI). Absent: any local user.",
+            },
+          },
         },
       },
     },

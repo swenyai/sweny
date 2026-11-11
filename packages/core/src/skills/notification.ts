@@ -95,9 +95,14 @@ export const notification: Skill = {
       env: "TEAMS_WEBHOOK_URL",
     },
     SMTP_URL: {
-      description: "SMTP connection URL for email notifications",
+      description: "SMTP connection URL for email (smtp:// or smtps://, nodemailer's URL form)",
       required: false,
       env: "SMTP_URL",
+    },
+    SMTP_FROM: {
+      description: "From address for email sent over SMTP_URL",
+      required: false,
+      env: "SMTP_FROM",
     },
   },
   tools: [
@@ -206,6 +211,40 @@ export const notification: Skill = {
         });
         if (!res.ok) throw new Error(`[Notification] Teams webhook failed (HTTP ${res.status}): ${await res.text()}`);
         return { ok: true };
+      },
+    },
+    {
+      name: "notify_email",
+      access: "write",
+      description:
+        "Send a plain-text email over SMTP_URL (nodemailer), from SMTP_FROM. Exactly one send per call; " +
+        "SMTP has no lookup, so a send whose outcome is unknown is never repeated.",
+      input_schema: {
+        type: "object",
+        properties: {
+          to: { type: "string", description: "Recipient address (comma-separated for several)" },
+          subject: { type: "string", description: "Subject line" },
+          text: { type: "string", description: "Plain-text body" },
+        },
+        required: ["to", "subject", "text"],
+      },
+      handler: async (input: { to: string; subject: string; text: string }, ctx) => {
+        if (!ctx.config.SMTP_URL) throw new Error("[Notification] SMTP_URL not configured");
+        if (!ctx.config.SMTP_FROM) throw new Error("[Notification] SMTP_FROM not configured (the From address)");
+        // Loaded on first use: nothing else in the CLI pays for the SMTP stack.
+        const { default: nodemailer } = await import("nodemailer");
+        const transport = nodemailer.createTransport(ctx.config.SMTP_URL);
+        const info = await transport.sendMail({
+          from: ctx.config.SMTP_FROM,
+          to: input.to,
+          subject: input.subject,
+          text: input.text,
+        });
+        return {
+          id: info.messageId,
+          accepted: (info.accepted ?? []).map(String),
+          rejected: (info.rejected ?? []).map(String),
+        };
       },
     },
   ],

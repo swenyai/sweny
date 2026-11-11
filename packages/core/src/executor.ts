@@ -41,7 +41,7 @@ import type {
   RouteRung,
   MapCounts,
 } from "./types.js";
-import { consoleLogger } from "./types.js";
+import { SAFE_OUTPUT_APPROVAL_EXPIRES_DEFAULT, consoleLogger } from "./types.js";
 import { resolveSources } from "./source-resolver.js";
 import { evaluateAll, aggregateEval } from "./eval/index.js";
 import type { AggregateOutcome, ToolAliases } from "./eval/index.js";
@@ -84,6 +84,7 @@ import {
   applySafeOutputs,
   createEmitOutputTool,
   createWriteStageState,
+  parseDuration,
   resolveActor,
   safeOutputsInstruction,
   unresolvedOutputs,
@@ -91,6 +92,7 @@ import {
   type ActorInfo,
   type SafeOutputIntent,
 } from "./safe-outputs.js";
+import type { ProposedWrite } from "./approval-bundle.js";
 import { JournalMismatchError, JournalWriteError, type ExecutionJournal, type JournalReplay } from "./journal.js";
 import { childWorkflowOf, isMapNode, mapLimits, withMapOutputs } from "./map-spec.js";
 import { childRefs, prepareMap, runMap, type ChildRunHost, type PreparedMap } from "./map.js";
@@ -334,6 +336,7 @@ async function executeRun(
   // triggering actor, resolved once per run.
   const writeState = createWriteStageState();
   const stageOutputs = dryRun || options.stageOutputs === true || workflow.safe_outputs?.staged === true;
+  const approval = workflow.safe_outputs?.approval;
   const runEnv = options.env ?? process.env;
   const usesOutputs = Object.values(workflow.nodes).some((n) => (n.outputs?.length ?? 0) > 0);
   const actor: ActorInfo = usesOutputs ? resolveActor(runEnv, options.actor) : {};
@@ -1531,6 +1534,21 @@ async function executeRun(
           env: runEnv,
           actor,
           staged: stageOutputs,
+          // Approval mode (#576): the writes are frozen into a bundle in the run's private dir; nothing is sent.
+          ...(approval?.required === true
+            ? {
+                approval: journal?.propose
+                  ? {
+                      propose: (writes: ProposedWrite[]) =>
+                        journal.propose!(visitId, iteration, writes, {
+                          workflow: workflow.id,
+                          expiresMs: parseDuration(approval.expires ?? SAFE_OUTPUT_APPROVAL_EXPIRES_DEFAULT)!,
+                          ...(approval.approvers ? { approvers: approval.approvers } : {}),
+                        }),
+                    }
+                  : ("unavailable" as const),
+              }
+            : {}),
           cwd: resolveCwd,
           pushBranch,
           ...(githubApiUrl ? { githubApiUrl } : {}),

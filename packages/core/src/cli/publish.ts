@@ -1,5 +1,6 @@
 /**
  * sweny publish — Interactive CLI for publishing workflows and skills to the marketplace.
+ * With a run id, it is the approval publisher instead (`publishRunAction`, #576).
  *
  * Supports:
  * - Workflow YAML files → marketplace community submission
@@ -15,8 +16,9 @@ import chalk from "chalk";
 import { parse as parseYaml } from "yaml";
 import type { Command } from "commander";
 import { parseWorkflow, validateWorkflow } from "../schema.js";
-import { builtinSkills } from "../skills/index.js";
-import { discoverSkillsWithDiagnostics } from "../skills/custom-loader.js";
+import { builtinSkills, createSkillMap } from "../skills/index.js";
+import { configuredSkills, discoverSkillsWithDiagnostics } from "../skills/custom-loader.js";
+import { publishRun } from "../approval.js";
 import { isValidSkillId } from "../types.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -512,9 +514,58 @@ export function copySkillDir(sourceDir: string, destDir: string): void {
 
 export function registerPublishCommand(program: Command): void {
   program
-    .command("publish")
-    .description("Publish a workflow or skill to the SWEny Marketplace")
-    .action(async () => {
+    .command("publish [run-id]")
+    .description(
+      "Publish a workflow or skill to the SWEny Marketplace; with a run id, send the writes that run froze for approval",
+    )
+    .option(
+      "--approve",
+      "With a run id: send the run's approval bundles (without it they are only verified and printed)",
+    )
+    .action(async (runId: string | undefined, opts: { approve?: boolean }) => {
+      if (runId) {
+        process.exitCode = await publishRunAction(runId, opts.approve === true);
+        return;
+      }
       await runPublish();
     });
+}
+
+/**
+ * `sweny publish <run-id> [--approve]` (RFC 0002 M2, #576): verify and print
+ * the run's approval bundles, and with `--approve` send them once. Exit 1
+ * when anything was refused or did not send.
+ */
+export async function publishRunAction(runId: string, approve: boolean): Promise<number> {
+  const skills = configuredSkills(process.env, process.cwd());
+  const config: Record<string, string> = {};
+  for (const skill of skills) {
+    for (const [key, field] of Object.entries(skill.config)) {
+      const v = field.env ? process.env[field.env] : undefined;
+      if (v !== undefined && v !== "") config[key] = v;
+    }
+  }
+  const logger = {
+    info: () => {},
+    debug: () => {},
+    warn: (m: string) => console.error(chalk.yellow(m)),
+    error: (m: string) => console.error(chalk.red(m)),
+  };
+  try {
+    const out = await publishRun({
+      runId,
+      approve,
+      skills: createSkillMap(skills),
+      config,
+      logger,
+      print: (line) => console.log(line),
+    });
+    const bad =
+      out.bundles.some((b) => b.state === "refused" || b.state === "incomplete") ||
+      out.bundles.some((b) => (b.receipts ?? []).some((r) => r.status !== "sent"));
+    return bad ? 1 : 0;
+  } catch (err) {
+    console.error(chalk.red(`  ${err instanceof Error ? err.message : String(err)}`));
+    return 1;
+  }
 }
