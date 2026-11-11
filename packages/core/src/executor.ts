@@ -39,6 +39,7 @@ import type {
   Evaluator,
   ToolCall,
   RouteRung,
+  MapCounts,
 } from "./types.js";
 import { consoleLogger } from "./types.js";
 import { resolveSources } from "./source-resolver.js";
@@ -762,6 +763,7 @@ async function executeRun(
             concurrency: serial ? 1 : declaredConcurrency,
             tally,
             ...(signal ? { signal } : {}),
+            ...(observer ? { observer } : {}),
             logger,
           })
         : {
@@ -796,6 +798,14 @@ async function executeRun(
         };
       }
       if (concurrentWarning) result = { ...result, degraded: [concurrentWarning] };
+      if (mapPrep.ok) {
+        const counts = (result.data as { counts: MapCounts }).counts;
+        safeObserve(
+          observer,
+          { type: "map:end", node: currentId, status: result.status, counts: { ...counts }, events_version: 2 },
+          logger,
+        );
+      }
       // The run itself was aborted: stop like any other node would.
       throwIfAborted(signal);
       results.set(currentId, result);

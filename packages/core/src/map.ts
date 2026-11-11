@@ -15,7 +15,16 @@ import pLimit from "p-limit";
 
 import type { AgentHarness } from "./harness/types.js";
 import { canonicalHash, workflowHashOf, type ChildRegistration, type ExecutionJournal } from "./journal.js";
-import type { ExecutionResult, Logger, MapItemStatus, Node, NodeResult, Observer, Workflow } from "./types.js";
+import type {
+  ExecutionEvent,
+  ExecutionResult,
+  Logger,
+  MapItemStatus,
+  Node,
+  NodeResult,
+  Observer,
+  Workflow,
+} from "./types.js";
 import { MAP_INDEX_KEY } from "./types.js";
 import { itemKeyOf, mapLimits, mapPathSegments } from "./map-spec.js";
 import { checkOutputContract, contractFailureMessage } from "./output-contract.js";
@@ -293,7 +302,30 @@ export interface MapVisit {
   signal?: AbortSignal;
   /** The spend the children share (#575): admission stops at its cap, and a crossing aborts every child. */
   tally?: SpendTally;
+  /** The parent run's observer: map:start, child:start and child:end (versioned events). */
+  observer?: Observer;
   logger: Logger;
+}
+
+/** Deliver an event; an observer that throws never stops the map. */
+function emit(observer: Observer | undefined, event: ExecutionEvent, logger: Logger): void {
+  if (!observer) return;
+  try {
+    observer(event);
+  } catch (err) {
+    logger.warn(`observer threw on ${event.type}: ${errText(err)}`);
+  }
+}
+
+/** A child's own events, scoped to its run (#575): run id, parent run, generation. */
+function scoped(
+  observer: Observer | undefined,
+  run: string,
+  parentRun: string,
+  generation: number,
+): Observer | undefined {
+  if (!observer) return undefined;
+  return (e) => observer({ ...e, run, parent_run: parentRun, generation, events_version: 2 });
 }
 
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -327,6 +359,19 @@ export async function runMap(v: MapVisit): Promise<NodeResult> {
   };
   const runSignals = [mapAbort.signal, ...(v.signal ? [v.signal] : []), ...(v.tally ? [v.tally.signal] : [])];
 
+  const runIds: Array<string | undefined> = keys.map(() => undefined);
+  emit(
+    v.observer,
+    {
+      type: "map:start",
+      node: v.nodeId,
+      iteration: v.iteration,
+      keys: [...keys],
+      concurrency: v.concurrency,
+      events_version: 2,
+    },
+    v.logger,
+  );
   const limit = pLimit(Math.max(1, v.concurrency));
   const task = async (i: number): Promise<void> => {
     const key = keys[i];
@@ -359,13 +404,29 @@ export async function runMap(v: MapVisit): Promise<NodeResult> {
       stop(key, outcomes[i].error!);
       return;
     }
+    runIds[i] = run.runId;
+    emit(
+      v.observer,
+      {
+        type: "child:start",
+        node: v.nodeId,
+        key,
+        index: i,
+        run: run.runId,
+        parent_run: host.runId,
+        generation: run.generation,
+        action: run.action,
+        events_version: 2,
+      },
+      v.logger,
+    );
     const childSignal = AbortSignal.any(runSignals);
     const input = { item: items[i], item_key: key, ...withValues };
     try {
       const res = await v.runChild(input, {
         ...(run.journal ? { journal: run.journal } : {}),
         ...(run.harness ? { harness: run.harness } : {}),
-        ...(run.observer ? { observer: run.observer } : {}),
+        ...(run.observer ? { observer: scoped(run.observer, run.runId, host.runId, run.generation) } : {}),
         signal: childSignal,
       });
       if (childSignal.aborted) {
@@ -388,7 +449,29 @@ export async function runMap(v: MapVisit): Promise<NodeResult> {
       stop(key, outcomes[i].error!);
     }
   };
-  await Promise.allSettled(keys.map((_, i) => limit(() => task(i))));
+  const ended = async (i: number): Promise<void> => {
+    try {
+      await task(i);
+    } finally {
+      const o = outcomes[i];
+      emit(
+        v.observer,
+        {
+          type: "child:end",
+          node: v.nodeId,
+          key: keys[i],
+          status: o.status,
+          parent_run: host.runId,
+          ...(runIds[i] !== undefined ? { run: runIds[i] } : {}),
+          ...(o.generation !== undefined ? { generation: o.generation } : {}),
+          ...(o.error !== undefined ? { error: o.error } : {}),
+          events_version: 2,
+        },
+        v.logger,
+      );
+    }
+  };
+  await Promise.allSettled(keys.map((_, i) => limit(() => ended(i))));
   return mapResult(v, outcomes, firstFailure);
 }
 

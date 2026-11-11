@@ -1066,7 +1066,63 @@ export interface ToolCall {
   status?: "success" | "error";
 }
 
-export type ExecutionEvent =
+/** The event schema version this sweny emits (#575): 2 adds map events and the run scope fields. */
+export const EVENTS_VERSION = 2;
+
+/**
+ * Which run an event belongs to (#575). A map child's own events carry its
+ * `run` (`<parent run>/<map node>#<iteration>/<key>@g<N>`), `parent_run` and
+ * `generation`; consumers key progress on run plus node. Absent on the
+ * parent run's own events, which keep their pre-map shape.
+ */
+export interface EventScope {
+  run?: string;
+  parent_run?: string;
+  generation?: number;
+  events_version?: 2;
+}
+
+/** How a map visit opened one child (see `ChildAction` in map.ts). */
+export type ChildStartAction = "launch" | "recreate" | "resume" | "replay" | "retry";
+
+/** Outcome counts of a map visit. */
+export interface MapCounts {
+  total: number;
+  success: number;
+  failed: number;
+  skipped: number;
+  cancelled: number;
+}
+
+export type ExecutionEvent = /** A map visit (#575) is about to launch its children. */
+(
+  | { type: "map:start"; node: string; iteration: number; keys: string[]; concurrency: number; events_version: 2 }
+  /** One child run opened: `run` is its generation's run id. */
+  | {
+      type: "child:start";
+      node: string;
+      key: string;
+      index: number;
+      run: string;
+      parent_run: string;
+      generation: number;
+      action: ChildStartAction;
+      events_version: 2;
+    }
+  /** One item ended. `run` and `generation` are absent for an item no generation was opened for. */
+  | {
+      type: "child:end";
+      node: string;
+      key: string;
+      status: MapItemStatus;
+      parent_run: string;
+      run?: string;
+      generation?: number;
+      error?: string;
+      events_version: 2;
+    }
+  /** A map visit ended (after its budget check): the map node's status and the item counts. */
+  | { type: "map:end"; node: string; status: NodeResult["status"]; counts: MapCounts; events_version: 2 }
   | { type: "workflow:start"; workflow: string }
   | { type: "sources:resolved"; sources: Record<string, _ResolvedSource> }
   | { type: "node:enter"; node: string; instruction: string }
@@ -1094,7 +1150,9 @@ export type ExecutionEvent =
    */
   | { type: "node:warning"; node: string; reason: string; fields: string[] }
   | { type: "route"; from: string; to: string; reason: string }
-  | { type: "workflow:end"; results: Record<string, NodeResult> };
+  | { type: "workflow:end"; results: Record<string, NodeResult> }
+) &
+  EventScope;
 
 export type Observer = (event: ExecutionEvent) => void;
 
