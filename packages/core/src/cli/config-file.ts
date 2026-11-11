@@ -55,7 +55,7 @@ export function loadDotenv(cwd: string = process.cwd(), env: NodeJS.ProcessEnv =
       process.stderr.write(`  warning: .env sets ${key}, a runtime/platform variable; ignored\n`);
       continue;
     }
-    const refused = repoFileLoosening(key, value, env, ".env");
+    const refused = repoFileLoosening(key, value ?? "", env, ".env");
     if (refused) {
       warnRefused(env, refused);
       continue;
