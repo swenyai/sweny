@@ -41,7 +41,9 @@ function twoNodes(): Workflow {
         name: "write",
         instruction: "[write] write the todo for each ticket",
         skills: [],
-        eval: [{ name: "cites_only_seen", kind: "function", rule: { output_grounded: {} } }],
+        eval: [
+          { name: "cites_only_seen", kind: "function", rule: { output_grounded: { patterns: ["url", "issue_key"] } } },
+        ],
       },
     },
     edges: [{ from: "gather", to: "write" }],
@@ -232,7 +234,13 @@ describe("output_grounded review: false fails pass", () => {
 describe("output_grounded in evaluateAll", () => {
   it("joins a tool-rule failure and a grounding failure on one function evaluator", async () => {
     const [r] = await evaluateAll(
-      [{ name: "g", kind: "function", rule: { any_tool_called: ["fetch"], output_grounded: {} } }],
+      [
+        {
+          name: "g",
+          kind: "function",
+          rule: { any_tool_called: ["fetch"], output_grounded: { patterns: ["issue_key"] } },
+        },
+      ],
       { status: "success", data: { s: "ENG-1" }, toolCalls: [] },
       { context: { input: {} }, nodeId: "n" },
     );
@@ -242,12 +250,12 @@ describe("output_grounded in evaluateAll", () => {
       pass: false,
       reasoning:
         "any_tool_called: required one of [fetch] to succeed, called: [none]; " +
-        'output_grounded: 1 value(s) not grounded (evidence: tool outputs, inputs, prior context): s "ENG-1"',
+        'output_grounded: 1 value(s) not grounded (evidence: tool outputs, instruction, inputs, prior context): s "ENG-1"',
     });
   });
 
   it("passes context and node id through as evidence", async () => {
-    const rule = { output_grounded: {} };
+    const rule = { output_grounded: { patterns: ["issue_key"] } };
     const result: NodeResult = { status: "success", data: { s: "ENG-1" }, toolCalls: [] };
     const seen = await evaluateAll([{ name: "g", kind: "function", rule }], result, {
       context: { input: {}, prior: { s: "ENG-1" } },
@@ -258,6 +266,37 @@ describe("output_grounded in evaluateAll", () => {
       nodeId: "me",
     });
     expect(self[0]!.pass).toBe(false);
+  });
+
+  it("passes the author's text and the skill tools' access through", async () => {
+    const rule = { output_grounded: { patterns: ["issue_key"] } };
+    const ev = (toolAccess?: Map<string, "read" | "write">, authored?: string[]) =>
+      evaluateAll(
+        [{ name: "g", kind: "function", rule }],
+        {
+          status: "success",
+          data: { s: "ENG-1" },
+          toolCalls: [{ tool: "fetch_t", input: {}, output: "ENG-1", status: "success" }],
+        },
+        { ...(toolAccess ? { toolAccess } : {}), ...(authored ? { authored } : {}) },
+      );
+    expect((await ev(new Map([["fetch_t", "read" as const]])))[0]!.pass).toBe(true);
+    expect((await ev(new Map([["fetch_t", "write" as const]])))[0]!.pass).toBe(false);
+    expect((await ev(new Map([["fetch_t", "write" as const]]), ["see ENG-1"]))[0]!.pass).toBe(true);
+  });
+
+  it("keeps a passing grounding warning as the result's reasoning", async () => {
+    const [r] = await evaluateAll([{ name: "g", kind: "function", rule: { output_grounded: { ids: ["nope"] } } }], {
+      status: "success",
+      data: {},
+      toolCalls: [],
+    });
+    expect(r).toEqual({
+      name: "g",
+      kind: "function",
+      pass: true,
+      reasoning: "output_grounded: warning: nothing at nope",
+    });
   });
 });
 
@@ -313,6 +352,6 @@ describe("output_grounded in the schema", () => {
 
   it("parses a workflow that uses it", () => {
     const wf = parseWorkflow(twoNodes());
-    expect(wf.nodes.write!.eval![0]!.rule!.output_grounded).toEqual({});
+    expect(wf.nodes.write!.eval![0]!.rule!.output_grounded).toEqual({ patterns: ["url", "issue_key"] });
   });
 });

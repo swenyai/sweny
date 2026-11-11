@@ -4,7 +4,7 @@
 // list of EvalResults. `aggregateEval(...)` collapses that list into a
 // single pass/fail under the node's eval_policy. v1 implements `all_pass`.
 
-import type { Claude, EvalPolicy, EvalResult, Evaluator, NodeResult, Workflow, Node } from "../types.js";
+import type { Claude, EvalPolicy, EvalResult, Evaluator, NodeResult, ToolAccess, Workflow, Node } from "../types.js";
 import { evaluateValueRule } from "./value.js";
 import { evaluateFunctionRule, type ToolAliases } from "./function.js";
 import { evaluateJudge } from "./judge.js";
@@ -62,6 +62,10 @@ export interface EvaluateAllOptions {
   context?: Record<string, unknown>;
   /** The evaluated node's id, so its own earlier visit in `context` is not evidence. */
   nodeId?: string;
+  /** The author's text the prompt carried (instruction, rules, context sources). Evidence for `output_grounded`. */
+  authored?: string[];
+  /** Access class of the node's skill tools by name, so `output_grounded` counts only read tools. */
+  toolAccess?: ReadonlyMap<string, ToolAccess>;
 }
 
 /**
@@ -128,12 +132,15 @@ async function evaluateOne(e: Evaluator, result: NodeResult, opts: EvaluateAllOp
           toolCalls: result.toolCalls,
           ...(opts.context ? { context: opts.context } : {}),
           ...(opts.nodeId !== undefined ? { nodeId: opts.nodeId } : {}),
-          ...(opts.aliases ? { aliases: opts.aliases } : {}),
+          ...(opts.authored ? { authored: opts.authored } : {}),
+          ...(opts.toolAccess ? { toolAccess: opts.toolAccess } : {}),
         }),
       );
     }
     const failed = verdicts.filter((v) => !v.pass);
-    const reasoning = failed.length > 0 ? failed.map((v) => v.reasoning).join("; ") : undefined;
+    // A passing verdict can still carry a warning (output_grounded: a path that matched nothing).
+    const notes = (failed.length > 0 ? failed : verdicts).flatMap((v) => (v.reasoning ? [v.reasoning] : []));
+    const reasoning = notes.length > 0 ? notes.join("; ") : undefined;
     return { name: e.name, kind: "function", pass: failed.length === 0, reasoning: capReasoning(reasoning) };
   }
   if (e.kind === "judge" && opts.claude) {

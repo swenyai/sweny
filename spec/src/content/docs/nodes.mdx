@@ -617,7 +617,7 @@ The `function` kind is also the natural home for any future code-based check (fo
 
 #### `output_grounded`: ids and links the agent actually saw
 
-A `function` rule that fails the node when its output cites an id or URL the agent never saw. Every id and URL in `result.data` must appear in the evidence: the outputs of the node's own successful tool calls, plus, by default, the workflow input and the prior nodes' context the prompt was given. It is deterministic and makes no model call.
+A `function` rule that fails the node when its output cites an id or URL the agent never saw. Every URL and id it checks must appear in the evidence: the outputs of the node's own successful read-tool calls, the node's instruction with its rules and context sources, and, by default, the workflow input and the prior nodes' context the prompt was given. It is deterministic and makes no model call.
 
 ```yaml
 eval:
@@ -632,36 +632,48 @@ eval:
         stale: true # see below (default false)
 ```
 
-`output_grounded: {}` is a valid rule: it scans every string in the output with the built-in patterns. A failure names each offending value and its path:
+`output_grounded: {}` is a valid rule: it scans every string in the output for URLs and `owner/repo#N` refs. Issue keys are checked in prose only when `patterns` lists `issue_key` (prose is full of `UTF-8` and `SHA-256`), and always at `ids` paths. A failure names each offending value and its path:
 
 ```
 eval failed (policy: all_pass):
-  - cites_only_seen (function): output_grounded: 1 value(s) not grounded (evidence: tool outputs, inputs, prior context): items[2].body "https://github.com/acme/api/pull/918"
+  - cites_only_seen (function): output_grounded: 1 value(s) not grounded (evidence: tool outputs, instruction, inputs, prior context): items[2].body "https://github.com/acme/api/pull/918"
 ```
 
-| Field      | Type     | Default       | Meaning                                                                                                                                                                    |
-| ---------- | -------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `paths`    | string[] | whole output  | [Paths](#path-grammar) whose strings are scanned with `patterns`. A path that does not resolve has nothing to check; a malformed one fails the rule.                       |
-| `ids`      | string[] | none          | Paths whose string or number values are each one id, checked whole (for ids no pattern recognizes, like `4821`).                                                           |
-| `patterns` | string[] | all built-ins | `url`, `github_ref` (`owner/repo#123`), `issue_key` (`ENG-123`), or a JavaScript regex source; its first capture group is the id when it has one. `[]` turns the scan off. |
-| `allow`    | string[] | none          | Constants that always pass. Exact match; URLs are compared normalized.                                                                                                     |
-| `tools`    | string[] | every tool    | Only these tools' outputs count as evidence (skill aliases apply).                                                                                                         |
-| `inputs`   | boolean  | `true`        | The workflow input counts as evidence. `false` requires every id to come from a tool or a prior node.                                                                      |
-| `context`  | boolean  | `true`        | Prior nodes' context counts as evidence. The node's own earlier visit (in a loop) never does.                                                                              |
-| `stale`    | boolean  | `false`       | Fail an id seen only in the input or prior context when this node's tools returned other ids of the same kind and not this one.                                            |
-| `quotes`   | object[] | none          | Values that must be copied verbatim from a tool's output. See [Quotes](#quotes-copied-verbatim-from-a-tool).                                                               |
+| Field      | Type     | Default             | Meaning                                                                                                                                                                    |
+| ---------- | -------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `paths`    | string[] | whole output        | [Paths](#path-grammar) whose strings are scanned with `patterns`. A malformed path fails the rule; one that resolves to nothing passes with a warning.                     |
+| `ids`      | string[] | none                | Paths whose string or number values are each one id, checked whole (for ids no pattern recognizes, like `4821`).                                                           |
+| `patterns` | string[] | `url`, `github_ref` | `url`, `github_ref` (`owner/repo#123`), `issue_key` (`ENG-123`), or a JavaScript regex source; its first capture group is the id when it has one. `[]` turns the scan off. |
+| `allow`    | string[] | none                | Constants that always pass. Exact match; URLs are compared normalized.                                                                                                     |
+| `tools`    | string[] | every read tool     | Only these tools' outputs count as evidence, whatever their class. See [Which tools count](#which-tools-count).                                                            |
+| `inputs`   | boolean  | `true`              | The workflow input counts as evidence. `false` requires every id to come from a tool, the instruction or a prior node.                                                     |
+| `context`  | boolean  | `true`              | Prior nodes' context counts as evidence. The node's own earlier visit (in a loop) never does.                                                                              |
+| `stale`    | boolean  | `false`             | Fail an id seen only in the input, instruction or prior context when this node's tools returned other ids of the same kind and not this one.                               |
+| `quotes`   | object[] | none                | Values that must be copied verbatim from a tool's output. See [Quotes](#quotes-copied-verbatim-from-a-tool).                                                               |
 
 Matching rules:
 
-- A URL matches when its normalized form does: scheme and host lowercased, default port, fragment and trailing slash dropped. Path and query stay case-sensitive. Sentence punctuation after a URL in prose is not part of it.
+- A URL is `http://` or `https://` in any case, or a scheme-less `github.com/...` or `<site>.atlassian.net/...` link. It matches when its normalized form does: scheme and host lowercased, default port and trailing slash dropped, path, query and fragment kept as written. A cited fragment (`#issuecomment-99`) must have been seen; a link without one is grounded by its page with or without a fragment. Sentence punctuation after a URL in prose is not part of it.
+- Every pattern reads the whole string, so an id inside a URL's path, query or fragment is checked on its own as well.
 - An `owner/repo#N` ref also matches a `/owner/repo/issues/N` or `/owner/repo/pull/N` URL a tool returned.
-- Other ids match as whole tokens: `ENG-12` is not grounded by `ENG-123`, and `48` is not grounded by `4821`.
-- An id inside a URL is checked once, as the URL.
-- Only successful tool calls count. A tool's input is never evidence, and neither is an error output.
+- Scanned ids match as whole tokens in evidence values or object keys: `ENG-12` is not grounded by `ENG-123`.
+- A value at an `ids` path matches evidence values only, never object keys. A number there must equal a whole evidence value: `48` is not grounded by `4821` or by `"PR 48 merged"`.
+- Only successful calls count. A tool's input is never evidence, and neither is an error output.
+- A custom pattern runs over the node's output only, never over tool outputs, so a slow regex cannot stall on a large result.
+
+##### Which tools count
+
+With no `tools`, a call counts only when its tool reads:
+
+- sweny's own skill tools by their declared `access`: `read` counts, `write` (or undeclared) does not.
+- Never: shells (`Bash`, `shell`), subagents (`Task`, `Agent`), file writers (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `apply_patch`), `TodoWrite`, `StructuredOutput` and the safe-output tool `emit_output`. Their results echo what the agent gave them.
+- Any other tool, built-in or MCP, unless its name says it writes, sends or runs (`create_`, `update_`, `save_`, `add_`, `post`, `send`, `comment`, `run_`, `exec`, `echo` and the like). A read tool with such a name (`run_query`) must be named in `tools`.
+
+`tools` names the calls that count, whatever their class. A bare name matches sweny's own tools and built-ins only. An MCP tool is named with its server, `linear/get_issue` or `mcp__linear__get_issue`, so another server's `get_issue` never satisfies it. Skill aliases do not apply. Claude Code and Codex report the server; on pi and ACP an MCP tool reads like a built-in, so name it bare there.
 
 ##### Quotes: copied verbatim from a tool
 
-A `quotes` entry checks that every value at its `path` appears, as one substring, in a single string of a named tool's output. Only successful calls count; the input and prior context never do. For example, a review node can require every quoted line to come from the patch the tool returned:
+A `quotes` entry checks that every value at its `path` appears, as one substring, in a single string of a tool's output. Only successful calls count; the input, the instruction and prior context never do. For example, a review node can require every quoted line to come from the patch the tool returned:
 
 ```yaml
 eval:
@@ -674,34 +686,39 @@ eval:
           - path: notes[*].quote
             tools: [github_get_pr_patches]
             whitespace: trim # default
+            min_length: 8 # default
 ```
 
-| Field        | Type     | Default                           | Meaning                                                              |
-| ------------ | -------- | --------------------------------- | -------------------------------------------------------------------- |
-| `path`       | string   | required                          | [Path](#path-grammar); every string or number under it is one quote. |
-| `tools`      | string[] | the rule's `tools`, else any tool | The tools the quote must come from (skill aliases apply).            |
-| `whitespace` | string   | `trim`                            | `exact`, `trim` or `collapse`, below.                                |
+| Field        | Type     | Default                                | Meaning                                                              |
+| ------------ | -------- | -------------------------------------- | -------------------------------------------------------------------- |
+| `path`       | string   | required                               | [Path](#path-grammar); every string or number under it is one quote. |
+| `tools`      | string[] | the rule's `tools`, else any read tool | The tools the quote must come from, named as in `tools` above.       |
+| `whitespace` | string   | `trim`                                 | `exact`, `trim` or `collapse`, below.                                |
+| `min_length` | integer  | `8`                                    | Shortest quote accepted, counted after the whitespace rule.          |
 
 Whitespace rules:
 
 - `exact`: byte for byte. `"name: deploy "` is not found in `"name: deploy\n"`.
-- `trim`: the quote's leading and trailing whitespace is ignored; inside it, every character must match. The tool output is not changed.
-- `collapse`: every run of spaces, tabs and newlines, in the quote and in each tool output string, counts as one space, and the quote is trimmed. `"a b c"` is found in `"a\t\tb\n  c"`.
+- `trim`: the quote's leading and trailing whitespace is ignored; inside it, every character must match.
+- `collapse`: every run of spaces, tabs and newlines, in the quote and in each tool output string, counts as one space, and the quote is trimmed. `"alpha beta gamma"` is found in `"alpha\t\tbeta\n  gamma"`.
 
-A quote that is empty or only whitespace fails. A quote never spans two strings of the output (two array items, two fields). A short quote is weak: `x` is found almost anywhere, so pair `quotes` with a `matches` rule on the value's shape.
+A quote that is empty or only whitespace fails, and so does one shorter than `min_length`. A quote never spans two strings of the output (two array items, two fields). Object keys are not quotable.
 
 ```
   - quotes_are_from_the_patch (function): output_grounded: 1 quote(s) not found verbatim in github_get_pr_patches output (whitespace: trim): notes[1].quote "uses: acme/deploy@v3"
 ```
 
+A configured path (`paths`, `ids` or a quote's `path`) that resolves to nothing passes, with `warning: nothing at <path>` in the result's reasoning, so a renamed field shows up instead of passing silently.
+
 Limits, stated plainly:
 
-- **Evidence is what the harness traced.** Anything a tool returned counts, including a shell that echoes text or a subagent's summary. To close that, deny the shell or set `tools` to the tools you trust.
+- **Read tools are judged by name.** sweny knows its own tools' access; for other tools the default goes by the name. A read tool with a writer's name is skipped until you name it in `tools`, and a writer with a reader's name counts. Name the tools you trust when it matters.
+- **What a reader returned is evidence, whoever wrote it.** `WebFetch` output counts, and so does an MCP tool that returns what a third party wrote. Grounding proves the agent saw the id, not that the source is right.
+- **The author's text is trusted.** The instruction, rules and context sources are evidence, including any workflow input interpolated into them.
 - **Grounding is per node.** A prior node's output is evidence for the next node even if that node invented it. Put the evaluator on the node that first produces the id.
-- **`stale` is a heuristic.** "Same kind" means the same issue-key prefix, the same `owner/repo`, the same URL collection (the URL minus its last path segment), or the same custom pattern. It catches "the input names OPS-7, and the open-tickets listing this node fetched does not include it". A paginated or filtered listing can flag a valid id, which is why it is opt-in. It does not detect a changed status or title on an id the tool did return.
-- **`issue_key` matches things like `UTF-8` and `SHA-256`.** Add them to `allow`, or choose `patterns`.
-- **Short ids are weak.** A whole-value id like `7` is grounded by any `7` token in the evidence. The check is strongest on URLs and prefixed keys.
-- **Retries and resume.** The evaluated attempt's own tool calls are the evidence; each retry is checked against its own. Tool outputs are held in memory for the check and never journaled. The verdict is journaled like any other `EvalResult`, so a node replayed on resume keeps it and is not re-checked; a node that re-runs on resume is checked against its new tool outputs.
+- **`stale` is a heuristic.** "Same kind" means the same issue-key prefix, the same `owner/repo`, or the same URL collection (the URL minus its last path segment and fragment). It catches "the input names OPS-7, and the open-tickets listing this node fetched does not include it". A paginated or filtered listing can flag a valid id, which is why it is opt-in. It does not detect a changed status or title on an id the tool did return, and ids from custom patterns are never stale.
+- **Short ids are weak.** A non-numeric whole value like `A` is grounded by any `A` token in an evidence value. The check is strongest on URLs and prefixed keys.
+- **Retries and resume.** The evaluated attempt's own tool calls are the evidence; each retry is checked against its own, and the retry note (which repeats the failure) is never evidence. Tool outputs are held in memory for the check and never journaled. The verdict is journaled like any other `EvalResult`, so a node replayed on resume keeps it and is not re-checked; a node that re-runs on resume is checked against its new tool outputs.
 
 #### `judge`: LLM-as-judge
 

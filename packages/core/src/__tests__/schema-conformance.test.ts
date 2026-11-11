@@ -1199,6 +1199,14 @@ const fixtures: Fixture[] = [
         false,
       ],
       ["output_grounded quote with an unknown key", "function", { quotes: [{ path: "q", x: 1 }] }, false],
+      ["output_grounded quote with a min_length", "function", { quotes: [{ path: "q", min_length: 3 }] }, true],
+      ["output_grounded quote with a zero min_length", "function", { quotes: [{ path: "q", min_length: 0 }] }, false],
+      [
+        "output_grounded quote with a fractional min_length",
+        "function",
+        { quotes: [{ path: "q", min_length: 2.5 }] },
+        false,
+      ],
     ] as [string, string, Record<string, unknown>, boolean][]
   ).map(([name, kind, output_grounded, expected]): Fixture => ({
     name: `#580 ${name}`,

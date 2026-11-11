@@ -168,7 +168,7 @@
             },
             "output_grounded": {
               "type": "object",
-              "description": "function only. Every id and URL in the output must appear in the node's successful tool outputs, the workflow input or prior nodes' context.",
+              "description": "function only. Every id and URL in the output must appear in the node's successful read-tool outputs, its instruction, the workflow input or prior nodes' context.",
               "additionalProperties": false,
               "properties": {
                 "paths": {
@@ -243,6 +243,10 @@
                       "whitespace": {
                         "type": "string",
                         "enum": ["exact", "trim", "collapse"]
+                      },
+                      "min_length": {
+                        "type": "integer",
+                        "minimum": 1
                       }
                     }
                   }

@@ -2,12 +2,13 @@
 //
 // A `function` rule with two checks, both pure and deterministic (no model call):
 //
-// - Ids: every URL, `owner/repo#N` ref and issue key a node outputs (or every
-//   value at the configured `ids` paths) must appear in what the agent saw:
-//   the outputs of its own successful tool calls, plus (by default) the
-//   workflow input and the prior-node context its prompt was given.
+// - Ids: every URL and `owner/repo#N` ref a node outputs (plus issue keys or
+//   custom patterns when listed, and every value at the configured `ids`
+//   paths) must appear in what the agent saw: the outputs of its own
+//   successful read-tool calls, the author's text its prompt carried, and (by
+//   default) the workflow input and the prior-node context.
 // - Quotes: every value at a `quotes` path must appear verbatim, under an
-//   explicit whitespace rule, in a named tool's output.
+//   explicit whitespace rule, in one string of a named tool's output.
 //
 // Evidence lives in memory only. Tool outputs are never journaled (see
 // NODE_RESULT_JOURNAL), so the verdict is computed once, while the run holds
@@ -15,8 +16,8 @@
 // resume keeps its journaled verdict; a node that re-runs is re-checked
 // against its new tool outputs.
 
-import type { OutputGroundedQuote, OutputGroundedRule, ToolCall } from "../types.js";
-import { isErrorOutput, type ToolAliases } from "./function.js";
+import type { OutputGroundedQuote, OutputGroundedRule, ToolAccess, ToolCall } from "../types.js";
+import { isErrorOutput } from "./function.js";
 
 /** What a node's grounding is checked against. */
 export interface GroundingEvidence {
@@ -26,26 +27,66 @@ export interface GroundingEvidence {
   context?: Record<string, unknown>;
   /** The evaluated node's id. Its own earlier visit (loops) is not evidence. */
   nodeId?: string;
-  /** Tool-name aliases from the loaded skills, for `tools`. */
-  aliases?: ToolAliases;
+  /** The author's text the prompt carried: instruction, rules, context sources. Always evidence. */
+  authored?: string[];
+  /** Access class of the node's skill tools by name. A `write` skill tool is never evidence. */
+  toolAccess?: ReadonlyMap<string, ToolAccess>;
 }
 
 export const BUILTIN_PATTERNS = ["url", "github_ref", "issue_key"] as const;
-
+/** What `{}` scans prose for. Issue keys only when listed: prose is full of `UTF-8`-style tokens. */
+export const DEFAULT_PATTERNS = ["url", "github_ref"] as const;
 /** Same cap as `output_matches[].matches` (see value.ts). */
 export const MAX_REGEX_SOURCE_LENGTH = 1000;
 /** Offending values listed per failure group before "and N more". */
 export const MAX_LISTED = 8;
+/** Shortest quote accepted by default, after whitespace normalization. */
+export const DEFAULT_MIN_QUOTE = 8;
 
-const URL_RE = /https?:\/\/[^\s<>"'`()[\]{}|\\^]+/g;
+/**
+ * Tools whose result is not evidence: shells, subagents, file writers, the
+ * safe-output tool (`emit_output`, EMIT_OUTPUT_TOOL in safe-outputs.ts) and
+ * tools that echo what they were given. Lower-cased; Claude Code, Codex and pi names.
+ */
+export const NOT_EVIDENCE_TOOLS: ReadonlySet<string> = new Set([
+  "bash",
+  "bashoutput",
+  "killshell",
+  "shell",
+  "apply_patch",
+  "task",
+  "agent",
+  "write",
+  "edit",
+  "multiedit",
+  "notebookedit",
+  "todowrite",
+  "structuredoutput",
+  "exitplanmode",
+  "emit_output",
+]);
+/** A tool name that says it writes, sends or runs: its result likely echoes its input. */
+const WRITE_VERB_RE =
+  /(?:^|[_-])(?:create|update|save|add|post|send|delete|remove|set|write|edit|upsert|put|patch|merge|close|reopen|assign|comment|reply|publish|push|commit|run|exec|execute|echo|emit)(?:[_-]|$)/i;
+
+const URL_BODY = String.raw`[^\s<>"'${"`"}()[\]{}|\\^]+`;
+/** `http(s)://...` in any case, or a scheme-less GitHub or Atlassian link. */
+const URL_RE = new RegExp(
+  String.raw`https?:\/\/${URL_BODY}|(?<![\w.@/:-])(?:github\.com|[\w-]+\.atlassian\.net)\/${URL_BODY}`,
+  "gi",
+);
+const KNOWN_HOST_RE = /^(?:github\.com|[\w-]+\.atlassian\.net)\//i;
 const TRAILING_PUNCT_RE = /[.,;:!?]+$/;
 const GITHUB_REF_RE = /(?<![\w./-])([\w.-]+)\/([\w.-]+)#(\d+)(?!\w)/g;
 const ISSUE_KEY_RE = /(?<![\w-])([A-Z][A-Z0-9]{1,9})-\d+(?![\w-])/g;
 /** Matched against a normalized URL: `//host/owner/repo/(issues|pull)/N` at the end. */
 const GITHUB_URL_RE = /\/\/[^/]+\/([^/]+)\/([^/]+)\/(?:issues|pull)\/(\d+)$/;
+const NUMBER_RE = /^-?\d+(?:\.\d+)?$/;
 const WORD_CHAR = /[\w-]/;
 const SEGMENT_RE = /^([A-Za-z_]\w*)(\[\*\])?$/;
 const IDENT_RE = /^[A-Za-z_]\w*$/;
+/** sweny's own MCP server: its tools are matched by bare name, like built-ins. */
+const OWN_SERVER = "sweny-core";
 
 type Verdict = { pass: boolean; reasoning?: string };
 type Located = { path: string; value: unknown };
@@ -54,23 +95,30 @@ type Located = { path: string; value: unknown };
 
 /**
  * Canonical form for comparing URLs: scheme and host lowercased and the
- * default port dropped (by URL), the fragment and any trailing slash dropped.
- * Path and query stay as written. A string that is not a URL comes back trimmed.
+ * default port dropped (by URL), any trailing slash on the path dropped.
+ * Path, query and fragment stay as written. A scheme-less GitHub or
+ * Atlassian link gets `https://`. A string that is not a URL comes back trimmed.
  */
 export function normalizeUrl(raw: string): string {
   const s = raw.trim();
   try {
-    const u = new URL(s);
-    return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, "")}${u.search}`;
+    const u = new URL(KNOWN_HOST_RE.test(s) ? `https://${s}` : s);
+    return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, "")}${u.search}${u.hash}`;
   } catch {
     return s;
   }
 }
 
+/** The URL minus its fragment. */
+function withoutFragment(normalized: string): string {
+  return normalized.split("#")[0]!;
+}
+
 /** The URL minus its last path segment (`https://h/a/b/3` -> `https://h/a/b`); none for a bare origin. */
 function urlCollection(normalized: string): string | undefined {
-  const pathStart = normalized.indexOf("/", normalized.indexOf("//") + 2);
-  return pathStart === -1 ? undefined : normalized.slice(0, normalized.lastIndexOf("/"));
+  const base = withoutFragment(normalized);
+  const pathStart = base.indexOf("/", base.indexOf("//") + 2);
+  return pathStart === -1 ? undefined : base.slice(0, base.lastIndexOf("/"));
 }
 
 // ─── Walking values ──────────────────────────────────────────────────
@@ -90,24 +138,29 @@ function leaves(value: unknown, path: string, numbers: boolean): Array<{ path: s
   return Object.entries(value).flatMap(([k, v]) => leaves(v, childPath(path, k), numbers));
 }
 
-/**
- * Every string and number in a tool output or context value, plus object keys
- * when `keys` (never array indexes). Cycles are read once.
- */
-function strings(value: unknown, keys: boolean, seen: WeakSet<object> = new WeakSet()): string[] {
-  if (typeof value === "string") return [value];
-  if (typeof value === "number") return [String(value)];
-  if (typeof value !== "object" || value === null || seen.has(value)) return [];
+/** Every string and number in an evidence value, and its object keys (never array indexes). Cycles read once. */
+function evidenceText(value: unknown, seen: WeakSet<object> = new WeakSet()): { values: string[]; keys: string[] } {
+  if (typeof value === "string") return { values: [value], keys: [] };
+  if (typeof value === "number") return { values: [String(value)], keys: [] };
+  if (typeof value !== "object" || value === null || seen.has(value)) return { values: [], keys: [] };
   seen.add(value);
-  if (Array.isArray(value)) return value.flatMap((v) => strings(v, keys, seen));
-  return Object.entries(value).flatMap(([k, v]) => [...(keys ? [k] : []), ...strings(v, keys, seen)]);
+  const entries: Array<[string | undefined, unknown]> = Array.isArray(value)
+    ? value.map((v): [undefined, unknown] => [undefined, v])
+    : Object.entries(value);
+  const out = { values: [] as string[], keys: [] as string[] };
+  for (const [k, v] of entries) {
+    const inner = evidenceText(v, seen);
+    out.values.push(...inner.values);
+    out.keys.push(...(k === undefined ? [] : [k]), ...inner.keys);
+  }
+  return out;
 }
 
 /**
  * Resolve an eval path (grammar: spec nodes#path-grammar) to concrete
  * `{ path, value }` pairs, so a failure names `items[3].url`, not
- * `items[*].url`. A path that does not resolve has nothing to check. A
- * malformed path throws.
+ * `items[*].url`. A path that does not resolve has nothing to check (the
+ * caller warns). A malformed path throws.
  */
 function resolveConcrete(data: unknown, path: string): Located[] {
   let current: Located[] = [{ path: "", value: data }];
@@ -129,12 +182,17 @@ function resolveConcrete(data: unknown, path: string): Located[] {
 
 // ─── Candidates: ids and URLs in the output ──────────────────────────
 
-/** One id or URL found in the output. `cls` groups ids of one kind, for `stale`. Other ids have no `type`. */
+/**
+ * One id or URL found in the output. `cls` groups ids of one kind, for
+ * `stale`. `whole`: a value at an `ids` path, matched against evidence values
+ * only (never keys), and a number only as a whole value.
+ */
 interface Candidate {
   path: string;
   value: string;
   type?: "url" | "github_ref";
   cls?: string;
+  whole?: true;
 }
 
 interface Compiled {
@@ -155,37 +213,38 @@ function compileRegex(p: string): { name: string; re: RegExp } {
   }
 }
 
-function compilePatterns(patterns: readonly string[] = BUILTIN_PATTERNS): Compiled {
+function compilePatterns(patterns: readonly string[]): Compiled {
   return { builtins: patterns.filter(isBuiltin), custom: patterns.filter((p) => !isBuiltin(p)).map(compileRegex) };
 }
 
+/** Built-ins only: what runs over tool outputs (a user regex never does). */
+const BUILTINS_ONLY = compilePatterns(BUILTIN_PATTERNS);
+
 /**
- * Find ids and URLs in one string. URLs are taken first and masked, so an id
- * inside a URL is checked once, as the URL. Masking happens even when the url
- * pattern is off, so other patterns never match inside a URL.
+ * Find ids and URLs in one string. Every pattern reads the whole text, so an
+ * id inside a URL's path, query or fragment is a candidate of its own.
  */
 function extract(text: string, compiled: Compiled, path = ""): Candidate[] {
   const out: Candidate[] = [];
-  let rest = text.replace(URL_RE, (m) => {
-    if (compiled.builtins.includes("url")) {
-      const value = m.replace(TRAILING_PUNCT_RE, "");
+  const has = (p: string): boolean => compiled.builtins.includes(p);
+  if (has("url")) {
+    for (const m of text.matchAll(URL_RE)) {
+      const value = m[0].replace(TRAILING_PUNCT_RE, "");
       out.push({ path, value, type: "url", cls: urlCollection(normalizeUrl(value)) });
     }
-    return " ";
-  });
-  if (compiled.builtins.includes("github_ref")) {
-    rest = rest.replace(GITHUB_REF_RE, (m, owner: string, repo: string) => {
-      out.push({ path, value: m, type: "github_ref", cls: `gh:${owner}/${repo}`.toLowerCase() });
-      return " ";
-    });
   }
-  if (compiled.builtins.includes("issue_key")) {
-    for (const m of rest.matchAll(ISSUE_KEY_RE)) out.push({ path, value: m[0], cls: `key:${m[1]}` });
+  if (has("github_ref")) {
+    for (const m of text.matchAll(GITHUB_REF_RE)) {
+      out.push({ path, value: m[0], type: "github_ref", cls: `gh:${m[1]}/${m[2]}`.toLowerCase() });
+    }
+  }
+  if (has("issue_key")) {
+    for (const m of text.matchAll(ISSUE_KEY_RE)) out.push({ path, value: m[0], cls: `key:${m[1]}` });
   }
   for (const c of compiled.custom) {
-    for (const m of rest.matchAll(c.re)) {
+    for (const m of text.matchAll(c.re)) {
       const value = m[1] ?? m[0];
-      if (value !== "") out.push({ path, value, cls: `re:${c.name}` });
+      if (value !== "") out.push({ path, value });
     }
   }
   return out;
@@ -193,25 +252,30 @@ function extract(text: string, compiled: Compiled, path = ""): Candidate[] {
 
 /** A whole value at an `ids` path, classified (for `stale`) when it has a recognizable kind. */
 function wholeValue(value: string, path: string): Candidate {
-  return extract(value, compilePatterns(), path).find((c) => c.value === value) ?? { path, value };
+  const same = extract(value, BUILTINS_ONLY, path).find((c) => c.value === value);
+  return { ...(same ?? { path, value }), whole: true };
 }
 
 // ─── Evidence ────────────────────────────────────────────────────────
 
 /** One body of evidence, indexed for lookup. Built in memory, never stored. */
 class Corpus {
-  readonly texts: string[] = [];
+  readonly values: string[] = [];
+  private readonly keys: string[] = [];
   private readonly urls = new Set<string>();
+  private readonly bases = new Set<string>();
   private readonly refs = new Set<string>();
 
   add(value: unknown): void {
-    // Object keys can carry ids too (`{ "ENG-1": {...} }`).
-    for (const s of strings(value, true)) {
-      this.texts.push(s);
+    const text = evidenceText(value);
+    this.keys.push(...text.keys);
+    for (const s of text.values) {
+      this.values.push(s);
       for (const m of s.matchAll(URL_RE)) {
         const url = normalizeUrl(m[0].replace(TRAILING_PUNCT_RE, ""));
         this.urls.add(url);
-        const gh = GITHUB_URL_RE.exec(url);
+        this.bases.add(withoutFragment(url));
+        const gh = GITHUB_URL_RE.exec(withoutFragment(url));
         if (gh) this.refs.add(`${gh[1]}/${gh[2]}#${gh[3]}`.toLowerCase());
       }
       for (const m of s.matchAll(GITHUB_REF_RE)) this.refs.add(m[0].toLowerCase());
@@ -219,14 +283,20 @@ class Corpus {
   }
 
   has(c: Candidate): boolean {
-    if (c.type === "url") return this.urls.has(normalizeUrl(c.value));
+    if (c.type === "url") {
+      // A fragment must have been seen; a link without one is grounded by its page.
+      const url = normalizeUrl(c.value);
+      return url.includes("#") ? this.urls.has(url) : this.bases.has(url);
+    }
     if (c.type === "github_ref" && this.refs.has(c.value.toLowerCase())) return true;
-    return this.texts.some((t) => containsToken(t, c.value));
+    if (c.whole && NUMBER_RE.test(c.value)) return this.values.some((v) => v.trim() === c.value);
+    const texts = c.whole ? this.values : [...this.values, ...this.keys];
+    return texts.some((t) => containsToken(t, c.value));
   }
 
-  /** Every id kind this corpus holds, by the same extraction as the output (undefined for a kindless one). */
-  kinds(compiled: Compiled): Set<string | undefined> {
-    return new Set(this.texts.flatMap((t) => extract(t, compiled)).map((c) => c.cls));
+  /** Every id kind this corpus holds, by the built-in patterns only (undefined for a kindless URL). */
+  kinds(): Set<string | undefined> {
+    return new Set(this.values.flatMap((t) => extract(t, BUILTINS_ONLY)).map((c) => c.cls));
   }
 }
 
@@ -247,12 +317,34 @@ function didSucceed(c: ToolCall): boolean {
   return !isErrorOutput(c.output);
 }
 
-/** Successful calls, limited to `names` (alias-expanded) when given. */
+/** sweny's own tools and built-ins have no server (sweny-core counts as none). */
+function serverOf(c: ToolCall): string | undefined {
+  return c.server === OWN_SERVER ? undefined : c.server;
+}
+
+/** A tool's result is evidence by default only when the tool reads. */
+export function isEvidenceTool(c: ToolCall, toolAccess?: ReadonlyMap<string, ToolAccess>): boolean {
+  if (serverOf(c) === undefined) {
+    const access = toolAccess?.get(c.tool);
+    if (access !== undefined) return access === "read";
+    if (NOT_EVIDENCE_TOOLS.has(c.tool.toLowerCase())) return false;
+  }
+  return !WRITE_VERB_RE.test(c.tool);
+}
+
+/** A `tools` entry names this call: a bare name for sweny's own or a built-in, else `server/tool` or `mcp__server__tool`. */
+export function namesCall(name: string, c: ToolCall): boolean {
+  const server = serverOf(c);
+  if (server === undefined) return name === c.tool;
+  return name === `${server}/${c.tool}` || name === `mcp__${server}__${c.tool}`;
+}
+
+/** Successful calls that count: the named ones when `names` is set, else every read tool. */
 function evidenceCalls(evidence: GroundingEvidence, names: string[] | undefined): ToolCall[] {
   return evidence.toolCalls.filter(
     (c) =>
       didSucceed(c) &&
-      (names === undefined || names.some((n) => (evidence.aliases?.get(n) ?? new Set([n])).has(c.tool))),
+      (names === undefined ? isEvidenceTool(c, evidence.toolAccess) : names.some((n) => namesCall(n, c))),
   );
 }
 
@@ -268,17 +360,24 @@ function listed(failures: string[]): string {
   return failures.slice(0, MAX_LISTED).join("; ") + (more > 0 ? `; and ${more} more` : "");
 }
 
+/** Resolve a configured path, noting it when it matched nothing. */
+function resolveNoting(data: unknown, path: string, empty: string[]): Located[] {
+  const found = resolveConcrete(data, path);
+  if (found.length === 0) empty.push(path);
+  return found;
+}
+
 // ─── The two checks ──────────────────────────────────────────────────
 
-function checkIds(rule: OutputGroundedRule, data: unknown, evidence: GroundingEvidence): string[] {
-  const compiled = compilePatterns(rule.patterns);
+function checkIds(rule: OutputGroundedRule, data: unknown, evidence: GroundingEvidence, empty: string[]): string[] {
+  const compiled = compilePatterns(rule.patterns ?? DEFAULT_PATTERNS);
   const roots =
-    rule.paths === undefined ? [{ path: "", value: data }] : rule.paths.flatMap((p) => resolveConcrete(data, p));
+    rule.paths === undefined ? [{ path: "", value: data }] : rule.paths.flatMap((p) => resolveNoting(data, p, empty));
   const scanned = roots
     .flatMap((r) => leaves(r.value, r.path, false))
     .flatMap((l) => extract(l.text, compiled, l.path));
   const whole = (rule.ids ?? [])
-    .flatMap((p) => resolveConcrete(data, p))
+    .flatMap((p) => resolveNoting(data, p, empty))
     .flatMap((r) => leaves(r.value, r.path, true))
     .filter((l) => l.text.trim() !== "")
     .map((l) => wholeValue(l.text.trim(), l.path));
@@ -288,13 +387,12 @@ function checkIds(rule: OutputGroundedRule, data: unknown, evidence: GroundingEv
   const useInputs = rule.inputs !== false;
   const useContext = rule.context !== false;
   const given = new Corpus();
+  given.add(evidence.authored);
   for (const [k, v] of Object.entries(evidence.context ?? {})) {
     if (k !== evidence.nodeId && (k === "input" ? useInputs : useContext)) given.add(v);
   }
   const allow = new Set(rule.allow?.map(normalizeUrl));
-  // Kinds come from every built-in plus the rule's own patterns, so a whole value at an ids path has a kind to match.
-  const staleKinds =
-    rule.stale === true ? tools.kinds(compilePatterns([...BUILTIN_PATTERNS, ...(rule.patterns ?? [])])) : undefined;
+  const staleKinds = rule.stale === true ? tools.kinds() : undefined;
 
   const failures: string[] = [];
   const seen = new Set<string>();
@@ -311,7 +409,7 @@ function checkIds(rule: OutputGroundedRule, data: unknown, evidence: GroundingEv
   }
   if (failures.length === 0) return [];
 
-  const sources = ["tool outputs"];
+  const sources = ["tool outputs", "instruction"];
   if (useInputs) sources.push("inputs");
   if (useContext) sources.push("prior context");
   return [`${failures.length} value(s) not grounded (evidence: ${sources.join(", ")}): ${listed(failures)}`];
@@ -324,23 +422,25 @@ export function normalizeQuote(s: string, mode: OutputGroundedQuote["whitespace"
   return s.trim();
 }
 
-function checkQuotes(rule: OutputGroundedRule, data: unknown, evidence: GroundingEvidence): string[] {
+function checkQuotes(rule: OutputGroundedRule, data: unknown, evidence: GroundingEvidence, empty: string[]): string[] {
   const parts: string[] = [];
   for (const q of rule.quotes ?? []) {
     const mode = q.whitespace ?? "trim";
+    const min = q.min_length ?? DEFAULT_MIN_QUOTE;
     const names = q.tools ?? rule.tools;
     // Normalizing the output under trim changes nothing a trimmed quote can match; under collapse it is the rule.
     const hay = evidenceCalls(evidence, names).flatMap((c) =>
-      strings(c.output, false).map((s) => normalizeQuote(s, mode)),
+      evidenceText(c.output).values.map((s) => normalizeQuote(s, mode)),
     );
     const failures: string[] = [];
-    for (const l of resolveConcrete(data, q.path).flatMap((r) => leaves(r.value, r.path, true))) {
+    for (const l of resolveNoting(data, q.path, empty).flatMap((r) => leaves(r.value, r.path, true))) {
       const needle = normalizeQuote(l.text, mode);
       if (!/\S/.test(needle)) failures.push(`${label(l.path, l.text)} (empty)`);
+      else if (needle.length < min) failures.push(`${label(l.path, l.text)} (shorter than ${min} characters)`);
       else if (!hay.some((h) => h.includes(needle))) failures.push(label(l.path, l.text));
     }
     if (failures.length > 0) {
-      const from = names === undefined ? "any tool's" : names.join(", ");
+      const from = names === undefined ? "any read tool's" : names.join(", ");
       parts.push(
         `${failures.length} quote(s) not found verbatim in ${from} output (whitespace: ${mode}): ${listed(failures)}`,
       );
@@ -354,14 +454,19 @@ function checkQuotes(rule: OutputGroundedRule, data: unknown, evidence: Groundin
 /**
  * Evaluate an `output_grounded` rule against the node's output and evidence.
  * Never throws: a bad config (malformed path, invalid pattern) is a failure
- * with a reason, not a silent pass.
+ * with a reason, not a silent pass. A configured path that matched nothing
+ * passes with a warning in the reasoning.
  */
 export function evaluateGroundedRule(rule: OutputGroundedRule, data: unknown, evidence: GroundingEvidence): Verdict {
+  const empty: string[] = [];
   let parts: string[];
   try {
-    parts = [...checkIds(rule, data, evidence), ...checkQuotes(rule, data, evidence)];
+    parts = [...checkIds(rule, data, evidence, empty), ...checkQuotes(rule, data, evidence, empty)];
   } catch (e) {
-    parts = [(e as Error).message];
+    return { pass: false, reasoning: `output_grounded: ${(e as Error).message}` };
   }
-  return parts.length === 0 ? { pass: true } : { pass: false, reasoning: `output_grounded: ${parts.join(" | ")}` };
+  const warning = empty.length > 0 ? [`warning: nothing at ${empty.join(", ")}`] : [];
+  const notes = [...parts, ...warning];
+  if (notes.length === 0) return { pass: true };
+  return { pass: parts.length === 0, reasoning: `output_grounded: ${notes.join(" | ")}` };
 }

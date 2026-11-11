@@ -193,6 +193,7 @@ export const outputGroundedZ = z
             path: z.string().min(1),
             tools: z.array(z.string().min(1)).min(1).optional(),
             whitespace: z.enum(["exact", "trim", "collapse"]).optional(),
+            min_length: z.number().int().min(1).optional(),
           })
           .strict(),
       )
@@ -1153,7 +1154,7 @@ export const workflowJsonSchema = {
             output_grounded: {
               type: "object",
               description:
-                "function only. Every id and URL in the output must appear in the node's successful tool outputs, the workflow input or prior nodes' context.",
+                "function only. Every id and URL in the output must appear in the node's successful read-tool outputs, its instruction, the workflow input or prior nodes' context.",
               additionalProperties: false,
               properties: {
                 paths: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
@@ -1176,6 +1177,7 @@ export const workflowJsonSchema = {
                       path: { type: "string", minLength: 1 },
                       tools: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
                       whitespace: { type: "string", enum: ["exact", "trim", "collapse"] },
+                      min_length: { type: "integer", minimum: 1 },
                     },
                   },
                 },
