@@ -445,7 +445,8 @@ describe("write stage: target", () => {
       intents: [intent({ target: "ACME/API" })],
     });
     expect(ok).toStrictEqual([
-      { type: "issue", status: "applied", via: "github", target: "ACME/API", ref: 7, url: "https://example.test/7" },
+      // #576: the author's spelling of the pin, not the agent's casing.
+      { type: "issue", status: "applied", via: "github", target: "acme/api", ref: 7, url: "https://example.test/7" },
     ]);
   });
 
