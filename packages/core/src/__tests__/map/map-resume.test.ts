@@ -5,7 +5,7 @@
  * in a scratch state dir; fake agents.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -114,27 +114,30 @@ interface Sp {
 }
 
 /** A first run, with a fresh parent journal and a journal child host; returns what `sweny workflow run` would. */
-async function firstRun(sp: Sp, wf: Workflow, claude: Claude, signal?: AbortSignal) {
-  const journal = RunJournal.create({ runId: RUN, cwd: sp.cwd, stateRoot: sp.stateRoot, swenyVersion: "9.9.9" });
+async function firstRun(
+  sp: Sp,
+  wf: Workflow,
+  claude: Claude,
+  signal?: AbortSignal,
+  opts: { version?: string; input?: Record<string, unknown> } = {},
+) {
+  const version = opts.version ?? "9.9.9";
+  const journal = RunJournal.create({ runId: RUN, cwd: sp.cwd, stateRoot: sp.stateRoot, swenyVersion: version });
   const host = createJournalChildHost({
     parentRunId: RUN,
     cwd: sp.cwd,
     stateRoot: sp.stateRoot,
-    swenyVersion: "9.9.9",
+    swenyVersion: version,
   });
   try {
-    const res = await execute(
-      wf,
-      {},
-      {
-        skills: new Map(),
-        claude,
-        logger: silent,
-        journal,
-        children: host,
-        ...(signal ? { signal } : {}),
-      },
-    );
+    const res = await execute(wf, opts.input ?? {}, {
+      skills: new Map(),
+      claude,
+      logger: silent,
+      journal,
+      children: host,
+      ...(signal ? { signal } : {}),
+    });
     journal.end([...res.results.values()].some((r) => r.status === "failed") ? "failed" : "success");
     return res;
   } catch (err) {
@@ -144,14 +147,20 @@ async function firstRun(sp: Sp, wf: Workflow, claude: Claude, signal?: AbortSign
 }
 
 /** `sweny workflow resume`: lock, read, plan, reopen the parent journal; the host finds the children. */
-async function resume(sp: Sp, wf: Workflow, claude: Claude, opts: { force?: boolean; host?: ChildRunHost } = {}) {
+async function resume(
+  sp: Sp,
+  wf: Workflow,
+  claude: Claude,
+  opts: { force?: boolean; host?: ChildRunHost; version?: string; input?: Record<string, unknown> } = {},
+) {
+  const version = opts.version ?? "9.9.9";
   const lock = lockRun(sp.cwd, RUN, sp.stateRoot);
   const read = readJournal(journalFile(sp.cwd, RUN, sp.stateRoot), { repair: true });
   const journal = RunJournal.openForResume({
     runId: RUN,
     cwd: sp.cwd,
     stateRoot: sp.stateRoot,
-    swenyVersion: "9.9.9",
+    swenyVersion: version,
     read,
     plan: buildResumePlan(read.records),
     lock,
@@ -162,7 +171,7 @@ async function resume(sp: Sp, wf: Workflow, claude: Claude, opts: { force?: bool
     parentRunId: RUN,
     cwd: sp.cwd,
     stateRoot: sp.stateRoot,
-    swenyVersion: "9.9.9",
+    swenyVersion: version,
   });
   const host: ChildRunHost = opts.host ?? {
     ...base,
@@ -173,7 +182,13 @@ async function resume(sp: Sp, wf: Workflow, claude: Claude, opts: { force?: bool
     },
   };
   try {
-    const res = await execute(wf, {}, { skills: new Map(), claude, logger: silent, journal, children: host });
+    const res = await execute(wf, opts.input ?? {}, {
+      skills: new Map(),
+      claude,
+      logger: silent,
+      journal,
+      children: host,
+    });
     journal.end([...res.results.values()].some((r) => r.status === "failed") ? "failed" : "success");
     return { res, generations };
   } catch (err) {
@@ -325,5 +340,83 @@ describe("a changed item list on resume", () => {
     expect(statusOf(res)).toBe("success");
     expect(fresh).toEqual([true, true, true]);
     expect((j.starts[0] as ChildRegistration).keys).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("resuming a map after something it depends on changed", () => {
+  /** A first run stopped while b and c run: a finished, d never launched. */
+  async function stoppedMidMap(sp: Sp, wf: Workflow, opts: { version?: string; input?: Record<string, unknown> } = {}) {
+    const ctl = new AbortController();
+    const first = agent({ a: ["ok"], b: ["hang"], c: ["hang"] }, (key) => {
+      if (key === "c") setTimeout(() => ctl.abort(), 10);
+    });
+    await expect(firstRun(sp, wf, first.claude, ctl.signal, opts)).rejects.toThrow("workflow aborted");
+  }
+  const four = { concurrency: 2, items: [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }] };
+
+  it("after a sweny upgrade, resume --force replays and resumes the children under the new version", async () => {
+    const sp = space();
+    const wf = workflow(four);
+    await stoppedMidMap(sp, wf);
+    // Without --force the run itself refuses: its tools hash names the sweny version.
+    await expect(resume(sp, wf, agent({}).claude, { version: "9.9.10" })).rejects.toThrow(
+      "cannot resume: the configured skills, agent or sweny version changed since this run was journaled",
+    );
+    const second = agent({});
+    const { res, generations } = await resume(sp, wf, second.claude, { version: "9.9.10", force: true });
+    expect(statusOf(res)).toBe("success");
+    expect(generations).toEqual({ a: "g1 replay", b: "g1 resume", c: "g1 resume", d: "g1 launch" });
+    expect([...second.calls].sort()).toEqual(["b", "c", "d"]);
+  });
+
+  it("after a with: value changed, resume --force resumes the children with their new input", async () => {
+    const sp = space();
+    const wf = workflow({ ...four, with: { team: "input.team" } });
+    await stoppedMidMap(sp, wf, { input: { team: "A" } });
+    const second = agent({});
+    const { res, generations } = await resume(sp, wf, second.claude, { input: { team: "B" }, force: true });
+    expect(statusOf(res)).toBe("success");
+    expect(generations).toEqual({ a: "g1 replay", b: "g1 resume", c: "g1 resume", d: "g1 launch" });
+    expect([...second.calls].sort()).toEqual(["b", "c", "d"]);
+  });
+
+  it("a child whose instructions changed refuses once, naming the child and what changed; --force completes the map", async () => {
+    const sp = space();
+    const instructions = join(sp.cwd, "draft.md");
+    writeFileSync(instructions, "Draft a prompt.", "utf-8");
+    const child = { ...CHILD, nodes: { draft: { ...CHILD.nodes.draft, instruction: { file: instructions } } } };
+    const wf = workflow({ concurrency: 1, workflow: child as never });
+    const ctl = new AbortController();
+    const first = agent({ a: ["ok"], b: ["hang"] }, (key) => {
+      if (key === "b") setTimeout(() => ctl.abort(), 10);
+    });
+    await expect(firstRun(sp, wf, first.claude, ctl.signal)).rejects.toThrow("workflow aborted");
+    // The parent's own instructions did not change; only the child's.
+    writeFileSync(instructions, "Draft a better prompt.", "utf-8");
+    const refused =
+      `cannot resume map node "m" item "a" (child run ${RUN}/m#1/a@g1): instructions, rules or context files ` +
+      `changed since it was journaled. Resuming would mix results from two different runs. Start a new run, ` +
+      `or resume with --force.`;
+    const noForce = agent({});
+    for (let i = 0; i < 2; i++) {
+      await expect(resume(sp, wf, noForce.claude)).rejects.toThrow(
+        new JournalMismatchError(
+          ["instructions, rules or context files"],
+          `map node "m" item "a" (child run ${RUN}/m#1/a@g1)`,
+        ),
+      );
+    }
+    expect(
+      new JournalMismatchError(
+        ["instructions, rules or context files"],
+        `map node "m" item "a" (child run ${RUN}/m#1/a@g1)`,
+      ).message,
+    ).toBe(refused);
+    expect(noForce.calls).toEqual([]);
+    const forced = agent({});
+    const { res, generations } = await resume(sp, wf, forced.claude, { force: true });
+    expect(statusOf(res)).toBe("success");
+    expect(generations).toEqual({ a: "g1 replay", b: "g1 resume", c: "g1 launch" });
+    expect(forced.calls).toEqual(["b", "c"]);
   });
 });

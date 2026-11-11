@@ -229,6 +229,29 @@ describe("fail-fast (the default)", () => {
     expect(res.results.has("after")).toBe(false);
   });
 
+  it("a child that finished with success keeps it, even when the stop fired before the map looked", async () => {
+    let failed: () => void = () => {};
+    const aFailed = new Promise<void>((resolve) => (failed = resolve));
+    const { claude } = fakeClaude(async (input) => {
+      if (input.item_key === "a") {
+        failed();
+        return { status: "failed", data: { error: "bad" }, toolCalls: [] };
+      }
+      // b's work is done; it returns only after a's failure has aborted the map.
+      await aFailed;
+      await tick(20);
+      return ok("b");
+    });
+    const { host, log } = recordingHost();
+    const res = await run(workflow({ items: [{ id: "a" }, { id: "b" }], concurrency: 2 }), claude, host);
+    expect([...log].sort()).toEqual(["end a failed", "end b success", "open a", "open b"]);
+    expect(mapData(res).items).toEqual({
+      a: { status: "failed", error: 'node "draft" failed: bad' },
+      b: { status: "success", data: { prompt: "b" } },
+    });
+    expect(mapData(res).counts).toEqual({ total: 2, success: 1, failed: 1, skipped: 0, cancelled: 0 });
+  });
+
   it("on_fail: continue routes on from a failed map", async () => {
     const { claude } = fakeClaude(async () => ({ status: "failed", data: {}, toolCalls: [] }), { after: { ok: true } });
     const wf = workflow(
