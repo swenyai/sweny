@@ -17,9 +17,11 @@
  *   returns, strict mode. The read must fail.
  * - Claude SDK sandbox path: sweny's own ClaudeCodeHarness (built dist) runs one
  *   node against a local fake model that asks for one Bash command, the probe.
- *   Sandbox off: the read succeeds; strict: it must fail. The same for the Read
- *   tool on /proc/<parent pid>/environ: the file tools run in the Claude Code
- *   process, outside Bash's PID namespace, so strict must refuse /proc to them.
+ *   Sandbox off: the read succeeds; strict: it must fail. The Read tool on
+ *   /proc/<parent pid>/environ runs in the Claude Code process, outside Bash's
+ *   PID namespace: Claude Code refuses /proc itself, and under the sandbox
+ *   sweny's deny rule refuses it first (defense in depth). A workspace file
+ *   holding the canary is the control that proves Read works in both modes.
  * - The CLI entry end to end: `sweny workflow run` with only the Action's
  *   SWENY_SANDBOX_DEFAULT=strict (no mode passed in) in a workspace whose
  *   .sweny.yml and .env both set the sandbox off. In CI they are refused and
@@ -347,6 +349,18 @@ function readProbe(pid: number): ToolCall {
   return { name: "Read", input: { file_path: `/proc/${pid}/environ` } };
 }
 
+/** A workspace file holding the canary: proves the Read tool and the fake model's plumbing work. */
+const CANARY_FILE = path.join(workspace, "read-control.txt");
+await writeFile(CANARY_FILE, `${CANARY_VALUE}\n`);
+const readControl = (): ToolCall => ({ name: "Read", input: { file_path: CANARY_FILE } });
+
+function readLine(label: string, r: ToolResult): string {
+  return (
+    `PROC RESULT Claude Read tool, ${label}: isError=${r.isError} leaked=${r.text.includes(CANARY_VALUE)} ` +
+    `result=${JSON.stringify(r.text.split("\n")[0].slice(0, 200))}`
+  );
+}
+
 const claudeSandboxReason = LINUX ? checkSandboxSupport() : "not Linux";
 const claudeReady = LINUX && existsSync(DIST_INDEX) && existsSync(DIST_CLI) && !claudeSandboxReason;
 
@@ -433,25 +447,40 @@ describe.skipIf(!claudeReady)("/proc isolation, Claude SDK sandbox path", () => 
     expect(probe.scan.found).toBe(false);
   }, 180_000);
 
-  it("sandbox off: the Read tool reads sweny's env from /proc/<pid>/environ (the risk)", async () => {
-    const { result, contained } = await claudeAgent("off", readProbe);
-    console.log(
-      `PROC RESULT Claude Read tool, off: isError=${result.isError} leaked=${result.text.includes(CANARY_VALUE)}`,
-    );
-    expect(contained).toBe(false);
-    expect(result.text).toContain(CANARY_VALUE);
-  }, 180_000);
+  // Claude Code's own Read tool refuses /proc and device files ("this path names a device or
+  // process file that this tool does not read", in the CLI binary of the pinned SDK), sandbox or
+  // not. sweny's /proc deny rule stays as defense in depth: these cases tell the two apart.
+  it("sandbox off: Read works (control), and Claude Code itself refuses /proc/<pid>/environ", async () => {
+    const control = await claudeAgent("off", readControl);
+    console.log(readLine("off, workspace control file", control.result));
+    expect(control.contained).toBe(false);
+    expect(control.result.text, "the Read tool and the fake model's plumbing work").toContain(CANARY_VALUE);
 
-  it("strict: the Read tool is refused /proc, so it cannot read sweny's env (#599)", async () => {
-    const { result, contained } = await claudeAgent("strict", readProbe);
-    console.log(
-      `PROC RESULT Claude Read tool, strict: isError=${result.isError} leaked=${result.text.includes(CANARY_VALUE)} ` +
-        `result=${JSON.stringify(result.text.slice(0, 200))}`,
-    );
-    expect(contained).toBe(true);
-    expect(result.text).not.toContain(CANARY_VALUE);
+    const { result, contained } = await claudeAgent("off", readProbe);
+    console.log(readLine("off, /proc/<parent>/environ", result));
+    expect(contained).toBe(false);
     expect(result.isError).toBe(true);
-  }, 180_000);
+    expect(result.text).not.toContain(CANARY_VALUE);
+    expect(result.text, "refused by Claude Code itself, not by a sweny rule").toContain(
+      "names a device or process file that this tool does not read",
+    );
+  }, 360_000);
+
+  it("strict: Read still works on the workspace, and sweny's deny rule refuses /proc (#599)", async () => {
+    const control = await claudeAgent("strict", readControl);
+    console.log(readLine("strict, workspace control file", control.result));
+    expect(control.contained).toBe(true);
+    expect(control.result.text).toContain(CANARY_VALUE);
+
+    const { result, contained } = await claudeAgent("strict", readProbe);
+    console.log(readLine("strict, /proc/<parent>/environ", result));
+    expect(contained).toBe(true);
+    expect(result.isError).toBe(true);
+    expect(result.text).not.toContain(CANARY_VALUE);
+    expect(result.text, "the deny rule fires before Claude Code's own check").toContain(
+      "denied by your permission settings",
+    );
+  }, 360_000);
 
   // #599 end to end: the CLI entry, with nothing but the Action's env default
   // (SWENY_SANDBOX_DEFAULT=strict, no SWENY_SANDBOX, no mode passed in), and a

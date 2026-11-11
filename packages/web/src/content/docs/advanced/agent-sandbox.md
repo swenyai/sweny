@@ -106,7 +106,7 @@ Sandboxed means Claude Code's shell commands run in its own sandbox, and Codex, 
 - Network egress is limited to an allowlist: source hosting and package registries (`github.com`, `api.github.com`, `*.githubusercontent.com`, `registry.npmjs.org`, `pypi.org`, `proxy.golang.org`, `crates.io`, `rubygems.org`, ...), plus the provider hosts of the node's skills (`api.linear.app` for `linear`, `*.sentry.io` for `sentry`, `*.datadoghq.com` for `datadog`, ...), plus your `sandbox-allowed-domains`.
 - Commands cannot opt out of the sandbox.
 - The agent's own Anthropic credentials are unset inside sandboxed commands, and `~/.claude/.credentials.json` is unreadable.
-- On Linux, the agent's shell commands (Claude Code's Bash) and the whole agent process (Codex, pi, ACP under `srt`) run in their own PID namespace, so they cannot read the environment of the SWEny process, or of any process outside the sandbox, through `/proc/<pid>/environ`. Claude Code's file tools (Read, Grep, Glob) run in the Claude Code process, outside that namespace, so SWEny denies them `/proc` while the sandbox is on: Read is refused there (tested), and Grep and Glob get the same deny rule, which Claude Code applies to them on a best-effort basis (not tested).
+- On Linux, the agent's shell commands (Claude Code's Bash) and the whole agent process (Codex, pi, ACP under `srt`) run in their own PID namespace, so they cannot read the environment of the SWEny process, or of any process outside the sandbox, through `/proc/<pid>/environ`. Claude Code's file tools (Read, Grep, Glob) run in the Claude Code process, outside that namespace. Claude Code's Read already refuses `/proc` and device files on its own, sandbox or not (tested). As defense in depth, SWEny also denies `/proc` to Read, Grep and Glob while the sandbox is on, and that rule fires first (tested for Read; Claude Code applies it to Grep and Glob on a best-effort basis, not tested).
 
 ### Why the Action is strict: `/proc`
 
@@ -115,7 +115,7 @@ SWEny keeps skill credentials (`GITHUB_TOKEN`, `LINEAR_API_KEY`, ...) out of the
 | Agent path | Unsandboxed (`off`, or `auto` on a host that cannot sandbox) | Sandboxed (`auto` or `strict` on a host that can) |
 |------------|--------------------------------------------------|-------------------------------------|
 | Claude Code's Bash (SDK sandbox), sweny's own harness | Reads the parent's secret | Cannot: the parent's pid does not exist in the agent's namespace, and no visible process holds the secret |
-| Claude Code's Read tool on `/proc/<parent pid>/environ` | Reads the parent's secret | Refused by the `/proc` deny rule |
+| Claude Code's Read tool on `/proc/<parent pid>/environ` | Refused by Claude Code itself (a workspace file holding the secret reads fine, so the probe works) | Refused by SWEny's `/proc` deny rule first |
 | The `sweny` CLI under the Action's default, with `.sweny.yml` and `.env` both setting the sandbox off | n/a | Cannot: the repo files are refused (see below) and the agent runs sandboxed |
 | Process sandbox (`srt`: Codex, pi, ACP) | Reads the parent's secret | Cannot: same as Bash |
 

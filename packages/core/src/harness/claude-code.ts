@@ -166,8 +166,10 @@ export function claudeReadDenyRule(absPath: string): string {
  * Deny rules keeping Read, Grep and Glob out of `/proc` while the sandbox is on
  * (#599). Bash runs in the sandbox's PID namespace, where no process outside it
  * is visible; the file tools run in the Claude Code process itself, which is
- * not in that namespace, so without these rules `Read(/proc/<pid>/environ)`
- * would hand the agent the sweny process's env, skill credentials included.
+ * not in that namespace. Claude Code's Read already refuses /proc and device
+ * files on its own (the pinned SDK's CLI: "this path names a device or process
+ * file that this tool does not read"); these rules are defense in depth that
+ * does not depend on that check, and cover Grep and Glob too (best effort).
  */
 export const CLAUDE_PROC_DENY_RULES: readonly string[] = ["Read(//proc)", "Read(//proc/**)"];
 
